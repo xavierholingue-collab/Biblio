@@ -1,0 +1,1408 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ma bibliothèque</title>
+<style>
+  :root {
+    --paper:      #E9EBE6;
+    --paper-2:    #F2F3EF;
+    --ink:        #1A1F1C;
+    --ink-soft:   #5E665F;
+    --rule:       #C9CEC5;
+    --acad:       #2F5D62;
+    --bd:         #A9722A;
+    --roman:      #8A3B4A;
+    --focus:      #2F5D62;
+    --serif: Georgia, "Iowan Old Style", "Times New Roman", serif;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font-family: var(--sans); font-size: 15px; line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 28px 20px 80px; }
+  [hidden] { display: none !important; }
+
+  /* ---------- En-tête ---------- */
+  header { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  h1 {
+    font-family: var(--serif); font-weight: 400; font-size: 34px;
+    letter-spacing: -0.02em; margin: 0;
+  }
+  .compte { font-family: var(--mono); font-size: 12px; color: var(--ink-soft); letter-spacing: 0.06em; }
+  .compte button {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em;
+    background: none; border: none; color: var(--ink-soft);
+    text-decoration: underline; padding: 0 0 0 10px;
+  }
+
+  /* ---------- Connexion ---------- */
+  .connexion { max-width: 380px; margin: 12vh auto; }
+  .connexion h1 { margin-bottom: 6px; }
+  .connexion p { color: var(--ink-soft); font-size: 14px; margin: 0 0 22px; }
+  .connexion .champ { margin-bottom: 12px; }
+  .connexion .btn { width: 100%; justify-content: center; }
+
+  /* ---------- Quête : « qu'ai-je envie d'apprendre ? » ---------- */
+  .quete {
+    background: var(--paper-2); border: 1px solid var(--rule); border-left: 3px solid var(--acad);
+    border-radius: 3px; padding: 18px; margin: 24px 0 10px;
+  }
+  .quete h2 {
+    font-family: var(--serif); font-weight: 400; font-size: 20px; margin: 0 0 4px;
+  }
+  .quete .aide { font-size: 13px; color: var(--ink-soft); margin: 0 0 12px; }
+  .quete textarea { width: 100%; resize: vertical; min-height: 62px; font-size: 15px; }
+  .quete-actions { display: flex; gap: 10px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
+  .quete-actions label { font-size: 13px; color: var(--ink-soft); display: inline-flex; align-items: center; gap: 6px; }
+  .exemples { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+  .exemples button {
+    font-size: 12px; color: var(--ink-soft); background: transparent;
+    border: 1px dashed var(--rule); border-radius: 999px; padding: 5px 11px;
+  }
+  .exemples button:hover { color: var(--ink); border-color: var(--ink-soft); }
+
+  .reponse { margin-top: 18px; border-top: 1px solid var(--rule); padding-top: 16px; }
+  .reponse .lecture { font-family: var(--serif); font-size: 16px; line-height: 1.45; margin: 0 0 16px; }
+  .etape { display: grid; grid-template-columns: 30px 1fr; gap: 12px; padding: 12px 0; border-top: 1px solid var(--rule); }
+  .etape .rang {
+    font-family: var(--mono); font-size: 12px; color: var(--paper); background: var(--ink);
+    width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center;
+  }
+  .etape .t { font-family: var(--serif); font-size: 17px; line-height: 1.25; }
+  .etape .t button { background: none; border: none; padding: 0; font: inherit; color: inherit; text-align: left; text-decoration: underline; text-decoration-color: var(--rule); }
+  .etape .a { font-size: 13px; color: var(--ink-soft); margin: 1px 0 6px; }
+  .etape .p { font-size: 14px; }
+  .etape .cible { font-size: 13px; color: var(--ink-soft); margin-top: 4px; font-style: italic; }
+  .lacune { background: var(--paper); border: 1px solid var(--rule); border-radius: 3px; padding: 12px; margin-top: 16px; font-size: 14px; }
+  .externe { border-top: 1px solid var(--rule); padding: 12px 0; display: flex; gap: 12px; align-items: flex-start; }
+  .externe .c { flex: 1; }
+  .externe .t { font-family: var(--serif); font-size: 16px; }
+
+  /* ---------- Étagère ---------- */
+  .etagere {
+    display: flex; align-items: flex-end; gap: 1px;
+    height: 76px; margin: 22px 0 6px;
+    border-bottom: 2px solid var(--ink);
+    padding: 0 1px;
+  }
+  .dos {
+    flex: 1 1 0; min-width: 2px; border-radius: 1px 1px 0 0;
+    cursor: pointer; transition: transform .12s ease, filter .12s ease;
+    transform-origin: bottom; border: none; padding: 0;
+  }
+  .dos:hover, .dos:focus-visible { filter: brightness(1.35); transform: scaleY(1.06); outline: none; }
+  .dos.attenue { opacity: .22; }
+  .legende {
+    display: flex; gap: 18px; flex-wrap: wrap;
+    font-family: var(--mono); font-size: 11px; color: var(--ink-soft);
+    letter-spacing: 0.04em; margin-bottom: 26px;
+  }
+  .legende span { display: inline-flex; align-items: center; gap: 6px; }
+  .pastille { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+
+  /* ---------- Barre d'outils ---------- */
+  .outils { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 18px; }
+  input[type="search"], select, input[type="text"], input[type="number"], input[type="email"],
+  input[type="password"], textarea {
+    font-family: var(--sans); font-size: 14px; color: var(--ink);
+    background: var(--paper-2); border: 1px solid var(--rule); border-radius: 3px;
+    padding: 8px 10px;
+  }
+  input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible {
+    outline: 2px solid var(--focus); outline-offset: 1px;
+  }
+  input[type="search"] { flex: 1 1 240px; min-width: 180px; }
+  .puces { display: flex; gap: 6px; flex-wrap: wrap; }
+  .puce {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase;
+    padding: 7px 12px; border: 1px solid var(--rule); border-radius: 999px;
+    background: transparent; color: var(--ink-soft); cursor: pointer;
+  }
+  .puce[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+
+  /* ---------- Boutons ---------- */
+  button { font-family: var(--sans); cursor: pointer; }
+  .btn {
+    font-size: 14px; padding: 8px 14px; border-radius: 3px;
+    border: 1px solid var(--ink); background: var(--ink); color: var(--paper);
+  }
+  .btn.creux { background: transparent; color: var(--ink); }
+  .btn.mini { font-size: 12px; padding: 5px 10px; }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+
+  /* ---------- Liste ---------- */
+  .groupe-titre {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--ink-soft); margin: 26px 0 8px; padding-bottom: 6px; border-bottom: 1px solid var(--rule);
+    display: flex; justify-content: space-between;
+  }
+  .fiche {
+    display: grid; grid-template-columns: 4px 1fr auto; gap: 14px; align-items: center;
+    padding: 11px 0; border-bottom: 1px solid var(--rule); cursor: pointer;
+  }
+  .fiche:hover { background: var(--paper-2); }
+  .barre { width: 4px; height: 100%; min-height: 34px; border-radius: 2px; }
+  .titre { font-family: var(--serif); font-size: 17px; line-height: 1.25; }
+  .meta { font-size: 13px; color: var(--ink-soft); margin-top: 2px; }
+  .droite { text-align: right; font-family: var(--mono); font-size: 11px; color: var(--ink-soft); white-space: nowrap; }
+  .note { color: var(--ink); font-size: 13px; }
+  .vide { padding: 50px 0; text-align: center; color: var(--ink-soft); }
+
+  /* ---------- Grille de couvertures ---------- */
+  .grille {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(124px, 1fr));
+    gap: 22px 18px; margin-top: 20px;
+  }
+  .vignette { background: none; border: none; padding: 0; text-align: left; cursor: pointer; }
+  .couv {
+    position: relative; width: 100%; aspect-ratio: 2 / 3; border-radius: 2px;
+    overflow: hidden; background: var(--paper-2);
+    box-shadow: 0 1px 3px rgba(26,31,28,.18), inset -3px 0 6px -4px rgba(0,0,0,.35);
+    transition: transform .14s ease, box-shadow .14s ease;
+  }
+  .vignette:hover .couv, .vignette:focus-visible .couv {
+    transform: translateY(-3px); box-shadow: 0 6px 14px rgba(26,31,28,.24);
+  }
+  .couv img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  /* Couverture dessinée quand aucune image n'existe */
+  .couv.dessinee { display: flex; flex-direction: column; justify-content: space-between; padding: 12px 11px; color: #fff; }
+  .couv.dessinee .ct { font-family: var(--serif); font-size: 13px; line-height: 1.22; }
+  .couv.dessinee .ca { font-family: var(--mono); font-size: 9px; letter-spacing: .06em; opacity: .8; text-transform: uppercase; }
+  .couv .drapeau {
+    position: absolute; top: 0; right: 0; font-family: var(--mono); font-size: 9px;
+    letter-spacing: .06em; text-transform: uppercase; padding: 3px 6px;
+    background: var(--ink); color: var(--paper);
+  }
+  .couv .resume-ok { position: absolute; bottom: 0; left: 0; width: 100%; height: 3px; background: var(--acad); }
+  .vignette .vt { font-family: var(--serif); font-size: 13px; line-height: 1.25; margin-top: 8px; }
+  .vignette .va { font-size: 12px; color: var(--ink-soft); }
+
+  /* ---------- Fenêtres modales ---------- */
+  dialog {
+    border: 1px solid var(--ink); border-radius: 4px; padding: 0;
+    background: var(--paper); color: var(--ink); max-width: 560px; width: calc(100% - 32px);
+  }
+  dialog.large { max-width: 680px; }
+  dialog::backdrop { background: rgba(26,31,28,.55); }
+  .modale-corps { padding: 24px; }
+  .modale-corps h2 { font-family: var(--serif); font-weight: 400; font-size: 22px; margin: 0 0 16px; }
+  .champ { margin-bottom: 12px; display: flex; flex-direction: column; gap: 4px; }
+  .champ label { font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-soft); }
+  .champ input, .champ select { width: 100%; }
+  .duo { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; flex-wrap: wrap; }
+  .actions .gauche { margin-right: auto; }
+  .recherche-isbn {
+    background: var(--paper-2); border: 1px solid var(--rule); border-radius: 3px;
+    padding: 12px; margin-bottom: 18px;
+  }
+  .recherche-isbn p { margin: 0 0 8px; font-size: 13px; color: var(--ink-soft); }
+  .ligne-isbn { display: flex; gap: 8px; }
+  .ligne-isbn input { flex: 1; }
+  .etat { font-size: 13px; margin-top: 8px; min-height: 18px; }
+  .etat.err { color: var(--roman); }
+
+  /* ---------- Fiche de lecture ---------- */
+  .fiche-haut { display: grid; grid-template-columns: 130px 1fr; gap: 20px; }
+  .fiche-haut .couv { width: 130px; }
+  .fiche-haut h2 { margin: 0 0 4px; }
+  .fiche-haut .sous { font-size: 14px; color: var(--ink-soft); }
+  .rayon {
+    display: inline-block; font-family: var(--mono); font-size: 10px; letter-spacing: .07em;
+    text-transform: uppercase; padding: 3px 8px; border-radius: 999px; color: #fff; margin-top: 8px;
+  }
+  .resume-bloc { margin-top: 22px; border-top: 1px solid var(--rule); padding-top: 16px; }
+  .resume-bloc h3 {
+    font-family: var(--mono); font-size: 11px; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--ink-soft); margin: 0 0 10px; font-weight: 400;
+  }
+  .resume-texte { font-family: var(--serif); font-size: 16px; line-height: 1.55; }
+  .points { margin: 14px 0 0; padding-left: 18px; }
+  .points li { margin-bottom: 5px; font-size: 14px; }
+  .themes { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 14px; }
+  .theme {
+    font-family: var(--mono); font-size: 10px; letter-spacing: .05em; text-transform: uppercase;
+    padding: 4px 9px; border: 1px solid var(--rule); border-radius: 999px;
+    background: transparent; color: var(--ink-soft);
+  }
+  .theme:hover { border-color: var(--ink); color: var(--ink); }
+  .signature { font-family: var(--mono); font-size: 10px; color: var(--ink-soft); margin-top: 14px; letter-spacing: .04em; }
+
+  /* ---------- Pied ---------- */
+  .pied { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 34px; padding-top: 18px; border-top: 1px solid var(--rule); }
+  .sauvegarde { font-family: var(--mono); font-size: 11px; color: var(--ink-soft); margin-left: auto; align-self: center; }
+
+  @media (max-width: 560px) {
+    h1 { font-size: 26px; }
+    .etagere { height: 56px; }
+    .duo { grid-template-columns: 1fr; }
+    .droite { display: none; }
+    .fiche-haut { grid-template-columns: 96px 1fr; gap: 14px; }
+    .fiche-haut .couv { width: 96px; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<!-- ====================== CONNEXION (fenêtre) ====================== -->
+<dialog id="modaleConnexion">
+  <div class="modale-corps">
+    <h2>Espace personnel</h2>
+    <p style="font-size:14px;color:var(--ink-soft);margin:0 0 16px">
+      Les romans, les bandes dessinées et les fonctions d'édition demandent le mot de passe.
+      Le rayon professionnel, lui, reste en accès libre.
+    </p>
+    <form id="formConnexion">
+      <div class="champ">
+        <label for="cMdp">Mot de passe</label>
+        <input type="password" id="cMdp" autocomplete="current-password" required>
+      </div>
+      <div class="etat" id="etatConnexion"></div>
+      <div class="actions">
+        <button class="btn creux" type="button" id="btnAnnulerConnexion">Annuler</button>
+        <button class="btn" type="submit" id="btnConnexion">Se connecter</button>
+      </div>
+    </form>
+  </div>
+</dialog>
+
+<!-- ====================== APPLICATION ====================== -->
+<div class="wrap" id="app" hidden>
+  <header>
+    <h1><a href="/" style="text-decoration:none;color:inherit">Ma bibliothèque</a></h1>
+    <div class="compte" id="compte"></div>
+  </header>
+
+  <!-- Recherche par intention : le cœur de la nouveauté -->
+  <section class="quete">
+    <h2>Qu'avez-vous envie d'apprendre ?</h2>
+    <p class="aide" id="aideQuete">Décrivez un sujet, une question, une difficulté. Claude Sonnet 5 construit un parcours dans vos rayons.</p>
+    <textarea id="qIntention" placeholder="Ex. : comprendre pourquoi les équipes prennent de mauvaises décisions collectives, et ce que je peux faire en tant que manager."></textarea>
+    <div class="quete-actions">
+      <button class="btn" id="btnQuete">Me recommander une lecture</button>
+      <label><input type="checkbox" id="qExternes" checked> Suggérer aussi des livres que je n'ai pas</label>
+      <span class="etat" id="etatQuete"></span>
+    </div>
+    <div class="exemples" id="exemples"></div>
+    <div class="reponse" id="reponseQuete" hidden></div>
+  </section>
+
+  <div class="etagere" id="etagere" role="img" aria-label="Vue d'ensemble de la bibliothèque par catégorie"></div>
+  <div class="legende" id="legende"></div>
+
+  <div class="outils">
+    <input type="search" id="q" placeholder="Chercher un titre, un auteur, un thème…" aria-label="Chercher">
+    <div class="puces" id="puces"></div>
+    <select id="sousCat" aria-label="Sous-catégorie"><option value="">Toutes les sous-catégories</option></select>
+    <select id="sphere" aria-label="Perso ou Pro">
+      <option value="">Perso et Pro</option>
+      <option>Perso</option><option>Pro</option>
+    </select>
+    <select id="statut" aria-label="Statut">
+      <option value="">Tous les statuts</option>
+      <option>Lu</option><option>En cours</option><option>A lire</option>
+    </select>
+    <select id="tri" aria-label="Trier">
+      <option value="auteur">Trier par auteur</option>
+      <option value="titre">Trier par titre</option>
+      <option value="note">Trier par note</option>
+      <option value="annee">Trier par année</option>
+    </select>
+    <div class="puces">
+      <button class="puce" id="vueListe" aria-pressed="true">Liste</button>
+      <button class="puce" id="vueGrille" aria-pressed="false">Couvertures</button>
+    </div>
+    <button class="btn" id="ajouter">+ Ajouter un livre</button>
+  </div>
+
+  <div id="liste"></div>
+  <div class="grille" id="grille" hidden></div>
+
+  <div class="pied">
+    <button class="btn creux" id="exportCsv">Exporter en CSV</button>
+    <button class="btn creux" id="exportJson">Exporter en JSON</button>
+    <button class="btn creux" id="importBtn">Importer un JSON</button>
+    <input type="file" id="importFile" accept=".json" hidden>
+    <span class="sauvegarde" id="sauvegarde"></span>
+  </div>
+</div>
+
+
+<!-- ====================== FICHE DE LECTURE ====================== -->
+<dialog id="fiche" class="large">
+  <div class="modale-corps">
+    <div class="fiche-haut">
+      <div id="ficheCouv"></div>
+      <div>
+        <h2 id="ficheTitre"></h2>
+        <div class="sous" id="ficheAuteur"></div>
+        <div class="sous" id="ficheMeta"></div>
+        <span class="rayon" id="ficheRayon"></span>
+      </div>
+    </div>
+
+    <div class="resume-bloc">
+      <h3>Résumé</h3>
+      <div id="ficheResume"></div>
+      <div class="etat" id="etatResume"></div>
+      <div class="themes" id="ficheThemes"></div>
+      <div class="signature" id="ficheSignature"></div>
+    </div>
+
+    <div class="actions">
+      <button class="btn creux gauche mini" id="btnRegenerer" hidden>Régénérer le résumé</button>
+      <button class="btn creux" id="btnModifier">Modifier</button>
+      <button class="btn" id="btnFermerFiche">Fermer</button>
+    </div>
+  </div>
+</dialog>
+
+<!-- ====================== FORMULAIRE ====================== -->
+<dialog id="modale">
+  <div class="modale-corps">
+    <h2 id="modaleTitre">Ajouter un livre</h2>
+
+    <div class="recherche-isbn" id="blocIsbn">
+      <p>Saisissez un ISBN ou un titre : les informations sont retrouvées et classées automatiquement.</p>
+      <div class="ligne-isbn">
+        <input type="text" id="rechercheIsbn" placeholder="9782081285750 ou « Nexus Harari »">
+        <button class="btn" id="btnChercher">Retrouver</button>
+      </div>
+      <div class="etat" id="etatRecherche"></div>
+    </div>
+
+    <div class="champ"><label for="fTitre">Titre</label><input type="text" id="fTitre"></div>
+    <div class="champ"><label for="fAuteur">Auteur</label><input type="text" id="fAuteur"></div>
+    <div class="duo">
+      <div class="champ"><label for="fEditeur">Éditeur</label><input type="text" id="fEditeur"></div>
+      <div class="champ"><label for="fAnnee">Année</label><input type="number" id="fAnnee" min="1400" max="2100"></div>
+    </div>
+    <div class="duo">
+      <div class="champ"><label for="fCat">Catégorie</label><select id="fCat"></select></div>
+      <div class="champ"><label for="fSous">Sous-catégorie</label><select id="fSous"></select></div>
+    </div>
+    <div class="duo">
+      <div class="champ"><label for="fSphere">Perso ou Pro</label>
+        <select id="fSphere"><option>Perso</option><option>Pro</option></select>
+      </div>
+      <div class="champ"><label for="fStatut">Statut</label>
+        <select id="fStatut"><option>Lu</option><option>En cours</option><option>A lire</option></select>
+      </div>
+      <div class="champ"><label for="fNote">Note sur 5</label><input type="number" id="fNote" min="0" max="5" step="0.5"></div>
+    </div>
+    <div class="champ"><label for="fIsbn">ISBN</label><input type="text" id="fIsbn"></div>
+
+    <div class="actions">
+      <button class="btn creux gauche" id="btnSupprimer">Supprimer</button>
+      <button class="btn creux" id="btnAnnuler">Annuler</button>
+      <button class="btn" id="btnEnregistrer">Enregistrer</button>
+    </div>
+  </div>
+</dialog>
+
+
+
+<script>
+/* =========================================================================
+   1. CONFIGURATION
+   L'application dialogue avec l'API locale, servie sous /api par le même
+   serveur. Aucun secret ici : le mot de passe et la clé Anthropic restent
+   dans le conteneur, hors de portée du navigateur.
+   ========================================================================= */
+
+const API = "/api";
+
+async function api(chemin, options = {}) {
+  const aUnCorps = options.corps !== undefined;
+  const reponse = await fetch(API + chemin, {
+    method: options.methode ?? (aUnCorps ? "POST" : "GET"),
+    credentials: "same-origin",
+    headers: aUnCorps ? { "Content-Type": "application/json" } : {},
+    body: aUnCorps ? JSON.stringify(options.corps) : undefined,
+  });
+  let donnees = null;
+  try { donnees = await reponse.json(); } catch (e) { /* réponse sans corps */ }
+  if (!reponse.ok) throw new Error(donnees?.error ?? ("Erreur " + reponse.status));
+  return donnees;
+}
+
+/* =========================================================================
+   2. DONNÉES DE DÉPART ET RÉFÉRENTIEL
+   ========================================================================= */
+
+const COULEURS = { "Académique": "var(--acad)", "BD": "var(--bd)", "Roman": "var(--roman)" };
+const HEX      = { "Académique": "#2F5D62",   "BD": "#A9722A",   "Roman": "#8A3B4A" };
+
+const SOUS_CATEGORIES = {
+  "Académique": ["Management & leadership","Stratégie & marketing","Industrie, opérations & lean",
+    "Numérique, IA & SI","Innovation & entrepreneuriat","Économie","Politique, société & géopolitique",
+    "Philosophie","Décision, biais & rationalité","Communication & influence",
+    "Psychologie & développement personnel","Sciences & environnement"],
+  "BD": ["Aventure & historique","Polar & thriller","SF & fantastique","Roman graphique & récit","Humour & société"],
+  "Roman": ["Polar & thriller","Littérature générale","SF & humour","Classique"]
+};
+
+const EXEMPLES_QUETE = [
+  "Mieux décider en situation d'incertitude",
+  "Comprendre la géopolitique de l'énergie",
+  "Faire adhérer une équipe à un changement",
+  "Les limites réelles de l'IA générative",
+  "Retrouver le goût de lire de la fiction"
+];
+
+/* =========================================================================
+   3. ÉTAT
+   ========================================================================= */
+
+let livres = [];
+let etat = { q: "", cat: "", sous: "", statut: "", sphere: "", tri: "auteur", vue: "liste" };
+let idEnCours = null;
+let ficheEnCours = null;
+
+/* =========================================================================
+   4. AUTHENTIFICATION
+   ========================================================================= */
+
+// Vrai quand la session est ouverte : conditionne tout ce qui est réservé.
+let connecte = false;
+let iaPublique = false;
+
+async function demarrer() {
+  try {
+    const s = await api("/session");
+    connecte = s.connecte;
+    iaPublique = s.ia_publique;
+  } catch (e) {
+    document.getElementById("app").hidden = false;
+    annoncer("Serveur injoignable. Les conteneurs sont-ils démarrés ?", true);
+    return;
+  }
+  await entrerDansApp();
+
+  // Un lien depuis la page d'accueil peut demander directement l'espace personnel.
+  if (!connecte && new URLSearchParams(location.search).get("espace") === "perso") {
+    ouvrirConnexion();
+  }
+}
+
+async function entrerDansApp() {
+  document.getElementById("app").hidden = false;
+  appliquerDroits();
+  await charger();
+  construirePuces();
+  construireExemples();
+  majSousCategories();
+  rafraichir();
+}
+
+// Affiche ou masque tout ce qui dépend de la session.
+function appliquerDroits() {
+  const compte = document.getElementById("compte");
+  compte.innerHTML = connecte
+    ? '<span id="compteTexte"></span><button id="btnDeconnexion" type="button">Se déconnecter</button>'
+    : '<span id="compteTexte"></span><button id="btnConnecter" type="button">Espace personnel</button>';
+
+  if (connecte) {
+    document.getElementById("btnDeconnexion").onclick = async () => {
+      await api("/deconnexion", { corps: {} });
+      location.href = "/";
+    };
+  } else {
+    document.getElementById("btnConnecter").onclick = ouvrirConnexion;
+  }
+
+  // Le choix Perso n'a de sens qu'une fois connecté.
+  const sphere = document.getElementById("sphere");
+  sphere.innerHTML = connecte
+    ? '<option value="">Perso et Pro</option><option>Perso</option><option>Pro</option>'
+    : '<option value="">Rayon professionnel</option>';
+  sphere.disabled = !connecte;
+  sphere.value = etat.sphere;
+
+  // Ajout, import, export et édition sont réservés.
+  ["ajouter", "exportJson", "importBtn"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.hidden = !connecte;
+  });
+  document.getElementById("btnModifier").hidden = !connecte;
+
+  // La recommandation dépense des crédits : réservée sauf configuration contraire.
+  const quete = document.getElementById("btnQuete");
+  const aide = document.getElementById("aideQuete");
+  if (!connecte && !iaPublique) {
+    quete.textContent = "Se connecter pour lancer une recommandation";
+    quete.onclick = ouvrirConnexion;
+    if (aide) aide.textContent =
+      "Décrivez un sujet, une question, une difficulté. La construction d'un parcours fait appel au modèle : elle demande une session.";
+  } else {
+    quete.textContent = "Me recommander une lecture";
+    quete.onclick = lancerQuete;
+  }
+}
+
+function ouvrirConnexion() {
+  document.getElementById("etatConnexion").textContent = "";
+  document.getElementById("modaleConnexion").showModal();
+  document.getElementById("cMdp").focus();
+}
+
+async function connexion(evt) {
+  evt.preventDefault();
+  const btn = document.getElementById("btnConnexion");
+  const etatEl = document.getElementById("etatConnexion");
+  btn.disabled = true;
+  etatEl.className = "etat";
+  etatEl.textContent = "Connexion…";
+
+  try {
+    await api("/connexion", { corps: { motDePasse: document.getElementById("cMdp").value } });
+    etatEl.textContent = "";
+    document.getElementById("modaleConnexion").close();
+    connecte = true;
+    await entrerDansApp();
+  } catch (e) {
+    etatEl.className = "etat err";
+    etatEl.textContent = "Connexion refusée : " + e.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/* =========================================================================
+   5. DONNÉES : LECTURE ET ÉCRITURE
+   ========================================================================= */
+
+// La base parle en snake_case, l'application en camelCase.
+function versApp(r) {
+  return {
+    id: r.id, isbn: r.isbn, titre: r.titre, auteur: r.auteur, editeur: r.editeur,
+    annee: r.annee, statut: r.statut, note: r.note === null ? null : Number(r.note),
+    categorie: r.categorie, sousCategorie: r.sous_categorie, sphere: r.sphere,
+    coverUrl: r.cover_url, coverStatut: r.cover_statut,
+    resume: r.resume, resumePoints: r.resume_points, resumeThemes: r.resume_themes,
+    resumeModele: r.resume_modele, resumeGenereLe: r.resume_genere_le,
+    resumeFiabilite: r.resume_fiabilite
+  };
+}
+
+function versBase(l) {
+  return {
+    id: l.id, isbn: l.isbn || null, titre: l.titre, auteur: l.auteur,
+    editeur: l.editeur || null, annee: l.annee ?? null, statut: l.statut,
+    note: l.note ?? null, categorie: l.categorie, sous_categorie: l.sousCategorie,
+    sphere: l.sphere || (l.categorie === "Académique" ? "Pro" : "Perso"),
+    cover_url: l.coverUrl ?? null, cover_statut: l.coverStatut ?? "inconnu",
+    resume: l.resume ?? null, resume_points: l.resumePoints ?? null,
+    resume_themes: l.resumeThemes ?? null, resume_modele: l.resumeModele ?? null,
+    resume_fiabilite: l.resumeFiabilite ?? null, resume_genere_le: l.resumeGenereLe ?? null
+  };
+}
+
+async function charger() {
+  annoncer("Chargement…");
+  try {
+    livres = (await api("/livres")).map(versApp);
+    annoncer(livres.length + " ouvrages chargés");
+  } catch (e) {
+    annoncer("Lecture impossible : " + e.message, true);
+  }
+}
+
+async function enregistrerLivre(livre) {
+  try {
+    await api("/livres", { methode: "PUT", corps: [versBase(livre)] });
+    annoncer("Enregistré");
+    return true;
+  } catch (e) {
+    annoncer("Enregistrement impossible : " + e.message, true);
+    return false;
+  }
+}
+
+async function supprimerLivre(id) {
+  try {
+    await api("/livres/" + encodeURIComponent(id), { methode: "DELETE" });
+    annoncer("Supprimé");
+    return true;
+  } catch (e) {
+    annoncer("Suppression impossible : " + e.message, true);
+    return false;
+  }
+}
+
+function annoncer(txt, err) {
+  const el = document.getElementById("sauvegarde");
+  if (!el) return;
+  el.textContent = txt;
+  el.style.color = err ? "var(--roman)" : "var(--ink-soft)";
+  if (!err) setTimeout(() => { if (el.textContent === txt) el.textContent = ""; }, 2600);
+}
+
+// Les trois traitements qui passent par le modèle. Les noms d'origine sont
+// conservés pour ne rien changer au reste de l'application.
+const ROUTES_IA = {
+  "book-summary": "/resume",
+  "recommend":    "/recommandation",
+  "book-lookup":  "/recherche-livre"
+};
+
+async function appelerFonction(nom, corps) {
+  return api(ROUTES_IA[nom], { corps });
+}
+
+/* =========================================================================
+   6. COUVERTURES
+   Open Library d'abord (gratuit, sans clé), Google Books en secours, puis
+   une couverture dessinée. L'URL trouvée est mémorisée : on ne cherche
+   qu'une seule fois par ouvrage.
+   ========================================================================= */
+
+const fileCouvertures = new Map();
+let minuteurCouvertures = null;
+
+function memoriserCouverture(id, url, statut) {
+  fileCouvertures.set(id, { id, cover_url: url, cover_statut: statut });
+  clearTimeout(minuteurCouvertures);
+  minuteurCouvertures = setTimeout(async () => {
+    const lot = [...fileCouvertures.values()];
+    fileCouvertures.clear();
+    if (lot.length) {
+      try { await api("/couvertures", { corps: lot }); } catch (e) { /* sans conséquence */ }
+    }
+  }, 1500);
+}
+
+function urlOpenLibrary(isbn) {
+  return "https://covers.openlibrary.org/b/isbn/" + encodeURIComponent(isbn) + "-M.jpg?default=false";
+}
+
+async function urlGoogleBooks(isbn) {
+  try {
+    const r = await fetch("https://www.googleapis.com/books/v1/volumes?q=isbn:" + encodeURIComponent(isbn));
+    const d = await r.json();
+    const img = d.items?.[0]?.volumeInfo?.imageLinks;
+    const u = img?.thumbnail || img?.smallThumbnail;
+    return u ? u.replace(/^http:/, "https:") : null;
+  } catch (e) { return null; }
+}
+
+function couvertureDessinee(l) {
+  const d = document.createElement("div");
+  d.className = "couv dessinee";
+  d.style.background = HEX[l.categorie] || "#444";
+  d.innerHTML = `<div class="ct">${echapper(l.titre)}</div><div class="ca">${echapper(l.auteur)}</div>`;
+  return d;
+}
+
+// Renvoie un conteneur .couv qui se remplit tout seul.
+function elementCouverture(l, avecDrapeau) {
+  const cadre = document.createElement("div");
+  cadre.className = "couv";
+  cadre.style.background = HEX[l.categorie] || "#444";
+
+  const finir = (noeud) => { cadre.replaceChildren(noeud); decorer(); };
+  const decorer = () => {
+    if (avecDrapeau && l.statut !== "Lu") {
+      const dr = document.createElement("span");
+      dr.className = "drapeau";
+      dr.textContent = l.statut === "En cours" ? "En cours" : "À lire";
+      cadre.appendChild(dr);
+    }
+    if (avecDrapeau && l.resume) {
+      const b = document.createElement("span");
+      b.className = "resume-ok";
+      b.title = "Résumé disponible";
+      cadre.appendChild(b);
+    }
+  };
+
+  if (l.coverStatut === "absente" || !l.isbn) {
+    const d = couvertureDessinee(l);
+    cadre.replaceChildren(...d.childNodes);
+    cadre.classList.add("dessinee");
+    decorer();
+    return cadre;
+  }
+
+  const img = document.createElement("img");
+  img.loading = "lazy";
+  img.alt = "";
+  img.src = l.coverUrl || urlOpenLibrary(l.isbn);
+
+  img.onload = () => {
+    if (!l.coverUrl) { l.coverUrl = img.src; l.coverStatut = "trouvee"; memoriserCouverture(l.id, img.src, "trouvee"); }
+  };
+
+  img.onerror = async () => {
+    const secours = await urlGoogleBooks(l.isbn);
+    if (secours) {
+      l.coverUrl = secours; l.coverStatut = "trouvee";
+      memoriserCouverture(l.id, secours, "trouvee");
+      const img2 = document.createElement("img");
+      img2.loading = "lazy"; img2.alt = ""; img2.src = secours;
+      img2.onerror = () => { l.coverStatut = "absente"; memoriserCouverture(l.id, null, "absente"); finir2(); };
+      finir(img2);
+    } else {
+      l.coverStatut = "absente";
+      memoriserCouverture(l.id, null, "absente");
+      finir2();
+    }
+  };
+
+  const finir2 = () => {
+    const d = couvertureDessinee(l);
+    cadre.classList.add("dessinee");
+    cadre.replaceChildren(...d.childNodes);
+    decorer();
+  };
+
+  cadre.appendChild(img);
+  decorer();
+  return cadre;
+}
+
+/* =========================================================================
+   7. FILTRAGE, TRI, AFFICHAGE
+   ========================================================================= */
+
+function filtrer() {
+  const q = etat.q.trim().toLowerCase();
+  return livres.filter(l => {
+    if (etat.cat && l.categorie !== etat.cat) return false;
+    if (etat.sous && l.sousCategorie !== etat.sous) return false;
+    if (etat.statut && l.statut !== etat.statut) return false;
+    if (etat.sphere && l.sphere !== etat.sphere) return false;
+    if (!q) return true;
+    const themes = (l.resumeThemes || []).join(" ");
+    return (l.titre + " " + l.auteur + " " + (l.editeur || "") + " " + themes).toLowerCase().includes(q);
+  });
+}
+
+function trier(a, b) {
+  switch (etat.tri) {
+    case "titre":  return a.titre.localeCompare(b.titre, "fr");
+    case "note":   return (b.note ?? -1) - (a.note ?? -1) || a.titre.localeCompare(b.titre, "fr");
+    case "annee":  return (b.annee ?? 0) - (a.annee ?? 0) || a.titre.localeCompare(b.titre, "fr");
+    default:       return a.auteur.localeCompare(b.auteur, "fr") || a.titre.localeCompare(b.titre, "fr");
+  }
+}
+
+function dessinerEtagere() {
+  const el = document.getElementById("etagere");
+  const visibles = new Set(filtrer().map(l => l.id));
+  el.innerHTML = "";
+  livres.forEach(l => {
+    const d = document.createElement("button");
+    d.className = "dos" + (visibles.has(l.id) ? "" : " attenue");
+    d.style.background = COULEURS[l.categorie];
+    const h = l.note ? 55 + l.note * 9 : 46;
+    d.style.height = h + "%";
+    d.title = l.titre + " — " + l.auteur;
+    d.onclick = () => ouvrirFiche(l.id);
+    el.appendChild(d);
+  });
+}
+
+function dessinerLegende() {
+  const el = document.getElementById("legende");
+  el.innerHTML = "";
+  Object.keys(COULEURS).forEach(c => {
+    const n = livres.filter(l => l.categorie === c).length;
+    const s = document.createElement("span");
+    s.innerHTML = `<i class="pastille" style="background:${COULEURS[c]}"></i>${c} · ${n}`;
+    el.appendChild(s);
+  });
+  const perso = livres.filter(l => l.sphere === "Perso").length;
+  const s = document.createElement("span");
+  s.textContent = perso + " perso · " + (livres.length - perso) + " pro";
+  el.appendChild(s);
+}
+
+function dessinerListe() {
+  const el = document.getElementById("liste");
+  const res = filtrer().sort(trier);
+  el.innerHTML = "";
+  document.getElementById("compteTexte").textContent =
+    res.length === livres.length ? livres.length + " ouvrages" : res.length + " / " + livres.length;
+
+  if (!res.length) { el.innerHTML = '<div class="vide">Aucun ouvrage ne correspond.</div>'; return; }
+
+  const grouper = etat.tri === "auteur" || etat.tri === "titre";
+  if (!grouper) { res.forEach(l => el.appendChild(fiche(l))); return; }
+
+  const groupes = {};
+  res.forEach(l => { (groupes[l.sousCategorie] ||= []).push(l); });
+  Object.keys(groupes).sort((a, b) => a.localeCompare(b, "fr")).forEach(g => {
+    const t = document.createElement("div");
+    t.className = "groupe-titre";
+    t.innerHTML = `<span>${echapper(g)}</span><span>${groupes[g].length}</span>`;
+    el.appendChild(t);
+    groupes[g].forEach(l => el.appendChild(fiche(l)));
+  });
+}
+
+function fiche(l) {
+  const d = document.createElement("div");
+  d.className = "fiche";
+  d.onclick = () => ouvrirFiche(l.id);
+  d.innerHTML = `
+    <div class="barre" style="background:${COULEURS[l.categorie]}"></div>
+    <div>
+      <div class="titre">${echapper(l.titre)}</div>
+      <div class="meta">${echapper(l.auteur)}${l.editeur ? " · " + echapper(l.editeur) : ""}${l.annee ? " · " + l.annee : ""}${l.resume ? " · résumé" : ""}</div>
+    </div>
+    <div class="droite">
+      ${l.note ? `<div class="note">${l.note.toFixed(1).replace(".0", "")} / 5</div>` : ""}
+      <div>${l.statut}</div>
+    </div>`;
+  return d;
+}
+
+function dessinerGrille() {
+  const el = document.getElementById("grille");
+  const res = filtrer().sort(trier);
+  el.innerHTML = "";
+  if (!res.length) { el.innerHTML = '<div class="vide">Aucun ouvrage ne correspond.</div>'; return; }
+  res.forEach(l => {
+    const v = document.createElement("button");
+    v.className = "vignette";
+    v.onclick = () => ouvrirFiche(l.id);
+    v.appendChild(elementCouverture(l, true));
+    const t = document.createElement("div");
+    t.className = "vt"; t.textContent = l.titre;
+    const a = document.createElement("div");
+    a.className = "va"; a.textContent = l.auteur;
+    v.append(t, a);
+    el.appendChild(v);
+  });
+}
+
+function echapper(s) {
+  return String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+
+function rafraichir() {
+  dessinerEtagere();
+  dessinerLegende();
+  document.getElementById("liste").hidden  = etat.vue !== "liste";
+  document.getElementById("grille").hidden = etat.vue !== "grille";
+  dessinerListe();
+  if (etat.vue === "grille") dessinerGrille();
+}
+
+function construirePuces() {
+  const el = document.getElementById("puces");
+  el.innerHTML = "";
+  ["", ...Object.keys(COULEURS)].forEach(c => {
+    const b = document.createElement("button");
+    b.className = "puce";
+    b.textContent = c || "Tout";
+    b.setAttribute("aria-pressed", String(etat.cat === c));
+    b.onclick = () => {
+      etat.cat = c; etat.sous = "";
+      construirePuces(); majSousCategories(); rafraichir();
+    };
+    el.appendChild(b);
+  });
+}
+
+function construireExemples() {
+  const el = document.getElementById("exemples");
+  el.innerHTML = "";
+  EXEMPLES_QUETE.forEach(t => {
+    const b = document.createElement("button");
+    b.type = "button"; b.textContent = t;
+    b.onclick = () => { document.getElementById("qIntention").value = t; lancerQuete(); };
+    el.appendChild(b);
+  });
+}
+
+function majSousCategories() {
+  const sel = document.getElementById("sousCat");
+  const liste = etat.cat ? SOUS_CATEGORIES[etat.cat]
+    : [...new Set(Object.values(SOUS_CATEGORIES).flat())].sort((a, b) => a.localeCompare(b, "fr"));
+  sel.innerHTML = '<option value="">Toutes les sous-catégories</option>';
+  liste.forEach(s => {
+    const o = document.createElement("option");
+    o.value = s; o.textContent = s;
+    sel.appendChild(o);
+  });
+  sel.value = etat.sous;
+}
+</script>
+
+<script>
+/* =========================================================================
+   8. FICHE DE LECTURE ET RÉSUMÉ
+   ========================================================================= */
+
+async function ouvrirFiche(id) {
+  const l = livres.find(x => x.id === id);
+  if (!l) return;
+  ficheEnCours = id;
+
+  document.getElementById("ficheCouv").replaceChildren(elementCouverture(l, false));
+  document.getElementById("ficheTitre").textContent  = l.titre;
+  document.getElementById("ficheAuteur").textContent = l.auteur;
+  document.getElementById("ficheMeta").textContent =
+    [l.editeur, l.annee, l.sphere, l.statut, l.note ? l.note + " / 5" : null].filter(Boolean).join(" · ");
+
+  const r = document.getElementById("ficheRayon");
+  r.textContent = l.categorie + " · " + l.sousCategorie;
+  r.style.background = HEX[l.categorie];
+
+  document.getElementById("etatResume").textContent = "";
+  document.getElementById("etatResume").className = "etat";
+  document.getElementById("btnRegenerer").hidden = !l.resume || !connecte;
+  peindreResume(l);
+  document.getElementById("fiche").showModal();
+
+  // Résumé absent : on le demande au modèle, une seule fois, puis il est en cache.
+  // Un visiteur non connecté ne déclenche aucun appel payant.
+  if (!l.resume) {
+    if (connecte || iaPublique) await genererResume(id, false);
+    else {
+      document.getElementById("etatResume").textContent =
+        "Aucun résumé enregistré pour cet ouvrage.";
+    }
+  }
+}
+
+function peindreResume(l) {
+  const bloc = document.getElementById("ficheResume");
+  const themes = document.getElementById("ficheThemes");
+  const sign = document.getElementById("ficheSignature");
+  bloc.innerHTML = ""; themes.innerHTML = ""; sign.textContent = "";
+
+  if (!l.resume) return;
+
+  const p = document.createElement("p");
+  p.className = "resume-texte";
+  p.textContent = l.resume;
+  bloc.appendChild(p);
+
+  if (l.resumePoints?.length) {
+    const ul = document.createElement("ul");
+    ul.className = "points";
+    l.resumePoints.forEach(pt => {
+      const li = document.createElement("li");
+      li.textContent = pt;
+      ul.appendChild(li);
+    });
+    bloc.appendChild(ul);
+  }
+
+  (l.resumeThemes || []).forEach(t => {
+    const b = document.createElement("button");
+    b.className = "theme"; b.type = "button"; b.textContent = t;
+    b.onclick = () => {
+      document.getElementById("fiche").close();
+      etat.q = t;
+      document.getElementById("q").value = t;
+      rafraichir();
+    };
+    themes.appendChild(b);
+  });
+
+  if (l.resumeGenereLe) {
+    const avertissement = {
+      faible:  " ⚠ Identification de l'ouvrage incertaine : à vérifier impérativement.",
+      moyenne: " ⚠ Identification probable mais non confirmée : à vérifier.",
+      haute:   ""
+    }[l.resumeFiabilite] ?? "";
+    sign.textContent = "Résumé produit par " + (l.resumeModele || "Claude") +
+      " le " + new Date(l.resumeGenereLe).toLocaleDateString("fr-FR") +
+      " — à vérifier avant citation." + avertissement;
+    sign.style.color = (l.resumeFiabilite === "faible") ? "var(--roman)" : "var(--ink-soft)";
+  }
+}
+
+async function genererResume(id, forcer) {
+  const l = livres.find(x => x.id === id);
+  const etatEl = document.getElementById("etatResume");
+  const btn = document.getElementById("btnRegenerer");
+  etatEl.className = "etat";
+  etatEl.textContent = forcer ? "Nouveau résumé en cours…" : "Lecture de l'ouvrage par Claude Sonnet 5…";
+  btn.disabled = true;
+
+  try {
+    const info = await appelerFonction("book-summary", { bookId: id, forcer: !!forcer });
+    l.resume = info.resume;
+    l.resumePoints = info.points || [];
+    l.resumeThemes = info.themes || [];
+    l.resumeModele = "claude-sonnet-5";
+    l.resumeGenereLe = new Date().toISOString();
+    etatEl.textContent = "";
+    btn.hidden = false;
+    if (ficheEnCours === id) peindreResume(l);
+    if (info.fiabilite === "faible" || info.fiabilite === "moyenne") {
+      etatEl.className = "etat err";
+      etatEl.textContent = "Identification incertaine de l'ouvrage — relisez avec précaution.";
+    }
+    rafraichir();
+  } catch (e) {
+    etatEl.className = "etat err";
+    etatEl.textContent = "Résumé impossible : " + e.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/* =========================================================================
+   9. QUÊTE : « qu'ai-je envie d'apprendre ? »
+   ========================================================================= */
+
+async function lancerQuete() {
+  const intention = document.getElementById("qIntention").value.trim();
+  const etatEl = document.getElementById("etatQuete");
+  const btn = document.getElementById("btnQuete");
+  const zone = document.getElementById("reponseQuete");
+
+  if (intention.length < 3) {
+    etatEl.className = "etat err";
+    etatEl.textContent = "Décrivez ce que vous cherchez.";
+    return;
+  }
+
+  btn.disabled = true;
+  etatEl.className = "etat";
+  etatEl.textContent = "Claude parcourt vos " + livres.length + " ouvrages…";
+  zone.hidden = true;
+
+  try {
+    const info = await appelerFonction("recommend", {
+      intention,
+      sphere: etat.sphere || null,
+      inclureExternes: document.getElementById("qExternes").checked
+    });
+    etatEl.textContent = "";
+    afficherQuete(info);
+  } catch (e) {
+    etatEl.className = "etat err";
+    etatEl.textContent = "Recommandation impossible : " + e.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function afficherQuete(info) {
+  const zone = document.getElementById("reponseQuete");
+  zone.innerHTML = "";
+  zone.hidden = false;
+
+  if (info.lecture_de_la_demande) {
+    const p = document.createElement("p");
+    p.className = "lecture";
+    p.textContent = info.lecture_de_la_demande;
+    zone.appendChild(p);
+  }
+
+  (info.parcours || []).forEach((p, i) => {
+    const l = livres.find(x => x.id === p.id);
+    if (!l) return;
+    const d = document.createElement("div");
+    d.className = "etape";
+
+    const rang = document.createElement("div");
+    rang.className = "rang";
+    rang.textContent = String(i + 1);
+
+    const corps = document.createElement("div");
+    const t = document.createElement("div");
+    t.className = "t";
+    const lien = document.createElement("button");
+    lien.type = "button";
+    lien.textContent = l.titre;
+    lien.onclick = () => ouvrirFiche(l.id);
+    t.appendChild(lien);
+
+    const a = document.createElement("div");
+    a.className = "a";
+    a.textContent = l.auteur + (l.annee ? " · " + l.annee : "") + " · " + l.statut;
+
+    const pq = document.createElement("div");
+    pq.className = "p";
+    pq.textContent = p.pourquoi || "";
+
+    corps.append(t, a, pq);
+
+    if (p.a_chercher) {
+      const c = document.createElement("div");
+      c.className = "cible";
+      c.textContent = "À viser : " + p.a_chercher;
+      corps.appendChild(c);
+    }
+
+    d.append(rang, corps);
+    zone.appendChild(d);
+  });
+
+  if (info.lacune) {
+    const l = document.createElement("div");
+    l.className = "lacune";
+    l.textContent = info.lacune;
+    zone.appendChild(l);
+  }
+
+  if (info.suggestions_externes?.length) {
+    const t = document.createElement("div");
+    t.className = "groupe-titre";
+    t.innerHTML = "<span>Absents de vos rayons</span>";
+    zone.appendChild(t);
+
+    info.suggestions_externes.forEach(s => {
+      const d = document.createElement("div");
+      d.className = "externe";
+      const c = document.createElement("div");
+      c.className = "c";
+      c.innerHTML = `<div class="t">${echapper(s.titre)}</div>
+        <div class="a">${echapper(s.auteur)}${s.editeur ? " · " + echapper(s.editeur) : ""}${s.annee ? " · " + s.annee : ""}</div>
+        <div class="p">${echapper(s.pourquoi || "")}</div>`;
+      const b = document.createElement("button");
+      b.className = "btn creux mini";
+      b.textContent = "Ajouter à ma liste";
+      b.onclick = () => prefixerFormulaire(s);
+      d.append(c, b);
+      zone.appendChild(d);
+    });
+  }
+
+  zone.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+// Ouvre le formulaire prérempli avec une suggestion, en statut « A lire ».
+function prefixerFormulaire(s) {
+  ouvrirModale(null);
+  document.getElementById("fTitre").value   = s.titre || "";
+  document.getElementById("fAuteur").value  = s.auteur || "";
+  document.getElementById("fEditeur").value = s.editeur || "";
+  document.getElementById("fAnnee").value   = s.annee || "";
+  document.getElementById("fIsbn").value    = s.isbn || "";
+  document.getElementById("fStatut").value  = "A lire";
+  document.getElementById("etatRecherche").textContent =
+    "Vérifiez le classement avant d'enregistrer.";
+}
+
+/* =========================================================================
+   10. FORMULAIRE
+   ========================================================================= */
+
+function majSousDuFormulaire() {
+  const cat = document.getElementById("fCat").value;
+  const sel = document.getElementById("fSous");
+  const actuel = sel.value;
+  sel.innerHTML = "";
+  (SOUS_CATEGORIES[cat] || []).forEach(s => {
+    const o = document.createElement("option");
+    o.value = s; o.textContent = s;
+    sel.appendChild(o);
+  });
+  if ([...sel.options].some(o => o.value === actuel)) sel.value = actuel;
+}
+
+function ouvrirModale(id) {
+  idEnCours = id;
+  const l = id ? livres.find(x => x.id === id) : null;
+
+  document.getElementById("modaleTitre").textContent = l ? "Modifier" : "Ajouter un livre";
+  document.getElementById("blocIsbn").hidden = !!l;
+  document.getElementById("btnSupprimer").hidden = !l;
+  document.getElementById("etatRecherche").textContent = "";
+  document.getElementById("rechercheIsbn").value = "";
+
+  const cat = document.getElementById("fCat");
+  cat.innerHTML = "";
+  Object.keys(SOUS_CATEGORIES).forEach(c => {
+    const o = document.createElement("option");
+    o.value = c; o.textContent = c;
+    cat.appendChild(o);
+  });
+
+  cat.value = l?.categorie || "Académique";
+  majSousDuFormulaire();
+
+  document.getElementById("fTitre").value   = l?.titre || "";
+  document.getElementById("fAuteur").value  = l?.auteur || "";
+  document.getElementById("fEditeur").value = l?.editeur || "";
+  document.getElementById("fAnnee").value   = l?.annee || "";
+  document.getElementById("fStatut").value  = l?.statut || "A lire";
+  document.getElementById("fSphere").value  = l?.sphere || "Pro";
+  document.getElementById("fNote").value    = l?.note ?? "";
+  document.getElementById("fIsbn").value    = l?.isbn || "";
+  if (l) document.getElementById("fSous").value = l.sousCategorie;
+
+  document.getElementById("modale").showModal();
+}
+
+async function enregistrer() {
+  const titre = document.getElementById("fTitre").value.trim();
+  const auteur = document.getElementById("fAuteur").value.trim();
+  if (!titre || !auteur) {
+    document.getElementById("etatRecherche").className = "etat err";
+    document.getElementById("etatRecherche").textContent = "Titre et auteur sont obligatoires.";
+    return;
+  }
+
+  const note = parseFloat(document.getElementById("fNote").value);
+  const annee = parseInt(document.getElementById("fAnnee").value, 10);
+  const donnees = {
+    titre, auteur,
+    editeur: document.getElementById("fEditeur").value.trim(),
+    annee: isNaN(annee) ? null : annee,
+    statut: document.getElementById("fStatut").value,
+    sphere: document.getElementById("fSphere").value,
+    note: isNaN(note) ? null : note,
+    categorie: document.getElementById("fCat").value,
+    sousCategorie: document.getElementById("fSous").value,
+    isbn: document.getElementById("fIsbn").value.trim()
+  };
+
+  let livre;
+  if (idEnCours) {
+    livre = livres.find(l => l.id === idEnCours);
+    Object.assign(livre, donnees);
+  } else {
+    livre = { id: "n" + Date.now().toString(36), coverStatut: "inconnu", ...donnees };
+    livres.push(livre);
+  }
+
+  if (await enregistrerLivre(livre)) {
+    document.getElementById("modale").close();
+    rafraichir();
+  }
+}
+
+async function supprimer() {
+  if (!idEnCours) return;
+  if (!confirm("Supprimer cet ouvrage ?")) return;
+  if (await supprimerLivre(idEnCours)) {
+    livres = livres.filter(l => l.id !== idEnCours);
+    document.getElementById("modale").close();
+    rafraichir();
+  }
+}
+
+// Recherche bibliographique : passe désormais par la fonction serveur.
+async function chercherLivre() {
+  const requete = document.getElementById("rechercheIsbn").value.trim();
+  const etatEl = document.getElementById("etatRecherche");
+  const btn = document.getElementById("btnChercher");
+  if (!requete) return;
+
+  btn.disabled = true;
+  etatEl.className = "etat";
+  etatEl.textContent = "Recherche en cours…";
+
+  try {
+    const info = await appelerFonction("book-lookup", { requete });
+    if (info.titre)   document.getElementById("fTitre").value   = info.titre;
+    if (info.auteur)  document.getElementById("fAuteur").value  = info.auteur;
+    if (info.editeur) document.getElementById("fEditeur").value = info.editeur;
+    if (info.annee)   document.getElementById("fAnnee").value   = info.annee;
+    if (info.isbn)    document.getElementById("fIsbn").value    = info.isbn;
+    if (SOUS_CATEGORIES[info.categorie]) {
+      document.getElementById("fCat").value = info.categorie;
+      majSousDuFormulaire();
+      if (SOUS_CATEGORIES[info.categorie].includes(info.sousCategorie))
+        document.getElementById("fSous").value = info.sousCategorie;
+    }
+    etatEl.textContent = "Informations trouvées — vérifiez puis enregistrez.";
+  } catch (e) {
+    etatEl.className = "etat err";
+    etatEl.textContent = "Recherche impossible : " + e.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/* =========================================================================
+   11. EXPORT ET IMPORT
+   ========================================================================= */
+
+function telecharger(nom, contenu, type) {
+  // Le BOM aide Excel a lire le CSV, mais casse la relecture du JSON.
+  const avecBom = type.startsWith("text/csv");
+  const url = URL.createObjectURL(new Blob([(avecBom ? "\uFEFF" : "") + contenu], { type }));
+  const a = document.createElement("a");
+  a.href = url; a.download = nom; a.click();
+  URL.revokeObjectURL(url);
+}
+
+function versCsv() {
+  const cols = ["isbn","titre","auteur","editeur","annee","categorie","sousCategorie","sphere","statut","note","resume"];
+  const cell = v => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  return [cols.join(";"), ...livres.sort(trier).map(l => cols.map(c => cell(l[c])).join(";"))].join("\n");
+}
+
+async function importer(fichier) {
+  try {
+    const data = JSON.parse(await fichier.text());
+    if (!Array.isArray(data)) throw new Error("format");
+    annoncer("Import en cours…");
+    const lot = 100;
+    for (let i = 0; i < data.length; i += lot) {
+      await api("/livres", { methode: "PUT", corps: data.slice(i, i + lot).map(versBase) });
+    }
+    await charger();
+    rafraichir();
+  } catch (e) {
+    annoncer("Import impossible : " + e.message, true);
+  }
+}
+
+/* =========================================================================
+   12. ÉVÉNEMENTS ET DÉMARRAGE
+   ========================================================================= */
+
+document.getElementById("formConnexion").onsubmit = connexion;
+document.getElementById("btnAnnulerConnexion").onclick =
+  () => document.getElementById("modaleConnexion").close();
+
+document.getElementById("q").oninput        = e => { etat.q = e.target.value; rafraichir(); };
+document.getElementById("sousCat").onchange = e => { etat.sous = e.target.value; rafraichir(); };
+document.getElementById("statut").onchange  = e => { etat.statut = e.target.value; rafraichir(); };
+document.getElementById("sphere").onchange  = e => { etat.sphere = e.target.value; rafraichir(); };
+document.getElementById("tri").onchange     = e => { etat.tri = e.target.value; rafraichir(); };
+document.getElementById("ajouter").onclick  = () => ouvrirModale(null);
+
+document.getElementById("vueListe").onclick = () => {
+  etat.vue = "liste";
+  document.getElementById("vueListe").setAttribute("aria-pressed", "true");
+  document.getElementById("vueGrille").setAttribute("aria-pressed", "false");
+  rafraichir();
+};
+document.getElementById("vueGrille").onclick = () => {
+  etat.vue = "grille";
+  document.getElementById("vueListe").setAttribute("aria-pressed", "false");
+  document.getElementById("vueGrille").setAttribute("aria-pressed", "true");
+  rafraichir();
+};
+
+document.getElementById("btnQuete").onclick = lancerQuete;
+document.getElementById("qIntention").onkeydown = e => {
+  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) lancerQuete();
+};
+
+document.getElementById("btnFermerFiche").onclick = () => document.getElementById("fiche").close();
+document.getElementById("btnRegenerer").onclick   = () => genererResume(ficheEnCours, true);
+document.getElementById("btnModifier").onclick    = () => {
+  const id = ficheEnCours;
+  document.getElementById("fiche").close();
+  ouvrirModale(id);
+};
+
+document.getElementById("fCat").onchange          = majSousDuFormulaire;
+document.getElementById("btnChercher").onclick    = chercherLivre;
+document.getElementById("btnEnregistrer").onclick = enregistrer;
+document.getElementById("btnSupprimer").onclick   = supprimer;
+document.getElementById("btnAnnuler").onclick     = () => document.getElementById("modale").close();
+
+document.getElementById("exportCsv").onclick  = () => telecharger("bibliotheque.csv", versCsv(), "text/csv;charset=utf-8");
+document.getElementById("exportJson").onclick = () => telecharger("bibliotheque.json", JSON.stringify(livres, null, 2), "application/json");
+document.getElementById("importBtn").onclick  = () => document.getElementById("importFile").click();
+document.getElementById("importFile").onchange = e => { if (e.target.files[0]) importer(e.target.files[0]); };
+
+demarrer();
+</script>

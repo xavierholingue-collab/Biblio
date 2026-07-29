@@ -1,0 +1,63 @@
+name: biblio
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${PGUSER:-biblio}
+      POSTGRES_PASSWORD: ${PGPASSWORD:?PGPASSWORD manquant dans .env}
+      POSTGRES_DB: ${PGDATABASE:-biblio}
+      # Locale française pour que le tri alphabétique respecte les accents
+      POSTGRES_INITDB_ARGS: "--locale=fr_FR.UTF-8 --encoding=UTF8"
+      LANG: fr_FR.utf8
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db:/docker-entrypoint-initdb.d:ro
+    # La base n'est pas exposée à l'extérieur : seule l'API y accède.
+    expose:
+      - "5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PGUSER:-biblio} -d ${PGDATABASE:-biblio}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build: ./api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGHOST: db
+      PGUSER: ${PGUSER:-biblio}
+      PGPASSWORD: ${PGPASSWORD}
+      PGDATABASE: ${PGDATABASE:-biblio}
+      MOT_DE_PASSE: ${MOT_DE_PASSE:?MOT_DE_PASSE manquant dans .env}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      MODELE: ${MODELE:-claude-sonnet-5}
+    volumes:
+      - ./seed:/seed:ro
+    expose:
+      - "3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/api/sante').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  web:
+    image: nginx:alpine
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      # Écoute uniquement sur cette machine, pas sur le réseau local.
+      - "127.0.0.1:${PORT_WEB:-8080}:80"
+    volumes:
+      - ./web:/usr/share/nginx/html:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+
+volumes:
+  pgdata:

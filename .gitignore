@@ -1,0 +1,16 @@
+# Secrets — ne doivent jamais partir sur GitHub
+.env
+.env.*
+!.env.exemple
+
+# Données personnelles
+seed/*.json
+sauvegardes/
+journaux/
+
+# Divers
+node_modules/
+*.log
+Thumbs.db
+desktop.ini
+.DS_Store
