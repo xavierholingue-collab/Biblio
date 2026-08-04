@@ -86,7 +86,18 @@ cp -f "${SOURCE}/deploiement/gitignore.modele" "${DEPOT}/.gitignore" 2>/dev/null
 echo
 echo "-- Ni secret ni donnee personnelle dans le depot --"
 
-secrets=$(grep -rlE 'sk-ant-api[0-9]{2}-[A-Za-z0-9_-]{30,}|^MOT_DE_PASSE=.+|^PGPASSWORD=.+' \
+# Le motif doit distinguer un SECRET d'un CODE QUI MANIPULE un secret.
+#
+# Une premiere version cherchait « ^MOT_DE_PASSE=.+ » et signalait
+# vps-installer-biblio.sh, qui contient « MOT_DE_PASSE=${ancien_mdp} » —
+# une reference de variable dans le heredoc qui ECRIT le fichier
+# d'environnement. Meme erreur que le 31/07/2026, ou le prefixe
+# « sk-ant- » de la validation zod passait pour une clef.
+#
+# On exige donc une valeur LITTERALE : ni « $ » ni guillemet en tete, et
+# au moins huit caracteres. Un vrai secret colle par megarde correspond ;
+# une variable, non.
+secrets=$(grep -rlE "sk-ant-api[0-9]{2}-[A-Za-z0-9_-]{30,}|^(MOT_DE_PASSE|PGPASSWORD|ANTHROPIC_API_KEY)=[^\$\"'[:space:]]{8,}" \
   "${DEPOT}" --exclude-dir=.git --exclude-dir=node_modules --exclude='*.exemple' 2>/dev/null | head -5)
 if [ -n "${secrets}" ]; then
   echo "  ALERTE valeurs sensibles trouvees :"
