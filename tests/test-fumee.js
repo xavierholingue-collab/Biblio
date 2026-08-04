@@ -6,7 +6,28 @@
 const fs = require("fs");
 const { JSDOM } = require("jsdom");
 
-const HTML = require("path").join(__dirname, "..", "ma-bibliotheque.html");
+/* La page a chercher, quelle que soit la profondeur ou vit ce test.
+ *
+ * Il a longtemps vecu dans web/test/, ou « .. » designait web/. Depuis
+ * qu'il est range dans tests/, a la racine du depot, « .. » designe le
+ * dossier parent du depot — et le test echouait sur un ENOENT sans rapport
+ * avec ce qu'il verifie.
+ *
+ * Un test ne doit pas se casser parce qu'on l'a deplace. On enumere donc
+ * les emplacements plausibles, et l'on dit lesquels ont ete essayes si
+ * aucun ne convient. */
+const chemin = require("path");
+const CANDIDATS = [
+  chemin.join(__dirname, "..", "ma-bibliotheque.html"),        // web/test/
+  chemin.join(__dirname, "..", "web", "ma-bibliotheque.html"), // tests/ a la racine
+  chemin.join(process.cwd(), "web", "ma-bibliotheque.html"),   // lance depuis la racine
+];
+const HTML = CANDIDATS.find((c) => fs.existsSync(c));
+if (!HTML) {
+  console.error("ma-bibliotheque.html introuvable. Emplacements essayes :");
+  CANDIDATS.forEach((c) => console.error("  " + c));
+  process.exit(1);
+}
 const html = fs.readFileSync(HTML, "utf8");
 
 const erreurs = [], ok = [];
