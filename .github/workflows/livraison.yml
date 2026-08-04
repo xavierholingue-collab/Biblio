@@ -1,0 +1,152 @@
+# =========================================================================
+# Contrôles, puis livraison de Biblio sur biblio.xavier-holingue.eu
+#
+# CE QUE CHAQUE ÉTAGE PROUVE
+#
+#   Les contrôles montent une pile complète — PostgreSQL, schéma, API — et
+#   lui envoient les 44 vérifications de test-api.mjs. Ils attrapent une
+#   régression de code ou de schéma avant qu'elle ne parte.
+#
+#   La vérification d'après-déploiement rejoue LE MÊME test contre
+#   l'instance installée. C'est le seul moment où l'on éprouve la
+#   configuration réelle : variables d'environnement, base de production,
+#   proxy inverse. Sur Adapsis, c'est cet étage-là qui a révélé qu'un champ
+#   optionnel côté TypeScript était refusé à l'exécution.
+#
+# AUCUN APPEL PAYANT : test-api.mjs ne déclenche pas le modèle, il vérifie
+# seulement que les routes qui coûtent sont protégées.
+# =========================================================================
+
+name: Livraison
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: biblio-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+
+  controles:
+    name: Contrôles
+    runs-on: ubuntu-latest
+
+    # PostgreSQL 17, comme en production. Une version différente ferait
+    # passer en CI ce qui échouerait sur le serveur.
+    services:
+      db:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: biblio
+          POSTGRES_PASSWORD: controle
+          POSTGRES_DB: biblio
+        options: >-
+          --health-cmd "pg_isready -U biblio"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+        ports: ['5432:5432']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+
+      - name: Vérifier la syntaxe
+        run: node --check api/server.js
+
+      - name: Appliquer le schéma
+        env: { PGPASSWORD: controle }
+        run: psql -h localhost -U biblio -d biblio -v ON_ERROR_STOP=1 -f db/01-schema.sql
+
+      - name: Installer les dépendances de l API
+        working-directory: api
+        run: npm install --omit=dev --no-audit --no-fund
+
+      - name: Démarrer l API
+        working-directory: api
+        env:
+          PORT: '3000'
+          PGHOST: localhost
+          PGUSER: biblio
+          PGPASSWORD: controle
+          PGDATABASE: biblio
+          MOT_DE_PASSE: mot-de-passe-de-controle
+          # Pas de clef : les routes coûteuses doivent refuser proprement,
+          # et c'est précisément ce que le test vérifie.
+          ANTHROPIC_API_KEY: ''
+          # Aucun fichier d'amorce : la base reste vide, le test crée ce
+          # dont il a besoin et le supprime.
+          FICHIER_AMORCE: /inexistant.json
+        run: |
+          node server.js &
+          for i in $(seq 1 20); do
+            curl -sf http://localhost:3000/api/session >/dev/null && break
+            sleep 1
+          done
+          curl -sf http://localhost:3000/api/session || { echo "l API n a pas démarré"; exit 1; }
+
+      - name: 44 vérifications contre la pile locale
+        env:
+          BASE: http://localhost:3000
+          MOT_DE_PASSE: mot-de-passe-de-controle
+        run: node api/test-api.mjs
+
+      - name: Test de fumée du front
+        run: |
+          npm install jsdom --no-audit --no-fund --silent
+          node tests/test-fumee.js
+
+      - name: Fabriquer le paquet
+        run: |
+          tar czf paquet.tar.gz --exclude=node_modules api web db
+          echo "poids : $(du -h paquet.tar.gz | cut -f1)"
+
+      - uses: actions/upload-artifact@v4
+        with: { name: paquet, path: paquet.tar.gz, retention-days: 7 }
+
+  production:
+    name: Production
+    needs: controles
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: paquet }
+
+      - name: Préparer l accès SSH
+        run: |
+          install -d -m 700 ~/.ssh
+          # Clef bridée par command= : elle ne peut lancer que le
+          # déploiement de Biblio, rien d autre sur ce serveur.
+          printf '%s\n' "${{ secrets.CLE_DEPLOIEMENT_BIBLIO }}" > ~/.ssh/cle
+          chmod 600 ~/.ssh/cle
+          printf '%s\n' "${{ secrets.EMPREINTE_HOTE }}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Déployer
+        run: |
+          ssh -i ~/.ssh/cle \
+              -o UserKnownHostsFile=~/.ssh/known_hosts \
+              -o StrictHostKeyChecking=yes -o ConnectTimeout=20 \
+              root@${{ secrets.HOTE_VPS }} "deployer biblio" < paquet.tar.gz
+
+      # LE contrôle qui compte : le même test, contre l instance réelle.
+      - name: 44 vérifications contre l instance déployée
+        env:
+          BASE: https://biblio.xavier-holingue.eu
+          MOT_DE_PASSE: ${{ secrets.MOT_DE_PASSE_BIBLIO }}
+        timeout-minutes: 10
+        run: node api/test-api.mjs
+
+      - name: La page répond
+        run: |
+          c=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 https://biblio.xavier-holingue.eu)
+          printf '  biblio.xavier-holingue.eu : %s\n' "${c}"
+          [ "${c}" = "200" ] || exit 1
