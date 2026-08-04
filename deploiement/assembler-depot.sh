@@ -25,7 +25,18 @@ echo
 
 [ -d "${SOURCE}/docker" ] || echec "dossier source introuvable"
 
-mkdir -p "${DEPOT}"/{api,web,deploiement,docs,.github/workflows}
+mkdir -p "${DEPOT}"/{api,web,db,deploiement,docs,.github/workflows}
+
+# --- Le schema de la base ------------------------------------------------
+#
+# OUBLI CORRIGE le 04/08/2026 : une premiere version de ce script ne
+# copiait pas db/. Sans 01-schema.sql, aucune table n'est creee sur le
+# serveur — et l'erreur ne se manifeste qu'au premier appel de l'API, sous
+# la forme d'un « relation books does not exist » qui ne dit pas d'ou il
+# vient. C'est le depot GitHub existant qui l'a revele, pas ce script.
+rsync -a --delete "${SOURCE}/docker/db/" "${DEPOT}/db/" || echec "recopie du schema"
+[ -f "${DEPOT}/db/01-schema.sql" ] || echec "01-schema.sql absent apres recopie"
+ok "db : schema present"
 
 # --- L'API ---------------------------------------------------------------
 # Le Dockerfile part avec : il decrit la version locale, qui reste
@@ -66,9 +77,13 @@ else
 fi
 
 # --- Le fichier de configuration d'exemple -------------------------------
-cp -f "${SOURCE}/docker/.env.exemple" "${DEPOT}/" 2>/dev/null && ok ".env.exemple"
-cp -f "${SOURCE}/docker/docker-compose.yml" "${DEPOT}/" 2>/dev/null
-cp -f "${SOURCE}/docker/nginx.conf" "${DEPOT}/" 2>/dev/null
+# Ce qui fait vivre la version LOCALE. Elle reste utilisable sur le poste :
+# le VPS n'est pas un remplacement, c'est une seconde facon d'y acceder.
+for f in .env.exemple .gitattributes docker-compose.yml nginx.conf \
+         Demarrer.cmd Arreter.cmd Sauvegarder.cmd README.md; do
+  cp -f "${SOURCE}/docker/${f}" "${DEPOT}/" 2>/dev/null
+done
+ok "version locale : $(ls -1 "${DEPOT}"/*.cmd 2>/dev/null | wc -l) scripts, compose, nginx"
 cp -f "${SOURCE}/deploiement/gitignore.modele" "${DEPOT}/.gitignore" 2>/dev/null && ok ".gitignore"
 
 # --- Le filet : rien de secret, rien de personnel ------------------------
