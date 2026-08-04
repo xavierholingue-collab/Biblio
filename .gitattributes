@@ -1,0 +1,15 @@
+# Normalisation des fins de ligne : indispensable quand on développe sous
+# Windows et qu'on exécute sous Linux dans les conteneurs.
+* text=auto eol=lf
+
+# Ces fichiers ne sont lus que par Windows et doivent garder des CRLF.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+# Binaires
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.zip binary
