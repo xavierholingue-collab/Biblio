@@ -1,0 +1,37 @@
+# =========================================================================
+# Ce qui ne doit jamais partir chez GitHub — dépôt Biblio.
+# =========================================================================
+
+# --- Secrets -------------------------------------------------------------
+.env
+.env.*
+!.env.exemple
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+
+# --- Données de la bibliothèque ------------------------------------------
+#
+# `seed/bibliotheque.json` contient TOUTE la bibliothèque, sphère Perso
+# comprise — c'est-à-dire exactement ce que l'application protège derrière
+# un mot de passe. Elle ne sert qu'une fois, à l'import initial sur le
+# serveur, et n'a aucune raison d'être versionnée.
+seed/
+bibliotheque.json
+Biblio_export*
+*.dump
+*.csv
+sauvegardes/
+journaux/
+
+# --- Dépendances et compilation ------------------------------------------
+node_modules/
+dist/
+*.log
+
+# --- Système -------------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+~$*

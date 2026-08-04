@@ -1,0 +1,291 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Une bibliothèque de travail</title>
+<meta name="description" content="Bibliothèque professionnelle : management, décision, industrie, numérique, philosophie et sciences sociales.">
+<style>
+  :root {
+    --paper:      #E9EBE6;
+    --paper-2:    #F2F3EF;
+    --ink:        #1A1F1C;
+    --ink-soft:   #5E665F;
+    --rule:       #C9CEC5;
+    --acad:       #2F5D62;
+    --bd:         #A9722A;
+    --roman:      #8A3B4A;
+    --focus:      #2F5D62;
+    --serif: Georgia, "Iowan Old Style", "Times New Roman", serif;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font-family: var(--sans); font-size: 16px; line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 940px; margin: 0 auto; padding: 0 22px 90px; }
+  [hidden] { display: none !important; }
+  a { color: inherit; }
+
+  /* ---------- Bandeau ---------- */
+  .bandeau { padding: 60px 0 34px; border-bottom: 2px solid var(--ink); }
+  h1 {
+    font-family: var(--serif); font-weight: 400; font-size: clamp(32px, 6vw, 48px);
+    letter-spacing: -0.02em; margin: 0 0 14px; line-height: 1.08;
+  }
+  .chapeau {
+    font-family: var(--serif); font-size: clamp(17px, 2.4vw, 20px);
+    line-height: 1.5; max-width: 62ch; margin: 0 0 8px; color: var(--ink);
+  }
+  .sous-chapeau { font-size: 15px; color: var(--ink-soft); max-width: 62ch; margin: 14px 0 0; }
+
+  /* ---------- Mur d'étagère ---------- */
+  .etagere {
+    display: flex; align-items: flex-end; gap: 1px;
+    height: 90px; margin: 34px 0 8px;
+    border-bottom: 2px solid var(--ink); padding: 0 1px;
+  }
+  .dos { flex: 1 1 0; min-width: 2px; border-radius: 1px 1px 0 0; }
+  .legende-etagere {
+    font-family: var(--mono); font-size: 11px; color: var(--ink-soft);
+    letter-spacing: .04em; margin-bottom: 40px;
+  }
+
+  /* ---------- Chiffres ---------- */
+  .chiffres {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 1px; background: var(--rule); border: 1px solid var(--rule);
+    margin: 40px 0;
+  }
+  .chiffre { background: var(--paper); padding: 20px 18px; }
+  .chiffre .n {
+    font-family: var(--serif); font-size: 38px; line-height: 1; letter-spacing: -0.02em;
+  }
+  .chiffre .quoi {
+    font-family: var(--mono); font-size: 10px; letter-spacing: .1em;
+    text-transform: uppercase; color: var(--ink-soft); margin-top: 8px;
+  }
+
+  /* ---------- Sections ---------- */
+  h2 {
+    font-family: var(--mono); font-size: 11px; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--ink-soft); font-weight: 400;
+    margin: 46px 0 16px; padding-bottom: 8px; border-bottom: 1px solid var(--rule);
+  }
+
+  /* ---------- Rayons ---------- */
+  .rayon { display: grid; grid-template-columns: 1fr 46px; gap: 12px; align-items: center; padding: 7px 0; }
+  .rayon .nom { font-size: 15px; }
+  .rayon .barre { height: 9px; background: var(--rule); border-radius: 1px; overflow: hidden; margin-top: 5px; }
+  .rayon .barre i { display: block; height: 100%; }
+  .rayon .n { font-family: var(--mono); font-size: 12px; color: var(--ink-soft); text-align: right; }
+
+  /* ---------- Décennies ---------- */
+  .decennies { display: flex; align-items: flex-end; gap: 4px; height: 130px; margin-top: 10px; }
+  .dec { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 6px; }
+  .dec .b { width: 100%; background: var(--acad); border-radius: 1px 1px 0 0; min-height: 2px; }
+  .dec .e { font-family: var(--mono); font-size: 9px; color: var(--ink-soft); letter-spacing: .02em; }
+
+  /* ---------- Listes ---------- */
+  .colonnes { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 34px; }
+  .ligne { display: flex; justify-content: space-between; gap: 14px; padding: 7px 0; border-bottom: 1px solid var(--rule); font-size: 15px; }
+  .ligne .d { font-family: var(--mono); font-size: 12px; color: var(--ink-soft); white-space: nowrap; }
+  .ligne .t { font-family: var(--serif); font-size: 16px; line-height: 1.3; }
+  .ligne .a { font-size: 13px; color: var(--ink-soft); }
+
+  /* ---------- Accès ---------- */
+  .acces { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 16px; margin-top: 20px; }
+  .porte {
+    display: block; text-decoration: none; border: 1px solid var(--ink);
+    padding: 22px 20px; background: var(--paper-2);
+    transition: background .12s ease, transform .12s ease;
+  }
+  .porte:hover { background: var(--ink); color: var(--paper); transform: translateY(-2px); }
+  .porte .t { font-family: var(--serif); font-size: 21px; margin-bottom: 6px; }
+  .porte .d { font-size: 14px; opacity: .85; }
+  .porte .cle {
+    font-family: var(--mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase;
+    margin-top: 12px; opacity: .7;
+  }
+
+  /* ---------- Divers ---------- */
+  .note-bas {
+    margin-top: 54px; padding-top: 20px; border-top: 1px solid var(--rule);
+    font-size: 13px; color: var(--ink-soft); max-width: 70ch;
+  }
+  .chargement { padding: 60px 0; text-align: center; color: var(--ink-soft); font-family: var(--mono); font-size: 12px; }
+  .erreur { padding: 24px; border: 1px solid var(--roman); color: var(--roman); font-size: 14px; margin: 34px 0; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+  <header class="bandeau">
+    <h1>Une bibliothèque de travail</h1>
+    <p class="chapeau">
+      Ce que j'ai lu, ce que je relis, et ce qui reste sur la pile. Une bibliothèque
+      d'ingénieur et de dirigeant, où le lean côtoie la philosophie et où les sciences
+      de la décision servent de fil conducteur.
+    </p>
+    <p class="sous-chapeau">
+      Chaque ouvrage porte un résumé rédigé par Claude, vérifié par recherche web, avec
+      son degré de certitude. On peut aussi décrire ce que l'on cherche à comprendre :
+      un parcours de lecture est alors construit dans ces rayons.
+    </p>
+  </header>
+
+  <div id="chargement" class="chargement">Chargement des statistiques…</div>
+  <div id="erreur" class="erreur" hidden></div>
+
+  <main id="contenu" hidden>
+    <div class="etagere" id="etagere" role="img" aria-label="Vue d'ensemble de la bibliothèque"></div>
+    <div class="legende-etagere" id="legendeEtagere"></div>
+
+    <div class="chiffres" id="chiffres"></div>
+
+    <h2 id="titreRayons">Les rayons</h2>
+    <div id="rayons"></div>
+
+    <h2>Par décennie de parution</h2>
+    <div class="decennies" id="decennies"></div>
+
+    <div class="colonnes" style="margin-top:46px">
+      <div>
+        <h2 style="margin-top:0">Auteurs les plus présents</h2>
+        <div id="auteurs"></div>
+      </div>
+      <div>
+        <h2 style="margin-top:0">Entrées les plus récentes</h2>
+        <div id="recents"></div>
+      </div>
+    </div>
+
+    <h2>Entrer</h2>
+    <div class="acces">
+      <a class="porte" href="/ma-bibliotheque.html">
+        <div class="t">La bibliothèque professionnelle</div>
+        <div class="d">Parcourir les rayons, lire les résumés, demander un parcours de lecture.</div>
+        <div class="cle" id="cleAcces">Accès libre</div>
+      </a>
+      <a class="porte" href="/ma-bibliotheque.html?espace=perso">
+        <div class="t">L'espace personnel</div>
+        <div class="d">Romans, bandes dessinées, lectures qui ne regardent que moi.</div>
+        <div class="cle" id="clePerso">Mot de passe requis</div>
+      </a>
+    </div>
+
+    <p class="note-bas" id="noteBas"></p>
+  </main>
+</div>
+
+<script>
+const HEX = { "Académique": "#2F5D62", "BD": "#A9722A", "Roman": "#8A3B4A" };
+
+function texte(el, t) { el.textContent = t; }
+function nombre(n) { return new Intl.NumberFormat("fr-FR").format(n); }
+
+function chiffre(n, quoi) {
+  return `<div class="chiffre"><div class="n">${n}</div><div class="quoi">${quoi}</div></div>`;
+}
+
+function dessinerEtagere(stats) {
+  const el = document.getElementById("etagere");
+  // Un dos par ouvrage, hauteur proportionnelle à la taille du rayon.
+  const dos = [];
+  stats.sous_categories.forEach(sc => {
+    for (let i = 0; i < sc.n; i++) {
+      const h = 45 + ((i * 37 + sc.n * 13) % 55);
+      dos.push(`<span class="dos" style="height:${h}%;background:${HEX[sc.categorie] || "#444"}"></span>`);
+    }
+  });
+  el.innerHTML = dos.join("");
+}
+
+function dessinerRayons(stats) {
+  const el = document.getElementById("rayons");
+  const max = Math.max(...stats.sous_categories.map(s => s.n));
+  el.innerHTML = stats.sous_categories.map(s => `
+    <div class="rayon">
+      <div>
+        <div class="nom">${s.sous_categorie}</div>
+        <div class="barre"><i style="width:${Math.round(s.n / max * 100)}%;background:${HEX[s.categorie] || "#444"}"></i></div>
+      </div>
+      <div class="n">${s.n}</div>
+    </div>`).join("");
+}
+
+function dessinerDecennies(stats) {
+  const el = document.getElementById("decennies");
+  if (!stats.decennies.length) { el.hidden = true; return; }
+  const max = Math.max(...stats.decennies.map(d => d.n));
+  el.innerHTML = stats.decennies.map(d => `
+    <div class="dec" title="${d.n} ouvrage${d.n > 1 ? "s" : ""}">
+      <div class="b" style="height:${Math.round(d.n / max * 100)}%"></div>
+      <div class="e">${String(d.decennie).slice(-2)}</div>
+    </div>`).join("");
+}
+
+function dessinerListes(stats) {
+  document.getElementById("auteurs").innerHTML = stats.auteurs_recurrents.map(a => `
+    <div class="ligne"><span>${a.auteur}</span><span class="d">${a.n} titres</span></div>`).join("")
+    || '<div class="ligne"><span>—</span></div>';
+
+  document.getElementById("recents").innerHTML = stats.plus_recents.map(l => `
+    <div class="ligne">
+      <span><span class="t">${l.titre}</span><br><span class="a">${l.auteur}</span></span>
+      <span class="d">${l.annee ?? ""}</span>
+    </div>`).join("");
+}
+
+(async () => {
+  try {
+    const r = await fetch("/api/statistiques", { credentials: "same-origin" });
+    if (!r.ok) throw new Error("Le serveur a répondu " + r.status);
+    const s = await r.json();
+
+    const partLus = s.total ? Math.round(s.lus / s.total * 100) : 0;
+    document.getElementById("chiffres").innerHTML = [
+      chiffre(nombre(s.total), "ouvrages"),
+      chiffre(nombre(s.lus), "lus (" + partLus + " %)"),
+      chiffre(nombre(s.a_lire + s.en_cours), "sur la pile"),
+      chiffre(nombre(s.avec_resume), "résumés"),
+      chiffre(nombre(s.auteurs), "auteurs"),
+      chiffre(s.note_moyenne !== null ? s.note_moyenne.toFixed(2).replace(".", ",") : "—", "note moyenne"),
+    ].join("");
+
+    dessinerEtagere(s);
+    dessinerRayons(s);
+    dessinerDecennies(s);
+    dessinerListes(s);
+
+    const complet = s.perimetre === "complet";
+    texte(document.getElementById("titreRayons"),
+      "Les " + s.rayons + " rayons");
+    texte(document.getElementById("legendeEtagere"),
+      complet
+        ? "Bibliothèque complète — " + nombre(s.total) + " ouvrages, tous rayons confondus."
+        : "Périmètre professionnel — " + nombre(s.total) + " ouvrages académiques.");
+
+    if (complet) {
+      texte(document.getElementById("clePerso"), "Session ouverte");
+      texte(document.getElementById("cleAcces"), "Session ouverte");
+    }
+
+    texte(document.getElementById("noteBas"),
+      "Les résumés sont produits par un modèle de langage et vérifiés par recherche web ; "
+      + "chacun porte la mention de sa date et de son degré de certitude, et reste à recouper "
+      + "avant citation. Les couvertures proviennent d'Open Library et de Google Books. "
+      + (s.annee_min && s.annee_max
+          ? "Les ouvrages présentés vont de " + s.annee_min + " à " + s.annee_max + "."
+          : ""));
+
+    document.getElementById("chargement").hidden = true;
+    document.getElementById("contenu").hidden = false;
+  } catch (e) {
+    document.getElementById("chargement").hidden = true;
+    const err = document.getElementById("erreur");
+    err.hidden = false;
+    err.textContent = "Statistiques indisponibles : " + e.message
+      + ". Le serveur est-il démarré ?";
+  }
+})();
+</script>
