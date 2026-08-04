@@ -88,7 +88,26 @@ biblio.xavier-holingue.eu {
 			# La politique de contenu n'autorise que les couvertures
 			# d'Open Library et de Google Books. Tout autre chargement
 			# distant est refuse par le navigateur.
-			Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://covers.openlibrary.org https://books.google.com https://*.googleusercontent.com; connect-src 'self' https://www.googleapis.com; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+			# script-src autorise 'unsafe-inline' — et il faut dire pourquoi.
+			#
+			# L'application tient en un seul fichier HTML, script compris.
+			# « script-src 'self' » interdit les scripts en ligne : la page
+			# s'affichait, le JavaScript ne s'executait jamais, et les
+			# statistiques restaient en « Chargement… ».
+			#
+			# Cela ne fonctionnait en local que parce que la politique n'y
+			# etait PAS APPLIQUEE : dans nginx, un add_header declare dans
+			# un bloc location annule tous ceux herites du parent, et le
+			# « location / » en declarait un pour Cache-Control. La CSP
+			# etait donc silencieusement desactivee depuis le debut. Caddy,
+			# qui applique les en-tetes ensemble, l'a rendue effective.
+			#
+			# 'unsafe-inline' affaiblit la protection contre l'injection de
+			# script. La vraie correction est d'autoriser CE script par son
+			# empreinte sha256 — mais elle doit etre recalculee a chaque
+			# modification de la page, donc par la chaine de livraison.
+			# A faire quand Biblio evoluera moins vite.
+			Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://covers.openlibrary.org https://books.google.com https://*.googleusercontent.com; connect-src 'self' https://www.googleapis.com; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
 			# L'application evolue : pas de version figee en cache.
 			Cache-Control "no-cache"
 			-Server
