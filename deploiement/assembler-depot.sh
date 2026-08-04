@@ -56,10 +56,19 @@ rsync -a --delete --delete-excluded \
   "${SOURCE}/docker/web/" "${DEPOT}/web/" || echec "recopie du web"
 ok "web : $(ls -1 "${DEPOT}/web" | wc -l) fichiers"
 
-# Les tests du web vivent a part, hors de ce qui est publie.
+# Les tests vivent a part, hors de ce qui est publie.
+#
+# Deux sources, et l'ordre compte : « --delete » sur la premiere fait le
+# menage, la seconde ajoute sans effacer. L'inverse supprimerait le jeu
+# d'amorce de controle a chaque assemblage.
 mkdir -p "${DEPOT}/tests"
 rsync -a --delete "${SOURCE}/docker/web/test/" "${DEPOT}/tests/" 2>/dev/null
+rsync -a          "${SOURCE}/docker/tests/"    "${DEPOT}/tests/" 2>/dev/null
 ok "tests : $(ls -1 "${DEPOT}/tests" 2>/dev/null | wc -l) fichiers"
+
+# Le jeu d'amorce de controle est indispensable a la CI : sans lui, trois
+# verifications sur la frontiere Pro/Perso echouent faute de donnees.
+[ -f "${DEPOT}/tests/amorce-controle.json" ] || echec "tests/amorce-controle.json absent"
 
 # --- Deploiement, documentation, workflows -------------------------------
 rsync -a --delete "${SOURCE}/deploiement/" "${DEPOT}/deploiement/" 2>/dev/null

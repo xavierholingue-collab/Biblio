@@ -78,9 +78,21 @@ jobs:
           # Pas de clef : les routes coûteuses doivent refuser proprement,
           # et c'est précisément ce que le test vérifie.
           ANTHROPIC_API_KEY: ''
-          # Aucun fichier d'amorce : la base reste vide, le test crée ce
-          # dont il a besoin et le supprime.
-          FICHIER_AMORCE: /inexistant.json
+
+          # Un jeu d'amorce SYNTHÉTIQUE — trois ouvrages Pro, deux Perso.
+          #
+          # La première version démarrait sur une base vide, et trois
+          # vérifications échouaient : « les ouvrages perso apparaissent
+          # une fois connecté », « le périmètre s'élargit — 0 vs 0 ».
+          # Elles portent sur la frontière Pro/Perso, c'est-à-dire sur la
+          # propriété de sécurité centrale de l'application. Les désactiver
+          # pour faire passer la chaîne aurait retiré le test le plus
+          # important ; on leur donne donc de quoi travailler.
+          #
+          # Ces cinq titres sont inventés. La vraie bibliothèque n'entre
+          # jamais dans le dépôt : c'est précisément ce que le mot de passe
+          # protège.
+          FICHIER_AMORCE: ${{ github.workspace }}/tests/amorce-controle.json
         run: |
           node server.js &
           for i in $(seq 1 20); do
