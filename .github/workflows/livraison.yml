@@ -170,3 +170,43 @@ jobs:
           c=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 https://biblio.xavier-holingue.eu)
           printf '  biblio.xavier-holingue.eu : %s\n' "${c}"
           [ "${c}" = "200" ] || exit 1
+
+      # ------------------------------------------------------------------
+      # UN VRAI NAVIGATEUR SUR LA PAGE RÉELLE
+      #
+      # Les étages précédents ne peuvent pas voir certaines pannes. jsdom
+      # n'applique ni feuille de style, ni mise en page, ni politique de
+      # sécurité du contenu : il exécute le script quoi qu'il arrive.
+      #
+      # Le 04/08/2026, la page publique est restée des heures sur
+      # « Chargement des statistiques… » parce que la CSP servie par Caddy
+      # interdisait les scripts en ligne. Tous les contrôles passaient.
+      # Le défaut a été trouvé à l'œil, en regardant la page.
+      #
+      # Cet étage regarde la page à notre place, dans Chromium, sur écran
+      # de bureau et sur mobile.
+      # ------------------------------------------------------------------
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+
+      - name: Installer Playwright
+        run: |
+          npm install @playwright/test --no-audit --no-fund
+          npx playwright install --with-deps chromium
+
+      - name: Parcours en navigateur réel
+        env:
+          BASE: https://biblio.xavier-holingue.eu
+        timeout-minutes: 10
+        run: npx playwright test --config tests/playwright.config.mjs
+
+      # En cas d'échec, la capture d'écran et la trace disent ce que le
+      # navigateur voyait — bien plus utile qu'un message d'assertion.
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-preuves
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
