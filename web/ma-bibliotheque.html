@@ -566,13 +566,20 @@ async function api(chemin, options = {}) {
 const COULEURS = { "Académique": "var(--acad)", "BD": "var(--bd)", "Roman": "var(--roman)" };
 const HEX      = { "Académique": "#2F5D62",   "BD": "#A9722A",   "Roman": "#8A3B4A" };
 
+/* « Non classé » figure dans chaque catégorie, et ce n'est pas un pis-aller.
+   Une classification de treize rayons bâtie sur trois cents ouvrages a des
+   trous : « Pop Forever », catalogue d'exposition d'art paru chez Gallimard,
+   n'entre dans aucun. Jusqu'au 12/08/2026, le champ était alors vidé en
+   silence — on ne pouvait pas distinguer « le modèle a échoué » de « votre
+   classification n'a pas ce rayon ». Un rangement avoué vaut mieux qu'un
+   rangement inventé. */
 const SOUS_CATEGORIES = {
   "Académique": ["Management & leadership","Stratégie & marketing","Industrie, opérations & lean",
     "Numérique, IA & SI","Innovation & entrepreneuriat","Économie","Politique, société & géopolitique",
     "Philosophie","Décision, biais & rationalité","Communication & influence",
-    "Psychologie & développement personnel","Sciences & environnement"],
-  "BD": ["Aventure & historique","Polar & thriller","SF & fantastique","Roman graphique & récit","Humour & société"],
-  "Roman": ["Polar & thriller","Littérature générale","SF & humour","Classique"]
+    "Psychologie & développement personnel","Sciences & environnement","Non classé"],
+  "BD": ["Aventure & historique","Polar & thriller","SF & fantastique","Roman graphique & récit","Humour & société","Non classé"],
+  "Roman": ["Polar & thriller","Littérature générale","SF & humour","Classique","Non classé"]
 };
 
 const EXEMPLES_QUETE = [
@@ -1536,9 +1543,39 @@ async function enregistrer() {
     livres.push(livre);
   }
 
+  const estNouveau = !idEnCours;
+
   if (await enregistrerLivre(livre)) {
     document.getElementById("modale").close();
     rafraichir();
+    // Un ouvrage qui vient d'entrer n'a pas de résumé, et le demander
+    // exigeait d'ouvrir sa fiche — une manipulation de plus, qui sur
+    // téléphone ne se fait jamais. On le lance en arrière-plan.
+    if (estNouveau && !livre.resume) resumerEnArrierePlan(livre.id);
+  }
+}
+
+/* Résumé lancé sans bloquer l'interface, après l'ajout d'un ouvrage.
+   Volontairement silencieux en cas d'échec : ce n'est pas parce que le
+   modèle est indisponible que l'enregistrement du livre, lui, a raté. Le
+   résumé reste demandable depuis la fiche. */
+async function resumerEnArrierePlan(id) {
+  const l = livres.find(x => x.id === id);
+  if (!l) return;
+  annoncer("Résumé de « " + l.titre + " » en cours…");
+  try {
+    const info = await appelerFonction("book-summary", { bookId: id });
+    l.resume = info.resume;
+    l.resumePoints = info.points ?? [];
+    l.resumeThemes = info.themes ?? [];
+    l.resumeFiabilite = info.fiabilite ?? null;
+    l.resumeModele = info.modele ?? null;
+    l.resumeGenereLe = new Date().toISOString();
+    annoncer("Résumé de « " + l.titre + " » enregistré.");
+    rafraichir();
+  } catch (e) {
+    annoncer("Résumé non produit pour « " + l.titre + " » : " + e.message
+      + " Vous pouvez le relancer depuis sa fiche.", true);
   }
 }
 
@@ -1576,7 +1613,24 @@ async function chercherLivre() {
       if (SOUS_CATEGORIES[info.categorie].includes(info.sousCategorie))
         document.getElementById("fSous").value = info.sousCategorie;
     }
-    etatEl.textContent = "Informations trouvées — vérifiez puis enregistrez.";
+    /* Quand aucun rayon ne convient, le modèle le dit et propose celui qui
+       manquerait. On le montre — c'est un renseignement sur VOTRE
+       classification, pas sur ce livre.
+
+       Le 12/08/2026, « Pop Forever », catalogue d'exposition d'art paru chez
+       Gallimard, a été rangé en « Management & leadership ». Le modèle
+       n'avait pas le droit de dire non : la liste était fermée, il a donc
+       choisi le moins mauvais. Un rangement faux ne se voit jamais — on
+       s'en aperçoit le jour où l'on cherche un ouvrage qui n'est pas là. */
+    if (info.rayonSuggere) {
+      etatEl.className = "etat";
+      etatEl.innerHTML =
+        "Aucun rayon existant ne convient : classé <strong>Non classé</strong>."
+        + "<br>Rayon suggéré : <strong>" + echapper(info.rayonSuggere) + "</strong>"
+        + (info.motif ? "<br><span style=\"color:var(--ink-soft)\">" + echapper(info.motif) + "</span>" : "");
+    } else {
+      etatEl.textContent = "Informations trouvées — vérifiez puis enregistrez.";
+    }
   } catch (e) {
     etatEl.className = "etat err";
     etatEl.textContent = "Recherche impossible : " + e.message;

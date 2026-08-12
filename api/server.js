@@ -84,10 +84,14 @@ const SOUS_CATEGORIES = {
     "Politique, société & géopolitique", "Philosophie", "Décision, biais & rationalité",
     "Communication & influence", "Psychologie & développement personnel",
     "Sciences & environnement",
+    // « Non classé » est une valeur legitime, pas un echec. Voir la note
+    // dans ma-bibliotheque.html : un rangement avoue vaut mieux qu'un
+    // rangement invente.
+    "Non classé",
   ],
   "BD": ["Aventure & historique", "Polar & thriller", "SF & fantastique",
-         "Roman graphique & récit", "Humour & société"],
-  "Roman": ["Polar & thriller", "Littérature générale", "SF & humour", "Classique"],
+         "Roman graphique & récit", "Humour & société", "Non classé"],
+  "Roman": ["Polar & thriller", "Littérature générale", "SF & humour", "Classique", "Non classé"],
 };
 
 function json(rep, corps, statut = 200, entetes = {}) {
@@ -476,7 +480,7 @@ Utilise la recherche web pour vérifier. N'invente aucune donnée : si une infor
 est introuvable, mets une chaîne vide ou null.
 
 Réponds UNIQUEMENT par un objet JSON, sans texte autour ni balises Markdown :
-{"titre":"","auteur":"Nom Prénom","editeur":"","annee":2020,"isbn":"","categorie":"","sousCategorie":""}
+{"titre":"","auteur":"Nom Prénom","editeur":"","annee":2020,"isbn":"","categorie":"","sousCategorie":"","rayonSuggere":"","motif":""}
 
 - "auteur" au format « Nom Prénom » (exemple : « Kahneman Daniel »).
 - "isbn" au format ISBN-13 sans tirets.
@@ -484,7 +488,24 @@ Réponds UNIQUEMENT par un objet JSON, sans texte autour ni balises Markdown :
 - "sousCategorie" vaut exactement l'une des valeurs autorisées pour cette catégorie :
 Académique : ${SOUS_CATEGORIES["Académique"].join(" | ")}
 Roman : ${SOUS_CATEGORIES["Roman"].join(" | ")}
-BD : ${SOUS_CATEGORIES["BD"].join(" | ")}`;
+BD : ${SOUS_CATEGORIES["BD"].join(" | ")}
+
+CE QUE TU FAIS QUAND AUCUN RAYON NE CONVIENT
+
+Ne force pas un rangement approximatif. Un ouvrage rangé dans un rayon qui
+ne lui correspond pas est introuvable ensuite, et l'erreur ne se voit jamais.
+
+Si aucun rayon de la liste ne convient réellement :
+- mets "sousCategorie" à "Non classé" ;
+- mets dans "rayonSuggere" le nom court du rayon qui manquerait à cette
+  classification (deux à quatre mots, dans le même style que les autres) ;
+- mets dans "motif" une phrase disant pourquoi aucun rayon existant ne va.
+
+Exemple : un catalogue d'exposition de peinture n'entre ni dans les rayons
+académiques, ni dans le roman, ni dans la bande dessinée — il appellerait un
+rayon « Art & histoire de l'art ».
+
+Si en revanche un rayon convient, laisse "rayonSuggere" et "motif" vides.`;
 
   const d = await appelerAnthropic({
     model: MODELE,
@@ -495,8 +516,24 @@ BD : ${SOUS_CATEGORIES["BD"].join(" | ")}`;
 
   const info = extraireJson((d.content ?? []).filter(b => b.type === "text").map(b => b.text).join("\n"));
 
+  /* La categorie reste contrainte a la liste fermee : elle commande le reste
+     de l'application. Le RAYON, lui, retombe desormais sur « Non classé »
+     plutot que sur une chaine vide.
+
+     La difference n'est pas cosmetique. Un champ vide ne dit pas s'il est
+     vide parce que le modele a echoue, parce que le livre est introuvable,
+     ou parce que la classification n'a pas ce rayon. « Non classé » repond a
+     la question, et rayonSuggere dit ce qu'il faudrait ajouter. */
   if (!SOUS_CATEGORIES[info.categorie]) { info.categorie = ""; info.sousCategorie = ""; }
-  else if (!SOUS_CATEGORIES[info.categorie].includes(info.sousCategorie)) info.sousCategorie = "";
+  else if (!SOUS_CATEGORIES[info.categorie].includes(info.sousCategorie)) info.sousCategorie = "Non classé";
+
+  // Texte libre venu du modele : borne et nettoye avant de traverser l'API.
+  const propre = (v, n) => String(v ?? "").replace(/[ -]/g, " ").trim().slice(0, n);
+  info.rayonSuggere = propre(info.rayonSuggere, 60);
+  info.motif = propre(info.motif, 300);
+  // Une suggestion n'a de sens que si le livre est effectivement non classe.
+  if (info.sousCategorie !== "Non classé") { info.rayonSuggere = ""; info.motif = ""; }
+
   if (info.isbn) info.isbn = String(info.isbn).replace(/[^0-9Xx]/g, "");
   return info;
 }
