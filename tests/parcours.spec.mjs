@@ -155,6 +155,55 @@ test.describe("Page d'accueil publique", () => {
 
 /* ------------------------------------------------------------------------ */
 
+test.describe("Ajout d'un ouvrage", () => {
+
+  /* Ce contrôle existe à cause d'un défaut précis, constaté le 12/08/2026 sur
+     iPhone : le bouton « Scanner » était hors de l'écran, poussé à droite par
+     un champ de saisie qui refusait de rétrécir — min-width: auto, la valeur
+     par défaut d'un élément flex. Le bouton existait dans le HTML, tous les
+     contrôles passaient, et il était invisible.
+
+     Vérifier la présence d'un élément ne prouve donc rien. On mesure ici sa
+     position RÉELLE dans la fenêtre. */
+  test("sur téléphone, le bouton Scanner est entièrement visible", async ({ page }, infos) => {
+    test.skip(infos.project.name !== "mobile", "ne concerne que l'affichage téléphone");
+    const motDePasse = process.env.MOT_DE_PASSE;
+    test.skip(!motDePasse, "sans mot de passe, le formulaire d'ajout reste fermé");
+
+    const plaintes = surveiller(page);
+    await page.goto("/ma-bibliotheque.html", { waitUntil: "networkidle" });
+
+    await page.locator("#btnConnecter").click();
+    await page.locator("#cMdp").fill(motDePasse);
+    await page.locator("#btnConnexion").click();
+    await expect(page.locator("#ajouter")).toBeVisible();
+
+    await page.locator("#ajouter").click();
+    const bouton = page.locator("#btnScanner");
+    await expect(bouton, "le bouton Scanner n'apparaît pas").toBeVisible();
+
+    const cadre = await bouton.boundingBox();
+    const ecran = page.viewportSize();
+    expect(cadre.x, "le bouton déborde à gauche").toBeGreaterThanOrEqual(-1);
+    expect(cadre.x + cadre.width, `le bouton déborde de ${Math.round(cadre.x + cadre.width - ecran.width)} px à droite`)
+      .toBeLessThanOrEqual(ecran.width + 1);
+    expect(cadre.y + cadre.height, "le bouton est sous la ligne de flottaison")
+      .toBeLessThanOrEqual(ecran.height + 1);
+
+    // Une cible tactile confortable fait au moins 44 points de côté.
+    expect(cadre.height, "cible tactile trop petite").toBeGreaterThanOrEqual(40);
+
+    // La page elle-même ne doit pas défiler latéralement.
+    const l = await page.evaluate(() => ({
+      doc: document.documentElement.scrollWidth, vue: window.innerWidth }));
+    expect(l.doc, "le formulaire déborde horizontalement").toBeLessThanOrEqual(l.vue + 1);
+
+    expect(plaintes, "le navigateur s'est plaint :\n  " + plaintes.join("\n  ")).toEqual([]);
+  });
+});
+
+/* ------------------------------------------------------------------------ */
+
 test.describe("Ce qui doit rester fermé", () => {
 
   test("aucun ouvrage personnel dans la page servie à un visiteur", async ({ page, request }) => {

@@ -197,6 +197,10 @@ jobs:
       - name: Parcours en navigateur réel
         env:
           BASE: https://biblio.xavier-holingue.eu
+          # Le formulaire d'ajout n'existe que pour une session ouverte :
+          # sans mot de passe, la vérification d'affichage du bouton
+          # « Scanner » est ignorée plutôt que faussement réussie.
+          MOT_DE_PASSE: ${{ secrets.MOT_DE_PASSE_BIBLIO }}
         timeout-minutes: 10
         run: npx playwright test --config tests/playwright.config.mjs
 

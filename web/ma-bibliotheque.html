@@ -223,8 +223,28 @@
     padding: 12px; margin-bottom: 18px;
   }
   .recherche-isbn p { margin: 0 0 8px; font-size: 13px; color: var(--ink-soft); }
-  .ligne-isbn { display: flex; gap: 8px; }
-  .ligne-isbn input { flex: 1; }
+
+  /* min-width: 0 — la correction du 12/08/2026.
+     Un élément flex a par défaut min-width: auto : il refuse de descendre
+     sous la largeur de son contenu. L'input ne rétrécissait donc pas, et
+     poussait le bouton « Scanner » hors de l'écran sur téléphone. Le bouton
+     existait, il était simplement invisible. */
+  .ligne-isbn { display: flex; gap: 8px; flex-wrap: wrap; align-items: stretch; }
+  .ligne-isbn input { flex: 1 1 11rem; min-width: 0; }
+  .ligne-isbn .btn { flex: 0 0 auto; }
+
+  /* Sur téléphone, scanner est l'intention principale : le reste est un
+     repli. Le bouton passe donc en tête, pleine largeur, et se distingue
+     du bouton de recherche textuelle. */
+  .btn-scanner {
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  }
+  .btn-scanner::before {
+    content: ""; width: 15px; height: 12px; flex: none;
+    background: currentColor;
+    -webkit-mask: repeating-linear-gradient(90deg, #000 0 2px, transparent 2px 4px);
+    mask: repeating-linear-gradient(90deg, #000 0 2px, transparent 2px 4px);
+  }
   .etat { font-size: 13px; margin-top: 8px; min-height: 18px; }
   .etat.err { color: var(--roman); }
 
@@ -289,7 +309,49 @@
   .pied { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 34px; padding-top: 18px; border-top: 1px solid var(--rule); }
   .sauvegarde { font-family: var(--mono); font-size: 11px; color: var(--ink-soft); margin-left: auto; align-self: center; }
 
+  /* ---------- Téléphone ----------
+     Trois corrections qui se voient tout de suite :
+
+     1. La fenêtre occupe l'écran entier. Une boîte flottante de 560 px sur
+        un écran de 390 px oblige à faire défiler dans deux directions.
+     2. Les actions restent collées en bas. Le formulaire d'ajout est long ;
+        « Enregistrer » ne doit pas se mériter au bout d'un défilement.
+     3. Les champs passent à 16 px. En dessous, iOS agrandit automatiquement
+        la page à chaque mise au point dans un champ, et ne la réduit jamais
+        ensuite : on se retrouve à faire défiler latéralement pour rien. */
   @media (max-width: 560px) {
+    /* dialog[open], et non dialog : une fenêtre fermée est masquée par la
+       feuille de style du navigateur avec « display: none ». Un
+       « display: flex » non restreint l'écraserait, et TOUTES les fenêtres
+       — connexion, fiche, formulaire, scanner — s'afficheraient en
+       permanence, empilées sous la page. */
+    dialog[open] {
+      max-width: none; width: 100%; height: 100dvh; max-height: 100dvh;
+      margin: 0; border: none; border-radius: 0;
+      display: flex; flex-direction: column;
+    }
+    .modale-corps {
+      padding: 18px 16px calc(env(safe-area-inset-bottom) + 16px);
+      overflow-y: auto; flex: 1; -webkit-overflow-scrolling: touch;
+    }
+    .actions {
+      position: sticky; bottom: 0; margin: 18px -16px 0;
+      padding: 12px 16px calc(env(safe-area-inset-bottom) + 12px);
+      background: var(--paper); border-top: 1px solid var(--rule);
+    }
+    .actions .btn { flex: 1 1 auto; padding: 13px 14px; font-size: 15px; }
+    .actions .gauche { flex: 1 1 100%; order: 3; margin-right: 0; }
+
+    input[type="search"], input[type="text"], input[type="number"],
+    input[type="email"], input[type="password"], select, textarea { font-size: 16px; }
+
+    /* Scanner d'abord, saisie ensuite. */
+    .ligne-isbn { flex-direction: column; }
+    .ligne-isbn .btn { width: 100%; padding: 14px; font-size: 16px; }
+    .btn-scanner { order: -1; }
+    .btn-scanner::before { width: 19px; height: 15px; }
+    #btnChercher { background: transparent; color: var(--ink); }
+
     h1 { font-size: 26px; }
     .mosaique { height: 220px; }
     .duo { grid-template-columns: 1fr; }
@@ -1656,7 +1718,14 @@ function estEan13(code) {
 window.scannerOutils = { estEan13 };
 
 const capable = window.isSecureContext && !!navigator.mediaDevices?.getUserMedia;
-if (capable) $("btnScanner").hidden = false;
+if (capable) {
+  $("btnScanner").hidden = false;
+  // La consigne doit refléter ce qui est proposé. Sur un poste sans caméra,
+  // parler de code-barres désignerait un bouton qui n'existe pas.
+  $("blocIsbn").querySelector("p").textContent =
+    "Scannez le code-barres, ou saisissez un ISBN ou un titre : "
+    + "les informations sont retrouvées et classées automatiquement.";
+}
 
 let flux = null, scanne = null, module = null;
 
