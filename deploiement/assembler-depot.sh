@@ -127,7 +127,10 @@ echo "-- Ni secret ni donnee personnelle dans le depot --"
 # On exige donc une valeur LITTERALE : ni « $ » ni guillemet en tete, et
 # au moins huit caracteres. Un vrai secret colle par megarde correspond ;
 # une variable, non.
-secrets=$(grep -rlE "sk-ant-api[0-9]{2}-[A-Za-z0-9_-]{30,}|^(MOT_DE_PASSE|PGPASSWORD|ANTHROPIC_API_KEY)=[^\$\"'[:space:]]{8,}" \
+# « AIza… » est le prefixe des clefs Google. Ajoute le 12/08/2026, quand une
+# clef Books est entree dans le circuit : le motif precedent ne l'aurait pas
+# vue passer, et rien n'aurait signale sa presence dans un fichier pousse.
+secrets=$(grep -rlE "sk-ant-api[0-9]{2}-[A-Za-z0-9_-]{30,}|AIza[0-9A-Za-z_-]{30,}|^(MOT_DE_PASSE|PGPASSWORD|ANTHROPIC_API_KEY|CLE_GOOGLE_BOOKS)=[^\$\"'[:space:]]{8,}" \
   "${DEPOT}" --exclude-dir=.git --exclude-dir=node_modules --exclude='*.exemple' 2>/dev/null | head -5)
 if [ -n "${secrets}" ]; then
   echo "  ALERTE valeurs sensibles trouvees :"
