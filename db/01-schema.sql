@@ -66,3 +66,25 @@ drop trigger if exists books_touch_updated_at on public.books;
 create trigger books_touch_updated_at
   before update on public.books
   for each row execute function public.touch_updated_at();
+
+/* ---------------------------------------------------------------------------
+   RAYONS AJOUTÉS
+
+   Les treize rayons d'origine restent dans le code : ils sont stables et
+   servent de garantie. Cette table ne contient QUE les rayons ajoutés en
+   cours de route, quand un ouvrage n'entre dans aucun des rayons prévus.
+
+   Pourquoi ne pas tout mettre en base ? Parce qu'une table vide ou une
+   requête ratée priverait alors l'application de toute classification. Ici,
+   le pire cas est de perdre les ajouts — le socle tient.
+
+   Ajoutée le 12/08/2026, après « Pop Forever », catalogue d'exposition d'art
+   qui n'entrait dans aucun rayon et que le modèle avait rangé en
+   « Management & leadership » faute d'avoir le droit de dire non.
+   --------------------------------------------------------------------------- */
+create table if not exists public.rayons_ajoutes (
+  categorie   text        not null check (categorie in ('Académique', 'Roman', 'BD')),
+  libelle     text        not null check (length(btrim(libelle)) between 2 and 60),
+  cree_le     timestamptz not null default now(),
+  primary key (categorie, libelle)
+);

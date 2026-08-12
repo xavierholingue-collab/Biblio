@@ -638,9 +638,24 @@ async function demarrer() {
   }
 }
 
+/* Les rayons ajoutes vivent en base ; le socle reste dans le code. Si
+   l'appel echoue, on garde le socle : mieux vaut une liste incomplete
+   qu'une application sans classification. */
+async function chargerRayons() {
+  try {
+    const vivants = await api("/rayons");
+    for (const cat of Object.keys(SOUS_CATEGORIES)) {
+      if (Array.isArray(vivants[cat]) && vivants[cat].length) SOUS_CATEGORIES[cat] = vivants[cat];
+    }
+  } catch (e) {
+    console.error("Rayons ajoutes non charges, socle seul :", e.message);
+  }
+}
+
 async function entrerDansApp() {
   document.getElementById("app").hidden = false;
   appliquerDroits();
+  await chargerRayons();
   await charger();
   construirePuces();
   construireExemples();
@@ -1623,11 +1638,7 @@ async function chercherLivre() {
        choisi le moins mauvais. Un rangement faux ne se voit jamais — on
        s'en aperçoit le jour où l'on cherche un ouvrage qui n'est pas là. */
     if (info.rayonSuggere) {
-      etatEl.className = "etat";
-      etatEl.innerHTML =
-        "Aucun rayon existant ne convient : classé <strong>Non classé</strong>."
-        + "<br>Rayon suggéré : <strong>" + echapper(info.rayonSuggere) + "</strong>"
-        + (info.motif ? "<br><span style=\"color:var(--ink-soft)\">" + echapper(info.motif) + "</span>" : "");
+      afficherSuggestionRayon(info);
     } else {
       etatEl.textContent = "Informations trouvées — vérifiez puis enregistrez.";
     }
@@ -1637,6 +1648,72 @@ async function chercherLivre() {
   } finally {
     btn.disabled = false;
   }
+}
+
+/* Le modele propose un rayon absent de la classification. Vous l'acceptez
+   tel quel, vous le renommez, ou vous l'ignorez — le livre reste alors en
+   « Non classé », ce qui est un etat honnete et non un echec.
+
+   Le champ est modifiable : la formulation du modele est une proposition,
+   pas une decision. C'est votre bibliotheque. */
+function afficherSuggestionRayon(info) {
+  const etatEl = document.getElementById("etatRecherche");
+  etatEl.className = "etat";
+  etatEl.replaceChildren();
+
+  const titre = document.createElement("div");
+  titre.innerHTML = "Aucun rayon existant ne convient — classé <strong>Non classé</strong>.";
+  etatEl.appendChild(titre);
+
+  if (info.motif) {
+    const m = document.createElement("div");
+    m.style.color = "var(--ink-soft)";
+    m.textContent = info.motif;
+    etatEl.appendChild(m);
+  }
+
+  const ligne = document.createElement("div");
+  ligne.className = "ligne-isbn";
+  ligne.style.marginTop = "8px";
+
+  const champ = document.createElement("input");
+  champ.type = "text";
+  champ.value = info.rayonSuggere;
+  champ.setAttribute("aria-label", "Nom du rayon à créer");
+  champ.maxLength = 60;
+
+  const accepter = document.createElement("button");
+  accepter.type = "button";
+  accepter.className = "btn";
+  accepter.textContent = "Créer ce rayon";
+
+  accepter.onclick = async () => {
+    const libelle = champ.value.trim();
+    const categorie = document.getElementById("fCat").value || info.categorie;
+    if (libelle.length < 2) { annoncer("Nom de rayon trop court.", true); return; }
+    accepter.disabled = true;
+    try {
+      const r = await api("/rayons", { corps: { categorie, libelle } });
+      // La reponse porte la liste a jour : on s'aligne dessus plutot que de
+      // deviner ou inserer le nouveau rayon.
+      for (const c of Object.keys(SOUS_CATEGORIES)) {
+        if (Array.isArray(r.rayons?.[c])) SOUS_CATEGORIES[c] = r.rayons[c];
+      }
+      majSousDuFormulaire();
+      document.getElementById("fSous").value = r.libelle;
+      majSousCategories();
+      etatEl.className = "etat";
+      etatEl.textContent = "Rayon « " + r.libelle + " » créé et appliqué.";
+    } catch (e) {
+      accepter.disabled = false;
+      etatEl.className = "etat err";
+      etatEl.textContent = "Création impossible : " + e.message;
+    }
+  };
+
+  ligne.appendChild(champ);
+  ligne.appendChild(accepter);
+  etatEl.appendChild(ligne);
 }
 
 /* =========================================================================

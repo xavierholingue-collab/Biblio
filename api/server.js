@@ -94,6 +94,40 @@ const SOUS_CATEGORIES = {
   "Roman": ["Polar & thriller", "Littérature générale", "SF & humour", "Classique", "Non classé"],
 };
 
+/* Les rayons effectivement disponibles : le socle figé dans le code, plus
+   ceux que vous avez acceptés en cours de route. Relu à chaque appel — la
+   liste change rarement, et une liste périmée rangerait mal. */
+async function rayonsDisponibles() {
+  const listes = {};
+  for (const c of Object.keys(SOUS_CATEGORIES)) listes[c] = [...SOUS_CATEGORIES[c]];
+  try {
+    const { rows } = await bd.query(
+      "select categorie, libelle from rayons_ajoutes order by libelle");
+    for (const r of rows) {
+      if (!listes[r.categorie] || listes[r.categorie].includes(r.libelle)) continue;
+      // « Non classé » reste en dernier : c'est le refuge, pas un rayon.
+      listes[r.categorie].splice(listes[r.categorie].length - 1, 0, r.libelle);
+    }
+  } catch (e) {
+    // La table peut manquer sur une base ancienne. Le socle suffit à
+    // fonctionner, et le dire vaut mieux que d'échouer.
+    console.error("rayons_ajoutes illisible, socle seul :", e.message);
+  }
+  return listes;
+}
+
+async function ajouterRayon({ categorie, libelle }) {
+  const l = String(libelle ?? "").replace(/\s+/g, " ").trim();
+  if (!SOUS_CATEGORIES[categorie]) { const e = new Error("Catégorie inconnue."); e.statut = 400; throw e; }
+  if (l.length < 2 || l.length > 60) { const e = new Error("Le nom du rayon doit faire 2 à 60 caractères."); e.statut = 400; throw e; }
+  if (l === "Non classé") { const e = new Error("« Non classé » existe déjà."); e.statut = 400; throw e; }
+
+  await bd.query(
+    "insert into rayons_ajoutes (categorie, libelle) values ($1, $2) on conflict do nothing",
+    [categorie, l]);
+  return { categorie, libelle: l, rayons: await rayonsDisponibles() };
+}
+
 function json(rep, corps, statut = 200, entetes = {}) {
   const texte = JSON.stringify(corps);
   rep.writeHead(statut, {
@@ -475,6 +509,11 @@ async function chercherLivre({ requete }) {
   requete = String(requete ?? "").trim().slice(0, 300);
   if (!requete) { const e = new Error("Indiquez un ISBN ou un titre."); e.statut = 400; throw e; }
 
+  // La liste proposee au modele doit inclure les rayons que vous avez
+  // acceptes depuis : sinon il rangerait en « Non classé » un ouvrage dont
+  // le rayon existe desormais.
+  const RAYONS = await rayonsDisponibles();
+
   const consigne = `Trouve les informations bibliographiques du livre correspondant à : "${requete}".
 Utilise la recherche web pour vérifier. N'invente aucune donnée : si une information
 est introuvable, mets une chaîne vide ou null.
@@ -486,9 +525,9 @@ Réponds UNIQUEMENT par un objet JSON, sans texte autour ni balises Markdown :
 - "isbn" au format ISBN-13 sans tirets.
 - "categorie" vaut exactement l'une de : "Académique", "Roman", "BD".
 - "sousCategorie" vaut exactement l'une des valeurs autorisées pour cette catégorie :
-Académique : ${SOUS_CATEGORIES["Académique"].join(" | ")}
-Roman : ${SOUS_CATEGORIES["Roman"].join(" | ")}
-BD : ${SOUS_CATEGORIES["BD"].join(" | ")}
+Académique : ${RAYONS["Académique"].join(" | ")}
+Roman : ${RAYONS["Roman"].join(" | ")}
+BD : ${RAYONS["BD"].join(" | ")}
 
 CE QUE TU FAIS QUAND AUCUN RAYON NE CONVIENT
 
@@ -524,8 +563,8 @@ Si en revanche un rayon convient, laisse "rayonSuggere" et "motif" vides.`;
      vide parce que le modele a echoue, parce que le livre est introuvable,
      ou parce que la classification n'a pas ce rayon. « Non classé » repond a
      la question, et rayonSuggere dit ce qu'il faudrait ajouter. */
-  if (!SOUS_CATEGORIES[info.categorie]) { info.categorie = ""; info.sousCategorie = ""; }
-  else if (!SOUS_CATEGORIES[info.categorie].includes(info.sousCategorie)) info.sousCategorie = "Non classé";
+  if (!RAYONS[info.categorie]) { info.categorie = ""; info.sousCategorie = ""; }
+  else if (!RAYONS[info.categorie].includes(info.sousCategorie)) info.sousCategorie = "Non classé";
 
   // Texte libre venu du modele : borne et nettoye avant de traverser l'API.
   const propre = (v, n) => String(v ?? "").replace(/[ -]/g, " ").trim().slice(0, n);
@@ -583,6 +622,12 @@ const serveur = createServer(async (req, rep) => {
       return json(rep, await statistiques(session));
     }
 
+    // Lecture ouverte : la liste des rayons n'est pas une donnee sensible,
+    // et la page publique en a besoin pour nommer ce qu'elle affiche.
+    if (chemin === "/api/rayons" && req.method === "GET") {
+      return json(rep, await rayonsDisponibles());
+    }
+
     /* --- Les traitements qui coûtent de l'argent --- */
     const routesIA = ["/api/resume", "/api/recommandation", "/api/recherche-livre"];
     if (routesIA.includes(chemin) && !session && !IA_PUBLIQUE) {
@@ -627,6 +672,10 @@ const serveur = createServer(async (req, rep) => {
 
     if (chemin === "/api/recommandation" && req.method === "POST") {
       return json(rep, await recommander(await lireCorps(req)));
+    }
+
+    if (chemin === "/api/rayons" && req.method === "POST") {
+      return json(rep, await ajouterRayon(await lireCorps(req)));
     }
 
     if (chemin === "/api/recherche-livre" && req.method === "POST") {
