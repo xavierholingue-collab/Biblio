@@ -209,6 +209,28 @@ test.describe("Ce qui doit rester fermé", () => {
     }
   });
 
+  /* Le lecteur de codes-barres tient en deux fichiers servis par Caddy et en
+     un mot-clef de la politique de contenu. Si l'un des trois manque, le
+     bouton « Scanner » ouvre la caméra puis échoue — et l'échec ne se voit
+     que sur un téléphone, devant une étagère. C'est le genre de panne qu'on
+     découvre au pire moment. */
+  test("le lecteur de codes-barres est réellement livré", async ({ request }) => {
+    const mjs = await request.get("/scanner/zbar-wasm.mjs");
+    expect(mjs.status(), "le module du scanner n'est pas servi").toBe(200);
+    expect(mjs.headers()["content-type"] ?? "", "servi avec un type qui empêche l'import")
+      .toMatch(/javascript/);
+
+    const wasm = await request.get("/scanner/zbar.wasm");
+    expect(wasm.status(), "le WebAssembly du scanner n'est pas servi").toBe(200);
+    const octets = (await wasm.body()).length;
+    expect(octets, "fichier WebAssembly suspect : " + octets + " octets")
+      .toBeGreaterThan(100_000);
+
+    const csp = (await request.get("/")).headers()["content-security-policy"] ?? "";
+    expect(csp, "sans 'wasm-unsafe-eval', le navigateur refusera d'instancier zbar")
+      .toContain("'wasm-unsafe-eval'");
+  });
+
   test("les tests et les dépendances ne sont pas servis", async ({ request }) => {
     for (const chemin of ["/test/test-fumee.js", "/node_modules/", "/test/"]) {
       const r = await request.get(chemin, { maxRedirects: 0 });

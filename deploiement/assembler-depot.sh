@@ -130,7 +130,12 @@ echo "-- Ni secret ni donnee personnelle dans le depot --"
 # « AIza… » est le prefixe des clefs Google. Ajoute le 12/08/2026, quand une
 # clef Books est entree dans le circuit : le motif precedent ne l'aurait pas
 # vue passer, et rien n'aurait signale sa presence dans un fichier pousse.
-secrets=$(grep -rlE "sk-ant-api[0-9]{2}-[A-Za-z0-9_-]{30,}|AIza[0-9A-Za-z_-]{30,}|^(MOT_DE_PASSE|PGPASSWORD|ANTHROPIC_API_KEY|CLE_GOOGLE_BOOKS)=[^\$\"'[:space:]]{8,}" \
+# « -I » ignore les fichiers binaires. Ajoute le 12/08/2026, quand zbar.wasm
+# (239 Ko de code compile) est entre dans web/ : sur un fichier binaire, un
+# motif comme « AIza » suivi de trente caracteres finit par correspondre par
+# hasard, et l'assemblage refuserait de pousser sans qu'aucun secret ne soit
+# en cause. Un garde-fou qui crie au loup finit par etre desactive.
+secrets=$(grep -rlIE "sk-ant-api[0-9]{2}-[A-Za-z0-9_-]{30,}|AIza[0-9A-Za-z_-]{30,}|^(MOT_DE_PASSE|PGPASSWORD|ANTHROPIC_API_KEY|CLE_GOOGLE_BOOKS)=[^\$\"'[:space:]]{8,}" \
   "${DEPOT}" --exclude-dir=.git --exclude-dir=node_modules --exclude='*.exemple' 2>/dev/null | head -5)
 if [ -n "${secrets}" ]; then
   echo "  ALERTE valeurs sensibles trouvees :"

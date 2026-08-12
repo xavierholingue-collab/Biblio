@@ -1,5 +1,13 @@
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- viewport-fit=cover : sans lui, l'aperçu de la caméra laisse des bandes
+     blanches sous l'encoche des iPhone récents. -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- Ajoutée à l'écran d'accueil, l'application s'ouvre sans barre d'adresse
+     et conserve sa session — utile pour scanner devant une étagère. -->
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Bibliothèque">
+<meta name="theme-color" content="#E9EBE6">
 <title>Ma bibliothèque</title>
 <style>
   :root {
@@ -220,6 +228,37 @@
   .etat { font-size: 13px; margin-top: 8px; min-height: 18px; }
   .etat.err { color: var(--roman); }
 
+  /* ---------- Scanner de code-barres ----------
+     L'aperçu occupe tout l'écran : sur un téléphone tenu à bout de bras,
+     une vignette est inutilisable. */
+  #scanner { border: none; padding: 0; max-width: 100vw; max-height: 100vh;
+             width: 100vw; height: 100dvh; background: #000; }
+  #scanner::backdrop { background: #000; }
+  .scan-cadre { position: relative; width: 100%; height: 100%; overflow: hidden; }
+  .scan-cadre video { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+  /* Une fenêtre de visée. Elle ne restreint pas la lecture — zbar examine
+     toute l'image — mais elle dit où placer le code, ce qui suffit à faire
+     tenir le téléphone à la bonne distance. */
+  .scan-visee {
+    position: absolute; left: 8%; right: 8%; top: 50%; transform: translateY(-50%);
+    height: 26%; border: 2px solid rgba(255,255,255,.9); border-radius: 6px;
+    box-shadow: 0 0 0 100vmax rgba(0,0,0,.45);
+  }
+  .scan-aide {
+    position: absolute; left: 0; right: 0; bottom: calc(env(safe-area-inset-bottom) + 92px);
+    text-align: center; color: #fff; font-size: 15px; padding: 0 24px;
+    text-shadow: 0 1px 3px rgba(0,0,0,.8);
+  }
+  .scan-aide.err { color: #FFB3B3; }
+  .scan-fermer {
+    position: absolute; left: 50%; transform: translateX(-50%);
+    bottom: calc(env(safe-area-inset-bottom) + 24px);
+    background: #fff; color: #111; border: none; border-radius: 999px;
+    padding: 13px 34px; font-size: 16px; font-family: var(--sans);
+  }
+  .btn-scanner { white-space: nowrap; }
+
   /* ---------- Fiche de lecture ---------- */
   .fiche-haut { display: grid; grid-template-columns: 130px 1fr; gap: 20px; }
   .fiche-haut .couv { width: 130px; }
@@ -384,6 +423,10 @@
       <div class="ligne-isbn">
         <input type="text" id="rechercheIsbn" placeholder="9782081285750 ou « Nexus Harari »">
         <button class="btn" id="btnChercher">Retrouver</button>
+        <!-- Masqué par défaut : révélé seulement si l'appareil a une caméra
+             utilisable. Un bouton qui ne peut rien faire vaut moins que pas
+             de bouton du tout. -->
+        <button class="btn btn-scanner" id="btnScanner" type="button" hidden>Scanner</button>
       </div>
       <div class="etat" id="etatRecherche"></div>
     </div>
@@ -414,6 +457,17 @@
       <button class="btn creux" id="btnAnnuler">Annuler</button>
       <button class="btn" id="btnEnregistrer">Enregistrer</button>
     </div>
+  </div>
+</dialog>
+
+<dialog id="scanner" aria-label="Scanner un code-barres">
+  <div class="scan-cadre">
+    <!-- playsinline et muted sont indispensables sur iPhone : sans eux,
+         Safari ouvre la vidéo en plein écran natif et le scan n'a plus lieu. -->
+    <video id="scanVideo" playsinline muted autoplay></video>
+    <div class="scan-visee" aria-hidden="true"></div>
+    <p class="scan-aide" id="scanAide">Placez le code-barres dans le cadre.</p>
+    <button class="scan-fermer" id="scanFermer" type="button">Annuler</button>
   </div>
 </dialog>
 
@@ -1565,4 +1619,157 @@ addEventListener("resize", () => {
 });
 
 demarrer();
+</script>
+
+<script type="module">
+/* =========================================================================
+   12. SCANNER DE CODE-BARRES
+
+   POURQUOI CE CODE EXISTE
+   Safari n'implémente pas l'API BarcodeDetector, et tous les navigateurs
+   iOS reposent sur WebKit : Chrome sur iPhone n'y changerait rien. Il faut
+   donc embarquer un décodeur. C'est zbar, compilé en WebAssembly — 239 Ko,
+   chargés SEULEMENT au premier appui sur « Scanner », jamais à l'ouverture
+   de la page.
+
+   CE QUE LE SCANNER NE FAIT PAS
+   Il n'enregistre rien. Il remplit le champ de recherche et déclenche la
+   recherche existante ; le formulaire se remplit, et c'est vous qui relisez
+   et enregistrez. Un livre mal identifié entré sans relecture serait plus
+   coûteux à retrouver qu'à saisir à la main.
+   ========================================================================= */
+
+const $ = id => document.getElementById(id);
+
+/* La clé de contrôle d'un EAN-13. zbar se trompe rarement, mais « rarement »
+   n'est pas « jamais » : un chiffre mal lu produit un ISBN plausible qui
+   ramènerait le mauvais livre. La clé attrape ces cas presque toujours. */
+function estEan13(code) {
+  if (!/^\d{13}$/.test(code)) return false;
+  const somme = [...code.slice(0, 12)]
+    .reduce((a, c, i) => a + Number(c) * (i % 2 ? 3 : 1), 0);
+  return (10 - (somme % 10)) % 10 === Number(code[12]);
+}
+
+// Exposé pour les tests : la vérification doit pouvoir être éprouvée sans
+// caméra ni WebAssembly.
+window.scannerOutils = { estEan13 };
+
+const capable = window.isSecureContext && !!navigator.mediaDevices?.getUserMedia;
+if (capable) $("btnScanner").hidden = false;
+
+let flux = null, scanne = null, module = null;
+
+function aide(texte, erreur = false) {
+  const el = $("scanAide");
+  el.textContent = texte;
+  el.className = "scan-aide" + (erreur ? " err" : "");
+}
+
+function arreter() {
+  cancelAnimationFrame(scanne);
+  scanne = null;
+  // Sans cet arrêt explicite, la caméra reste allumée après la fermeture —
+  // témoin lumineux compris. C'est le défaut le plus courant de ce genre
+  // d'interface, et le plus désagréable.
+  flux?.getTracks().forEach(t => t.stop());
+  flux = null;
+  $("scanVideo").srcObject = null;
+  if ($("scanner").open) $("scanner").close();
+}
+
+async function ouvrir() {
+  const dlg = $("scanner");
+  dlg.showModal();
+  aide("Ouverture de la caméra…");
+
+  try {
+    flux = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 } },
+      audio: false,
+    });
+  } catch (e) {
+    // Distinguer les causes : un refus se corrige dans les réglages, une
+    // absence de caméra ne se corrige pas. Dire « erreur » aux deux ne
+    // rendrait service à personne.
+    aide(e.name === "NotAllowedError"
+      ? "Accès à la caméra refusé. Autorisez-le dans les réglages du navigateur."
+      : e.name === "NotFoundError"
+        ? "Aucune caméra disponible sur cet appareil."
+        : "Caméra indisponible : " + e.message, true);
+    return;
+  }
+
+  const video = $("scanVideo");
+  video.srcObject = flux;
+  try { await video.play(); } catch { /* certains navigateurs jouent seuls */ }
+
+  if (!module) {
+    aide("Chargement du lecteur…");
+    try {
+      module = await import("/scanner/zbar-wasm.mjs");
+    } catch (e) {
+      aide("Lecteur de code-barres indisponible : " + e.message, true);
+      return;
+    }
+  }
+
+  aide("Placez le code-barres dans le cadre.");
+  boucler(video);
+}
+
+function boucler(video) {
+  const toile = document.createElement("canvas");
+  const ctx = toile.getContext("2d", { willReadFrequently: true });
+  let precedent = null, dernier = 0;
+
+  const tour = async (temps) => {
+    if (!flux) return;                       // fermé entre-temps
+    scanne = requestAnimationFrame(tour);
+
+    // Six analyses par seconde suffisent et laissent le téléphone respirer.
+    if (temps - dernier < 160) return;
+    dernier = temps;
+    if (video.readyState < 2 || !video.videoWidth) return;
+
+    // On réduit l'image : au-delà de 960 pixels de large, la lecture n'est
+    // pas meilleure et chaque analyse coûte deux fois plus.
+    const echelle = Math.min(1, 960 / video.videoWidth);
+    toile.width = Math.round(video.videoWidth * echelle);
+    toile.height = Math.round(video.videoHeight * echelle);
+    ctx.drawImage(video, 0, 0, toile.width, toile.height);
+
+    let lus;
+    try {
+      lus = await module.scanImageData(ctx.getImageData(0, 0, toile.width, toile.height));
+    } catch { return; }
+
+    for (const l of lus) {
+      const code = l.decode();
+      if (!estEan13(code)) continue;
+
+      /* Deux lectures identiques d'affilée avant d'accepter. Une seule
+         lecture suffit dans 99 % des cas ; la centième fait entrer un
+         mauvais livre, et l'erreur ne se voit qu'au moment où l'on cherche
+         un ouvrage qui n'est pas là. Le coût est un dixième de seconde. */
+      if (code !== precedent) { precedent = code; aide("Lecture en cours…"); return; }
+
+      navigator.vibrate?.(60);
+      arreter();
+      $("rechercheIsbn").value = code;
+      $("etatRecherche").textContent = "Code-barres lu : " + code;
+      $("btnChercher").click();
+      return;
+    }
+  };
+  scanne = requestAnimationFrame(tour);
+}
+
+if (capable) {
+  $("btnScanner").onclick = ouvrir;
+  $("scanFermer").onclick = arreter;
+  // Échap et le geste de retour ferment la fenêtre : la caméra doit
+  // s'éteindre dans ces cas-là aussi.
+  $("scanner").addEventListener("close", () => { if (flux) arreter(); });
+}
 </script>

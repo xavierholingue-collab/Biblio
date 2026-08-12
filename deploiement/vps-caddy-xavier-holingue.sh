@@ -107,7 +107,13 @@ biblio.xavier-holingue.eu {
 			# empreinte sha256 — mais elle doit etre recalculee a chaque
 			# modification de la page, donc par la chaine de livraison.
 			# A faire quand Biblio evoluera moins vite.
-			Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://covers.openlibrary.org https://books.google.com https://*.googleusercontent.com; connect-src 'self' https://www.googleapis.com; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+			# 'wasm-unsafe-eval' : ajoute le 12/08/2026 pour le lecteur de
+			# codes-barres. Safari n'implemente pas BarcodeDetector, il faut
+			# donc embarquer zbar compile en WebAssembly, et instancier un
+			# module WebAssembly releve de script-src. Ce mot-clef n'autorise
+			# QUE cela : il ne rouvre ni eval() ni les scripts distants.
+			# media-src blob: : l'apercu de la camera est un flux blob.
+			Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://covers.openlibrary.org https://books.google.com https://*.googleusercontent.com; connect-src 'self' https://www.googleapis.com; media-src 'self' blob:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
 			# L'application evolue : pas de version figee en cache.
 			Cache-Control "no-cache"
 			-Server

@@ -331,6 +331,41 @@ const attendre = ms => new Promise(r => setTimeout(r, ms));
   const csv = lire("versCsv()");
   verifier("CSV avec colonne sphere", csv.split("\n")[0].includes("sphere"));
 
+  /* ------------------------------- Scanner --------------------------------
+     jsdom n'exécute pas les scripts de type module et n'a ni caméra ni
+     WebAssembly. On ne peut donc pas éprouver le scan lui-même ici — c'est
+     une limite réelle, pas un oubli. En revanche, la vérification de la clé
+     de contrôle EAN-13 est du calcul pur : elle doit être éprouvée, car
+     c'est elle qui empêche une lecture erronée de ramener le mauvais livre. */
+  verifier("bouton Scanner présent et masqué sans caméra",
+    d.getElementById("btnScanner") !== null && d.getElementById("btnScanner").hidden,
+    d.getElementById("btnScanner") ? "visible" : "absent");
+  verifier("fenêtre de scan présente", d.getElementById("scanner") !== null);
+  verifier("la vidéo est jouable en ligne sur iPhone",
+    d.getElementById("scanVideo")?.hasAttribute("playsinline") === true);
+
+  const bloc = html.match(/<script type="module">([\s\S]*?)<\/script>/)?.[1];
+  verifier("bloc du scanner trouvé", !!bloc);
+  if (bloc) {
+    const source = bloc.match(/function estEan13[\s\S]*?\n}/)[0];
+    const estEan13 = new Function(source + "; return estEan13;")();
+
+    const valides = ["9782738149466", "9782226240101", "9782021428582", "9791095438663"];
+    const refuses = [
+      "9782738149467",   // dernier chiffre faux
+      "9782738149",      // trop court
+      "97827381494660",  // trop long
+      "978273814946X",   // caractère non numérique
+      "",
+    ];
+    verifier("clé EAN-13 : les ISBN réels sont acceptés",
+      valides.every(estEan13),
+      valides.filter(c => !estEan13(c)).join(", "));
+    verifier("clé EAN-13 : un chiffre faux est refusé",
+      refuses.every(c => !estEan13(c)),
+      refuses.filter(estEan13).join(", "));
+  }
+
   /* Déconnexion */
   d.getElementById("btnDeconnexion").dispatchEvent(new w.Event("click"));
   await attendre(60);
