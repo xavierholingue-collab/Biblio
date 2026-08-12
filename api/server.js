@@ -66,7 +66,13 @@ const bd = new pg.Pool({
   user: process.env.PGUSER ?? "biblio",
   password: process.env.PGPASSWORD,
   database: process.env.PGDATABASE ?? "biblio",
-  max: 8,
+  // Huit connexions en service. Le banc d'essai local abaisse cette valeur
+  // a 1 : PGlite, le PostgreSQL en WebAssembly qu'il utilise, n'accepte
+  // qu'une connexion a la fois. Le pool serialise alors les requetes au lieu
+  // de les paralleliser — c'est plus lent, et cela ne prouve rien sur le
+  // comportement en concurrence, mais cela permet de faire passer les
+  // requetes devant un vrai moteur avant de les livrer.
+  max: Number(process.env.PGMAX ?? 8),
 });
 
 /* ---------------------------------------------------------------- Outils */
@@ -189,6 +195,12 @@ async function statistiques(session) {
         count(distinct auteur)::int                            as auteurs,
         count(distinct sous_categorie)::int                     as rayons,
         round(avg(note)::numeric, 2)                                    as note_moyenne,
+        -- Sur combien d'ouvrages cette moyenne porte-t-elle ? avg() ignore
+        -- silencieusement les valeurs nulles : sans ce compte, « 4,32 »
+        -- s'affiche a cote de « 242 ouvrages » et se lit comme si les 242
+        -- etaient notes. Ils sont 57. Une moyenne sans son effectif est une
+        -- affirmation qu'on ne peut pas evaluer.
+        count(note)::int                                       as notes,
         min(annee)::int                                        as annee_min,
         max(annee)::int                                        as annee_max
       from books ${ou}`),

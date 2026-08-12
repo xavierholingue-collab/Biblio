@@ -81,20 +81,35 @@
   .externe .c { flex: 1; }
   .externe .t { font-family: var(--serif); font-size: 16px; }
 
-  /* ---------- Étagère ---------- */
-  .etagere {
-    display: flex; align-items: flex-end; gap: 1px;
-    height: 76px; margin: 22px 0 6px;
-    border-bottom: 2px solid var(--ink);
-    padding: 0 1px;
+  /* ---------- Mosaïque des rayons ----------
+     Aire ∝ nombre d'ouvrages, remplissage ∝ part correspondant au filtre
+     courant. Remplace l'ancienne étagère, dont la hauteur encodait la note :
+     185 ouvrages sur 242 n'en ayant pas, trois quarts des dos avaient la
+     même taille et la figure ne montrait rien. */
+  .mosaique {
+    position: relative; width: 100%;
+    height: clamp(180px, 26vw, 260px);
+    margin: 22px 0 8px;
   }
-  .dos {
-    flex: 1 1 0; min-width: 2px; border-radius: 1px 1px 0 0;
-    cursor: pointer; transition: transform .12s ease, filter .12s ease;
-    transform-origin: bottom; border: none; padding: 0;
+  .tuile {
+    position: absolute; overflow: hidden; border: 1px solid var(--rule);
+    background: var(--paper-2); color: var(--ink); text-align: left;
+    display: flex; flex-direction: column; justify-content: space-between;
+    padding: 7px 8px 0; cursor: pointer; font: inherit;
+    transition: background .12s ease, border-color .12s ease;
   }
-  .dos:hover, .dos:focus-visible { filter: brightness(1.35); transform: scaleY(1.06); outline: none; }
-  .dos.attenue { opacity: .22; }
+  .tuile:hover, .tuile:focus-visible { border-color: var(--ink); outline: none; z-index: 2; }
+  .tuile[aria-pressed="true"] { border-color: var(--ink); border-width: 2px; }
+  .tuile .nom {
+    font-size: 12px; line-height: 1.22; overflow: hidden;
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3;
+  }
+  .tuile .n { font-family: var(--mono); font-size: 10px; color: var(--ink-soft); margin-top: 3px; }
+  .tuile .jauge { height: 5px; margin: 5px -8px 0; background: var(--rule); flex: none; }
+  .tuile .jauge i { display: block; height: 100%; }
+  .tuile.muette { padding: 4px 5px 0; }
+  .tuile.muette .nom { display: none; }
+  .tuile.muette .n { margin-top: 0; font-size: 9px; }
   .legende {
     display: flex; gap: 18px; flex-wrap: wrap;
     font-family: var(--mono); font-size: 11px; color: var(--ink-soft);
@@ -237,7 +252,7 @@
 
   @media (max-width: 560px) {
     h1 { font-size: 26px; }
-    .etagere { height: 56px; }
+    .mosaique { height: 220px; }
     .duo { grid-template-columns: 1fr; }
     .droite { display: none; }
     .fiche-haut { grid-template-columns: 96px 1fr; gap: 14px; }
@@ -289,7 +304,7 @@
     <div class="reponse" id="reponseQuete" hidden></div>
   </section>
 
-  <div class="etagere" id="etagere" role="img" aria-label="Vue d'ensemble de la bibliothèque par catégorie"></div>
+  <div class="mosaique" id="mosaique"></div>
   <div class="legende" id="legende"></div>
 
   <div class="outils">
@@ -479,10 +494,23 @@ async function demarrer() {
     annoncer("Serveur injoignable. Les conteneurs sont-ils démarrés ?", true);
     return;
   }
+  // Un lien depuis la page d'accueil peut demander un rayon précis :
+  // /ma-bibliotheque.html?rayon=Philosophie. On applique le filtre AVANT
+  // le premier tracé, sinon la liste s'affiche entière puis se réduit.
+  //
+  // On ne retient que les rayons connus. Sans cette vérification, une URL
+  // fabriquée poserait dans etat.sous une valeur arbitraire : elle ne
+  // filtrerait rien de dangereux, mais l'application afficherait « aucun
+  // ouvrage » sans que le visiteur comprenne pourquoi.
+  const parametres = new URLSearchParams(location.search);
+  const rayon = parametres.get("rayon");
+  const connus = new Set(Object.values(SOUS_CATEGORIES).flat());
+  if (rayon && connus.has(rayon)) etat.sous = rayon;
+
   await entrerDansApp();
 
   // Un lien depuis la page d'accueil peut demander directement l'espace personnel.
-  if (!connecte && new URLSearchParams(location.search).get("espace") === "perso") {
+  if (!connecte && parametres.get("espace") === "perso") {
     ouvrirConnexion();
   }
 }
@@ -789,19 +817,138 @@ function trier(a, b) {
   }
 }
 
-function dessinerEtagere() {
-  const el = document.getElementById("etagere");
-  const visibles = new Set(filtrer().map(l => l.id));
-  el.innerHTML = "";
+/* -------------------------------------------------------------------------
+   PAVAGE « SQUARIFIÉ »  (Bruls, Huizing & van Wijk, 2000)
+
+   Découpe un rectangle en tuiles d'aires imposées, en cherchant des formes
+   proches du carré : à aire égale, un trait fin et un carré ne se comparent
+   pas à l'œil. Entrée triée par n décroissant ; sortie enrichie de x,y,w,h.
+   ------------------------------------------------------------------------- */
+function pavage(items, W, H) {
+  const total = items.reduce((s, i) => s + i.n, 0);
+  if (!total || W <= 0 || H <= 0) return [];
+
+  const echelle = (W * H) / total;
+  const file = items.map(i => Object.assign({}, i, { aire: i.n * echelle }));
+  const posees = [];
+  let x = 0, y = 0, w = W, h = H, i = 0;
+
+  const pire = (rangee, cote) => {
+    const s = rangee.reduce((a, b) => a + b.aire, 0);
+    if (s <= 0 || cote <= 0) return Infinity;
+    const max = Math.max.apply(null, rangee.map(r => r.aire));
+    const min = Math.min.apply(null, rangee.map(r => r.aire));
+    return Math.max((cote * cote * max) / (s * s), (s * s) / (cote * cote * min));
+  };
+
+  while (i < file.length && w > 0.5 && h > 0.5) {
+    const vertical = w >= h;
+    const cote = vertical ? h : w;
+    const rangee = [file[i]];
+    let j = i + 1;
+    while (j < file.length &&
+           pire(rangee.concat([file[j]]), cote) <= pire(rangee, cote)) {
+      rangee.push(file[j]); j++;
+    }
+    const s = rangee.reduce((a, b) => a + b.aire, 0);
+    const epaisseur = Math.min(s / cote, vertical ? w : h);
+    let d = 0;
+    rangee.forEach(r => {
+      const longueur = epaisseur > 0 ? r.aire / epaisseur : 0;
+      posees.push(Object.assign({}, r, vertical
+        ? { x: x,     y: y + d, w: epaisseur, h: longueur }
+        : { x: x + d, y: y,     w: longueur,  h: epaisseur }));
+      d += longueur;
+    });
+    if (vertical) { x += epaisseur; w -= epaisseur; }
+    else          { y += epaisseur; h -= epaisseur; }
+    i = j;
+  }
+  while (i < file.length) {
+    posees.push(Object.assign({}, file[i], { x: 0, y: 0, w: 0, h: 0 }));
+    i++;
+  }
+  return posees;
+}
+
+/* La mosaïque est bâtie sur TOUS les ouvrages chargés, pas sur le résultat
+   du filtre : une figure qui se réorganise à chaque frappe dans la
+   recherche devient impossible à lire. C'est le REMPLISSAGE qui suit le
+   filtre — chaque tuile montre quelle part d'elle-même reste retenue. */
+let essaisMosaique = 0;
+
+function dessinerMosaique() {
+  const el = document.getElementById("mosaique");
+  if (!el) return;
+
+  const W = el.clientWidth, H = el.clientHeight;
+
+  // Un cadre de largeur nulle donnerait une mosaïque vide sans le dire.
+  // Cela arrive quand le premier tracé précède la mise en page. On réessaie
+  // un nombre borné de fois, jamais indéfiniment.
+  if (W < 2 || H < 2) {
+    if (essaisMosaique++ < 5) requestAnimationFrame(dessinerMosaique);
+    return;
+  }
+  essaisMosaique = 0;
+
+  const retenus = new Set(filtrer().map(l => l.id));
+  const parRayon = new Map();
   livres.forEach(l => {
-    const d = document.createElement("button");
-    d.className = "dos" + (visibles.has(l.id) ? "" : " attenue");
-    d.style.background = COULEURS[l.categorie];
-    const h = l.note ? 55 + l.note * 9 : 46;
-    d.style.height = h + "%";
-    d.title = l.titre + " — " + l.auteur;
-    d.onclick = () => ouvrirFiche(l.id);
-    el.appendChild(d);
+    const cle = l.sousCategorie || "Sans rayon";
+    if (!parRayon.has(cle)) parRayon.set(cle, { rayon: cle, categorie: l.categorie, n: 0, vus: 0 });
+    const r = parRayon.get(cle);
+    r.n++;
+    if (retenus.has(l.id)) r.vus++;
+  });
+
+  const rayons = [...parRayon.values()].sort((a, b) => b.n - a.n);
+  el.innerHTML = "";
+
+  pavage(rayons, W, H).forEach(t => {
+    if (t.w < 1 || t.h < 1) return;
+    const couleur = HEX[t.categorie] || "#444";
+    const part = t.n ? Math.round(t.vus / t.n * 100) : 0;
+    const actif = etat.sous === t.rayon;
+
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "tuile" + (t.w < 88 || t.h < 56 ? " muette" : "");
+    b.style.left = t.x + "px"; b.style.top = t.y + "px";
+    b.style.width = t.w + "px"; b.style.height = t.h + "px";
+    b.style.background = couleur + (actif ? "33" : "1E");
+    b.style.borderColor = actif ? "var(--ink)" : couleur + "66";
+    b.setAttribute("aria-pressed", String(actif));
+    b.title = t.rayon + " — " + t.n + " ouvrage" + (t.n > 1 ? "s" : "")
+      + (part < 100 ? ", " + t.vus + " retenu" + (t.vus > 1 ? "s" : "") + " par le filtre" : "");
+    b.setAttribute("aria-label",
+      (actif ? "Retirer le filtre " : "Filtrer sur ") + t.rayon + ", " + t.n + " ouvrages");
+
+    const haut = document.createElement("div");
+    const nom = document.createElement("div");
+    nom.className = "nom"; nom.textContent = t.rayon;
+    const nb = document.createElement("div");
+    nb.className = "n"; nb.textContent = part < 100 ? t.vus + "/" + t.n : String(t.n);
+    haut.appendChild(nom); haut.appendChild(nb);
+
+    const jauge = document.createElement("div");
+    jauge.className = "jauge";
+    const rempli = document.createElement("i");
+    rempli.style.width = part + "%";
+    rempli.style.background = couleur;
+    jauge.appendChild(rempli);
+
+    b.appendChild(haut); b.appendChild(jauge);
+
+    // Un second clic sur le même rayon retire le filtre : sans cela, on ne
+    // peut plus revenir à la vue complète sans chercher le menu déroulant.
+    b.onclick = () => {
+      etat.sous = actif ? "" : t.rayon;
+      etat.cat = "";
+      construirePuces(); majSousCategories(); rafraichir();
+    };
+
+    el.appendChild(b);
   });
 }
 
@@ -810,6 +957,7 @@ function dessinerLegende() {
   el.innerHTML = "";
   Object.keys(COULEURS).forEach(c => {
     const n = livres.filter(l => l.categorie === c).length;
+    if (!n) return;
     const s = document.createElement("span");
     s.innerHTML = `<i class="pastille" style="background:${COULEURS[c]}"></i>${c} · ${n}`;
     el.appendChild(s);
@@ -818,6 +966,10 @@ function dessinerLegende() {
   const s = document.createElement("span");
   s.textContent = perso + " perso · " + (livres.length - perso) + " pro";
   el.appendChild(s);
+
+  const aide = document.createElement("span");
+  aide.textContent = "aire ∝ nombre d'ouvrages · cliquez un rayon pour filtrer";
+  el.appendChild(aide);
 }
 
 function dessinerListe() {
@@ -884,7 +1036,7 @@ function echapper(s) {
 }
 
 function rafraichir() {
-  dessinerEtagere();
+  dessinerMosaique();
   dessinerLegende();
   document.getElementById("liste").hidden  = etat.vue !== "liste";
   document.getElementById("grille").hidden = etat.vue !== "grille";
@@ -1403,6 +1555,14 @@ document.getElementById("exportCsv").onclick  = () => telecharger("bibliotheque.
 document.getElementById("exportJson").onclick = () => telecharger("bibliotheque.json", JSON.stringify(livres, null, 2), "application/json");
 document.getElementById("importBtn").onclick  = () => document.getElementById("importFile").click();
 document.getElementById("importFile").onchange = e => { if (e.target.files[0]) importer(e.target.files[0]); };
+
+// Le pavage dépend de la largeur disponible : on le recalcule quand elle
+// change, en espaçant les tracés pour ne pas redessiner à chaque pixel.
+let minuteurMosaique = null;
+addEventListener("resize", () => {
+  clearTimeout(minuteurMosaique);
+  minuteurMosaique = setTimeout(dessinerMosaique, 120);
+});
 
 demarrer();
 </script>

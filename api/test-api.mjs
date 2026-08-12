@@ -86,6 +86,23 @@ try {
     statsPub.sous_categories.reduce((s, x) => s + x.n, 0) === statsPub.total,
     statsPub.sous_categories.reduce((s, x) => s + x.n, 0) + " vs " + statsPub.total);
 
+  // L'effectif sur lequel porte la note moyenne. avg() ignore les valeurs
+  // nulles sans le dire : sans ce compte, la page affiche « 4,32 » à côté de
+  // « 242 ouvrages » et personne ne peut savoir que 57 seulement sont notés.
+  verifier("statistiques : effectif des ouvrages notés fourni",
+    typeof statsPub.notes === "number", "notes = " + statsPub.notes);
+  verifier("statistiques : les notés ne dépassent pas le total",
+    statsPub.notes <= statsPub.total, statsPub.notes + " sur " + statsPub.total);
+  verifier("statistiques : une moyenne n'est donnée que s'il y a des notes",
+    (statsPub.notes > 0) === (statsPub.note_moyenne !== null),
+    "notes = " + statsPub.notes + ", moyenne = " + statsPub.note_moyenne);
+
+  // Chaque rayon doit annoncer combien de ses ouvrages sont lus : c'est ce
+  // que remplit la jauge de la mosaïque.
+  verifier("statistiques : part lue fournie par rayon",
+    statsPub.sous_categories.every(x => typeof x.lus === "number" && x.lus <= x.n),
+    JSON.stringify(statsPub.sous_categories.find(x => typeof x.lus !== "number") ?? "—"));
+
   /* ------------------------------------------- Ce qui reste fermé au public */
 
   for (const [chemin, options] of [

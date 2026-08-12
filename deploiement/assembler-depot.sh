@@ -70,6 +70,12 @@ ok "tests : $(ls -1 "${DEPOT}/tests" 2>/dev/null | wc -l) fichiers"
 # verifications sur la frontiere Pro/Perso echouent faute de donnees.
 [ -f "${DEPOT}/tests/amorce-controle.json" ] || echec "tests/amorce-controle.json absent"
 
+# La chaine de livraison appelle ces fichiers par leur nom. S'ils manquent,
+# elle s'arrete sur un ENOENT qui ne dit pas ce qui n'a pas ete recopie.
+for t in test-fumee.js test-accueil.js; do
+  [ -f "${DEPOT}/tests/${t}" ] || echec "tests/${t} absent — la CI l'appelle pourtant"
+done
+
 # --- Deploiement, documentation, workflows -------------------------------
 rsync -a --delete "${SOURCE}/deploiement/" "${DEPOT}/deploiement/" 2>/dev/null
 ok "deploiement"

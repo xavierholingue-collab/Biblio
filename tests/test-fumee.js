@@ -44,6 +44,20 @@ delete w.location.reload;
 w.location.reload = () => {};
 w.confirm = () => true;
 
+/* jsdom ne calcule aucune mise en page : clientWidth et clientHeight valent
+   toujours 0. La mosaïque, qui pave une surface, ne dessinerait donc rien —
+   et le test ne prouverait rien du tout. On donne au DOM simulé des
+   dimensions plausibles, celles d'une fenêtre de bureau.
+
+   Ce n'est pas une complaisance : sans mise en page, il n'y a aucune
+   question à poser à un algorithme de pavage. Ce que le test vérifie
+   ensuite — le nombre de tuiles, la proportionnalité des aires, les liens —
+   ne dépend pas de la valeur choisie. */
+Object.defineProperty(w.HTMLElement.prototype, "clientWidth",
+  { configurable: true, get() { return this.id === "mosaique" ? 880 : 0; } });
+Object.defineProperty(w.HTMLElement.prototype, "clientHeight",
+  { configurable: true, get() { return this.id === "mosaique" ? 240 : 0; } });
+
 /* ------------------------------- API simulée ------------------------------ */
 
 const MOT_DE_PASSE = "motdepassedetest";
@@ -213,7 +227,49 @@ const attendre = ms => new Promise(r => setTimeout(r, ms));
 
   /* Rendu */
   verifier("liste rendue", d.querySelectorAll("#liste .fiche").length === 2);
-  verifier("étagère dessinée", d.querySelectorAll("#etagere .dos").length === 2);
+
+  /* Mosaïque des rayons.
+     Les deux ouvrages d'essai appartiennent à deux rayons distincts : on
+     attend donc deux tuiles, et les aires doivent être égales puisque
+     chaque rayon compte un ouvrage. */
+  const tuiles = [...d.querySelectorAll("#mosaique .tuile")];
+  verifier("mosaïque dessinée", tuiles.length === 2, tuiles.length + " tuile(s)");
+
+  if (tuiles.length === 2) {
+    const aire = t => parseFloat(t.style.width) * parseFloat(t.style.height);
+    const [a1, a2] = tuiles.map(aire);
+    verifier("aires proportionnelles au nombre d'ouvrages",
+      Math.abs(a1 - a2) / Math.max(a1, a2) < 0.02,
+      "aires " + Math.round(a1) + " et " + Math.round(a2));
+    verifier("la mosaïque couvre le cadre",
+      Math.abs(a1 + a2 - 880 * 240) / (880 * 240) < 0.02,
+      "couverture " + Math.round((a1 + a2) / (880 * 240) * 100) + " %");
+    verifier("tuiles nommées d'après les rayons",
+      tuiles.every(t => t.textContent.trim().length > 0));
+  }
+
+  /* Interaction : cliquer une tuile filtre sur ce rayon, un second clic le
+     retire. C'est la seule fonction nouvelle qui n'a pas d'équivalent
+     ailleurs dans l'interface — le menu déroulant ne se déclique pas. */
+  const cible = tuiles.find(t => /Décision/.test(t.textContent));
+  verifier("tuile du rayon Décision présente", !!cible);
+  if (cible) {
+    cible.dispatchEvent(new w.Event("click"));
+    await attendre(30);
+    verifier("clic sur une tuile filtre le rayon",
+      d.querySelectorAll("#liste .fiche").length === 1,
+      d.querySelectorAll("#liste .fiche").length + " fiche(s)");
+    verifier("tuile marquée active",
+      d.querySelector('#mosaique .tuile[aria-pressed="true"]') !== null);
+
+    const memeTuile = [...d.querySelectorAll("#mosaique .tuile")]
+      .find(t => /Décision/.test(t.textContent));
+    memeTuile.dispatchEvent(new w.Event("click"));
+    await attendre(30);
+    verifier("second clic retire le filtre",
+      d.querySelectorAll("#liste .fiche").length === 2,
+      d.querySelectorAll("#liste .fiche").length + " fiche(s)");
+  }
 
   /* Filtre Perso / Pro */
   d.getElementById("sphere").value = "Perso";

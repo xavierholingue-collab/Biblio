@@ -39,16 +39,46 @@
   }
   .sous-chapeau { font-size: 15px; color: var(--ink-soft); max-width: 62ch; margin: 14px 0 0; }
 
-  /* ---------- Mur d'étagère ---------- */
-  .etagere {
-    display: flex; align-items: flex-end; gap: 1px;
-    height: 90px; margin: 34px 0 8px;
-    border-bottom: 2px solid var(--ink); padding: 0 1px;
+  /* ---------- Mosaïque des rayons ----------
+     Une tuile par rayon, AIRE proportionnelle au nombre d'ouvrages.
+     L'aire est la seule variable encodée : pas de hauteur décorative,
+     pas de couleur qui ne dise rien. La barre du bas ajoute une seconde
+     information, mesurée elle aussi : la part déjà lue. */
+  .mosaique {
+    position: relative; width: 100%;
+    height: clamp(280px, 44vw, 400px);
+    margin: 10px 0 8px;
   }
-  .dos { flex: 1 1 0; min-width: 2px; border-radius: 1px 1px 0 0; }
-  .legende-etagere {
+  .tuile {
+    position: absolute; overflow: hidden; text-decoration: none;
+    color: var(--ink); background: var(--paper-2);
+    border: 1px solid var(--rule);
+    display: flex; flex-direction: column; justify-content: space-between;
+    padding: 9px 10px 0; cursor: pointer;
+    transition: background .12s ease, border-color .12s ease;
+  }
+  .tuile:hover, .tuile:focus-visible {
+    background: #DDE2DA; border-color: var(--ink); outline: none; z-index: 2;
+  }
+  .tuile .nom {
+    font-size: 13px; line-height: 1.25; overflow: hidden;
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3;
+  }
+  .tuile .n {
     font-family: var(--mono); font-size: 11px; color: var(--ink-soft);
-    letter-spacing: .04em; margin-bottom: 40px;
+    letter-spacing: .04em; margin-top: 4px;
+  }
+  .tuile .jauge {
+    height: 6px; margin: 6px -10px 0; background: var(--rule); flex: none;
+  }
+  .tuile .jauge i { display: block; height: 100%; }
+  .tuile.muette { padding: 5px 6px 0; }
+  .tuile.muette .nom { display: none; }
+  .tuile.muette .n { margin-top: 0; font-size: 10px; }
+
+  .legende-mosaique {
+    font-family: var(--mono); font-size: 11px; color: var(--ink-soft);
+    letter-spacing: .04em; margin-bottom: 40px; line-height: 1.7;
   }
 
   /* ---------- Chiffres ---------- */
@@ -72,13 +102,6 @@
     text-transform: uppercase; color: var(--ink-soft); font-weight: 400;
     margin: 46px 0 16px; padding-bottom: 8px; border-bottom: 1px solid var(--rule);
   }
-
-  /* ---------- Rayons ---------- */
-  .rayon { display: grid; grid-template-columns: 1fr 46px; gap: 12px; align-items: center; padding: 7px 0; }
-  .rayon .nom { font-size: 15px; }
-  .rayon .barre { height: 9px; background: var(--rule); border-radius: 1px; overflow: hidden; margin-top: 5px; }
-  .rayon .barre i { display: block; height: 100%; }
-  .rayon .n { font-family: var(--mono); font-size: 12px; color: var(--ink-soft); text-align: right; }
 
   /* ---------- Décennies ---------- */
   .decennies { display: flex; align-items: flex-end; gap: 4px; height: 130px; margin-top: 10px; }
@@ -137,13 +160,11 @@
   <div id="erreur" class="erreur" hidden></div>
 
   <main id="contenu" hidden>
-    <div class="etagere" id="etagere" role="img" aria-label="Vue d'ensemble de la bibliothèque"></div>
-    <div class="legende-etagere" id="legendeEtagere"></div>
-
     <div class="chiffres" id="chiffres"></div>
 
     <h2 id="titreRayons">Les rayons</h2>
-    <div id="rayons"></div>
+    <div class="mosaique" id="mosaique"></div>
+    <p class="legende-mosaique" id="legendeMosaique"></p>
 
     <h2>Par décennie de parution</h2>
     <div class="decennies" id="decennies"></div>
@@ -187,30 +208,132 @@ function chiffre(n, quoi) {
   return `<div class="chiffre"><div class="n">${n}</div><div class="quoi">${quoi}</div></div>`;
 }
 
-function dessinerEtagere(stats) {
-  const el = document.getElementById("etagere");
-  // Un dos par ouvrage, hauteur proportionnelle à la taille du rayon.
-  const dos = [];
-  stats.sous_categories.forEach(sc => {
-    for (let i = 0; i < sc.n; i++) {
-      const h = 45 + ((i * 37 + sc.n * 13) % 55);
-      dos.push(`<span class="dos" style="height:${h}%;background:${HEX[sc.categorie] || "#444"}"></span>`);
+/* -------------------------------------------------------------------------
+   PAVAGE « SQUARIFIÉ »  (Bruls, Huizing & van Wijk, 2000)
+
+   Découper un rectangle en tuiles d'aires données. L'algorithme naïf — des
+   bandes successives — donne des rectangles très allongés pour les petits
+   rayons : à aire égale, un trait fin et un carré ne se comparent pas à
+   l'œil, et l'aire cesse d'être lisible. Celui-ci empile les tuiles par
+   rangées le long du côté court et ferme la rangée dès que le rapport
+   d'aspect commencerait à se dégrader.
+
+   Entrée  : [{ n, ... }] trié par n décroissant.
+   Sortie  : les mêmes objets enrichis de x, y, w, h (en pixels).
+   ------------------------------------------------------------------------- */
+function pavage(items, W, H) {
+  const total = items.reduce((s, i) => s + i.n, 0);
+  if (!total || W <= 0 || H <= 0) return [];
+
+  const echelle = (W * H) / total;
+  const file = items.map(i => Object.assign({}, i, { aire: i.n * echelle }));
+  const posees = [];
+  let x = 0, y = 0, w = W, h = H, i = 0;
+
+  // Rapport d'aspect le plus défavorable d'une rangée donnée.
+  const pire = (rangee, cote) => {
+    const s = rangee.reduce((a, b) => a + b.aire, 0);
+    if (s <= 0 || cote <= 0) return Infinity;
+    const max = Math.max.apply(null, rangee.map(r => r.aire));
+    const min = Math.min.apply(null, rangee.map(r => r.aire));
+    return Math.max((cote * cote * max) / (s * s), (s * s) / (cote * cote * min));
+  };
+
+  while (i < file.length && w > 0.5 && h > 0.5) {
+    const vertical = w >= h;            // on empile le long du côté court
+    const cote = vertical ? h : w;
+    const rangee = [file[i]];
+    let j = i + 1;
+    while (j < file.length &&
+           pire(rangee.concat([file[j]]), cote) <= pire(rangee, cote)) {
+      rangee.push(file[j]); j++;
     }
-  });
-  el.innerHTML = dos.join("");
+
+    const s = rangee.reduce((a, b) => a + b.aire, 0);
+    const epaisseur = Math.min(s / cote, vertical ? w : h);
+    let d = 0;
+    rangee.forEach(r => {
+      const longueur = epaisseur > 0 ? r.aire / epaisseur : 0;
+      posees.push(Object.assign({}, r, vertical
+        ? { x: x,     y: y + d, w: epaisseur, h: longueur }
+        : { x: x + d, y: y,     w: longueur,  h: epaisseur }));
+      d += longueur;
+    });
+
+    if (vertical) { x += epaisseur; w -= epaisseur; }
+    else          { y += epaisseur; h -= epaisseur; }
+    i = j;
+  }
+
+  // Si la boucle s'est arrêtée faute de place, les rayons restants existent
+  // toujours : mieux vaut une tuile minuscule qu'un rayon escamoté.
+  while (i < file.length) {
+    posees.push(Object.assign({}, file[i], { x: 0, y: 0, w: 0, h: 0 }));
+    i++;
+  }
+  return posees;
 }
 
-function dessinerRayons(stats) {
-  const el = document.getElementById("rayons");
-  const max = Math.max(...stats.sous_categories.map(s => s.n));
-  el.innerHTML = stats.sous_categories.map(s => `
-    <div class="rayon">
-      <div>
-        <div class="nom">${s.sous_categorie}</div>
-        <div class="barre"><i style="width:${Math.round(s.n / max * 100)}%;background:${HEX[s.categorie] || "#444"}"></i></div>
-      </div>
-      <div class="n">${s.n}</div>
-    </div>`).join("");
+let STATS = null;
+let essaisMosaique = 0;
+
+function dessinerMosaique() {
+  const el = document.getElementById("mosaique");
+  if (!STATS || !el) return;
+
+  const W = el.clientWidth, H = el.clientHeight;
+
+  // Tracer dans un cadre de largeur nulle produirait une mosaïque vide, sans
+  // erreur ni message : le pire des résultats, puisqu'il ressemble à « ce
+  // rayon n'existe pas ». Cela arrive quand le bloc est encore masqué au
+  // moment du premier appel. On réessaie, mais un nombre borné de fois :
+  // une boucle d'animation sans fin serait pire que l'absence de figure.
+  if (W < 2 || H < 2) {
+    if (essaisMosaique++ < 5) requestAnimationFrame(dessinerMosaique);
+    return;
+  }
+  essaisMosaique = 0;
+
+  const rayons = STATS.sous_categories.slice().sort((a, b) => b.n - a.n);
+  el.innerHTML = "";
+
+  pavage(rayons, W, H).forEach(t => {
+    if (t.w < 1 || t.h < 1) return;
+    const couleur = HEX[t.categorie] || "#444";
+    const partLue = t.n ? Math.round((t.lus ?? 0) / t.n * 100) : 0;
+
+    const a = document.createElement("a");
+    a.className = "tuile" + (t.w < 96 || t.h < 62 ? " muette" : "");
+    a.style.left = t.x + "px";
+    a.style.top = t.y + "px";
+    a.style.width = t.w + "px";
+    a.style.height = t.h + "px";
+    a.style.background = couleur + "22";      // teinte légère de la catégorie
+    a.style.borderColor = couleur + "66";
+    a.href = "/ma-bibliotheque.html?rayon=" + encodeURIComponent(t.sous_categorie);
+    a.setAttribute("aria-label",
+      t.sous_categorie + " : " + t.n + " ouvrage" + (t.n > 1 ? "s" : "")
+      + ", " + (t.lus || 0) + " lu" + ((t.lus || 0) > 1 ? "s" : "")
+      + ". Ouvrir ce rayon.");
+    a.title = t.sous_categorie + " — " + t.n + " ouvrages, " + partLue + " % lus";
+
+    const haut = document.createElement("div");
+    const nom = document.createElement("div");
+    nom.className = "nom"; nom.textContent = t.sous_categorie;
+    const nb = document.createElement("div");
+    nb.className = "n"; nb.textContent = t.n;
+    haut.appendChild(nom); haut.appendChild(nb);
+
+    const jauge = document.createElement("div");
+    jauge.className = "jauge";
+    const rempli = document.createElement("i");
+    rempli.style.width = partLue + "%";
+    rempli.style.background = couleur;
+    jauge.appendChild(rempli);
+
+    a.appendChild(haut); a.appendChild(jauge);
+    el.appendChild(a);
+  });
 }
 
 function dessinerDecennies(stats) {
@@ -243,27 +366,39 @@ function dessinerListes(stats) {
     const s = await r.json();
 
     const partLus = s.total ? Math.round(s.lus / s.total * 100) : 0;
+
+    // La note moyenne ne porte que sur les ouvrages NOTÉS. Le dire dans
+    // l'étiquette, sinon « 4,32 » posé à côté de « 242 ouvrages » se lit
+    // comme la moyenne des 242. Ils sont 57.
+    const notes = s.notes ?? null;
+    const etiquetteNote = notes === null ? "note moyenne"
+      : notes === 0        ? "aucune note"
+      : "note moyenne (" + nombre(notes) + " notés)";
+
     document.getElementById("chiffres").innerHTML = [
       chiffre(nombre(s.total), "ouvrages"),
       chiffre(nombre(s.lus), "lus (" + partLus + " %)"),
       chiffre(nombre(s.a_lire + s.en_cours), "sur la pile"),
       chiffre(nombre(s.avec_resume), "résumés"),
       chiffre(nombre(s.auteurs), "auteurs"),
-      chiffre(s.note_moyenne !== null ? s.note_moyenne.toFixed(2).replace(".", ",") : "—", "note moyenne"),
+      chiffre(s.note_moyenne !== null && notes ? s.note_moyenne.toFixed(2).replace(".", ",") : "—",
+              etiquetteNote),
     ].join("");
 
-    dessinerEtagere(s);
-    dessinerRayons(s);
+    STATS = s;
+    dessinerMosaique();
     dessinerDecennies(s);
     dessinerListes(s);
 
     const complet = s.perimetre === "complet";
     texte(document.getElementById("titreRayons"),
       "Les " + s.rayons + " rayons");
-    texte(document.getElementById("legendeEtagere"),
-      complet
-        ? "Bibliothèque complète — " + nombre(s.total) + " ouvrages, tous rayons confondus."
-        : "Périmètre professionnel — " + nombre(s.total) + " ouvrages académiques.");
+    texte(document.getElementById("legendeMosaique"),
+      (complet
+        ? "Bibliothèque complète — " + nombre(s.total) + " ouvrages, tous rayons confondus. "
+        : "Périmètre professionnel — " + nombre(s.total) + " ouvrages académiques. ")
+      + "L'aire de chaque tuile est proportionnelle au nombre d'ouvrages ; "
+      + "la barre du bas indique la part déjà lue. Cliquez un rayon pour l'ouvrir.");
 
     if (complet) {
       texte(document.getElementById("clePerso"), "Session ouverte");
@@ -280,6 +415,17 @@ function dessinerListes(stats) {
 
     document.getElementById("chargement").hidden = true;
     document.getElementById("contenu").hidden = false;
+
+    // Le pavage dépend de la largeur disponible : il doit être recalculé
+    // quand elle change. Le premier tracé a eu lieu pendant que le bloc
+    // était encore masqué — largeur nulle —, d'où ce second tracé une fois
+    // le contenu affiché.
+    dessinerMosaique();
+    let minuteur = null;
+    addEventListener("resize", () => {
+      clearTimeout(minuteur);
+      minuteur = setTimeout(dessinerMosaique, 120);
+    });
   } catch (e) {
     document.getElementById("chargement").hidden = true;
     const err = document.getElementById("erreur");
