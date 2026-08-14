@@ -73,7 +73,7 @@ ok "tests : $(ls -1 "${DEPOT}/tests" 2>/dev/null | wc -l) fichiers"
 # La chaine de livraison appelle ces fichiers par leur nom. S'ils manquent,
 # elle s'arrete sur un ENOENT qui ne dit pas ce qui n'a pas ete recopie.
 for t in test-fumee.js test-accueil.js parcours.spec.mjs playwright.config.mjs \
-         test-cloisonnement.mjs; do
+         test-cloisonnement.mjs test-contexte.mjs; do
   [ -f "${DEPOT}/tests/${t}" ] || echec "tests/${t} absent — la CI l'appelle pourtant"
 done
 

@@ -137,8 +137,10 @@ jobs:
       # ------------------------------------------------------------------
       - name: Cloisonnement entre locataires
         run: |
-          npm install @electric-sql/pglite --no-audit --no-fund --silent
+          npm install @electric-sql/pglite @electric-sql/pglite-socket pg \
+            --no-audit --no-fund --silent
           node tests/test-cloisonnement.mjs
+          node tests/test-contexte.mjs
 
       - name: Fabriquer le paquet
         run: |
