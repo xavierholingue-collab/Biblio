@@ -50,7 +50,8 @@ tar -tzf "${TRAVAIL}/paquet.tar.gz" >/dev/null 2>&1 || { echo "  ECHEC archive i
 mkdir -p "${TRAVAIL}/contenu"
 tar -xzf "${TRAVAIL}/paquet.tar.gz" -C "${TRAVAIL}/contenu" || { echo "  ECHEC extraction"; exit 1; }
 
-for attendu in api/server.js api/package.json web/index.html db/01-schema.sql; do
+for attendu in api/server.js api/package.json web/index.html db/01-schema.sql \
+               deploiement/calculer-csp.mjs; do
   [ -f "${TRAVAIL}/contenu/${attendu}" ] \
     || { echo "  ECHEC fichier attendu absent : ${attendu}"; exit 1; }
 done
@@ -87,6 +88,53 @@ install -d -m 755 "${RACINE_WEB}"
 rsync -a --delete "${TRAVAIL}/contenu/web/" "${RACINE_WEB}/"
 chmod -R a+rX "${RACINE_WEB}"
 echo "  pages posees : $(find "${RACINE_WEB}" -type f | wc -l) fichiers"
+
+# --- La politique de contenu, recalculee sur les pages qu'on vient de poser --
+#
+# Chaque script en ligne est autorise par son empreinte sha256, jamais par
+# 'unsafe-inline'. L'empreinte change des qu'une virgule change dans le
+# script : elle DOIT donc etre recalculee a chaque livraison, ici, et non
+# ecrite a la main dans le Caddyfile.
+#
+# TROIS PRECAUTIONS, parce qu'une politique fautive casse la page en silence
+# — le script est refuse par le navigateur, aucune erreur serveur, aucun
+# journal. C'est la panne du 04/08/2026.
+#
+#   1. On ecrit dans un fichier temporaire, jamais directement dans celui que
+#      Caddy lit.
+#   2. On valide la configuration complete AVANT de basculer.
+#   3. Si le rechargement echoue, on remet l'ancienne politique et on
+#      recharge : mieux vaut une politique perimee qu'un serveur arrete.
+CSP_FICHIER=/etc/caddy/csp-biblio.conf
+CALCUL="${TRAVAIL}/contenu/deploiement/calculer-csp.mjs"
+
+if [ -f "${CALCUL}" ]; then
+  if node "${CALCUL}" "${RACINE_WEB}" --caddy > /tmp/csp-biblio.nouveau 2>/tmp/csp-biblio.err; then
+    [ -f "${CSP_FICHIER}" ] && cp -a "${CSP_FICHIER}" /tmp/csp-biblio.ancien
+    cp /tmp/csp-biblio.nouveau "${CSP_FICHIER}"
+
+    if caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/tmp/caddy-valid.log 2>&1 \
+       && systemctl reload caddy 2>>/tmp/caddy-valid.log; then
+      echo "  politique de contenu : $(grep -c "^#   " "${CSP_FICHIER}") empreinte(s)"
+    else
+      echo "  ECHEC politique de contenu refusee par Caddy :"
+      tail -5 /tmp/caddy-valid.log | sed 's/^/         /'
+      if [ -f /tmp/csp-biblio.ancien ]; then
+        cp /tmp/csp-biblio.ancien "${CSP_FICHIER}"
+      else
+        rm -f "${CSP_FICHIER}"
+      fi
+      systemctl reload caddy || true
+      echo "  ancienne politique retablie"
+      exit 1
+    fi
+  else
+    echo "  ECHEC calcul de la politique :"; tail -3 /tmp/csp-biblio.err | sed 's/^/         /'
+    exit 1
+  fi
+else
+  echo "  ATTENTION calculer-csp.mjs absent du paquet : politique inchangee"
+fi
 
 # --- L'API -------------------------------------------------------------------
 rsync -a --delete --exclude='node_modules' "${TRAVAIL}/contenu/api/" "${RACINE_API}/"

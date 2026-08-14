@@ -46,6 +46,25 @@ done
 chmod -R a+rX /var/www/biblio /var/www/xavier-holingue /var/www/blog
 ok "racines web preparees"
 
+# La politique de contenu est importee par le bloc ci-dessous. Si le fichier
+# manque, Caddy refuse de demarrer — le serveur entier tomberait, tous sites
+# confondus, pour une page qui n'aurait pas encore ete livree.
+#
+# On pose donc une politique de repli AVANT d'ecrire le bloc. Elle autorise
+# les scripts en ligne, ce qui est moins bon, mais un site qui fonctionne
+# imparfaitement vaut mieux qu'un serveur arrete. La premiere livraison la
+# remplacera par la version a empreintes.
+if [ ! -f /etc/caddy/csp-biblio.conf ]; then
+  cat > /etc/caddy/csp-biblio.conf <<'REPLI'
+# Politique de REPLI, posee par vps-caddy-xavier-holingue.sh.
+# Sera remplacee a la premiere livraison par la version a empreintes sha256.
+header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://covers.openlibrary.org https://books.google.com https://*.googleusercontent.com; connect-src 'self' https://www.googleapis.com; media-src 'self' blob:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+REPLI
+  ok "politique de repli posee"
+else
+  ok "politique de contenu deja en place : $(grep -c '^#   ' /etc/caddy/csp-biblio.conf) empreinte(s)"
+fi
+
 if grep -qF "${MARQUE_DEBUT}" "${CADDYFILE}"; then
   sed -i "/^${MARQUE_DEBUT}$/,/^${MARQUE_FIN}$/d" "${CADDYFILE}"
   ok "bloc precedent retire"
@@ -85,35 +104,15 @@ biblio.xavier-holingue.eu {
 			X-Frame-Options "DENY"
 			Referrer-Policy "no-referrer"
 			Strict-Transport-Security "max-age=31536000; includeSubDomains"
-			# La politique de contenu n'autorise que les couvertures
-			# d'Open Library et de Google Books. Tout autre chargement
-			# distant est refuse par le navigateur.
-			# script-src autorise 'unsafe-inline' — et il faut dire pourquoi.
+			# La politique de contenu vit dans un fichier a part, recalcule a chaque
+			# livraison par calculer-csp.mjs : chaque script en ligne y est autorise
+			# par son empreinte sha256, jamais par 'unsafe-inline'.
 			#
-			# L'application tient en un seul fichier HTML, script compris.
-			# « script-src 'self' » interdit les scripts en ligne : la page
-			# s'affichait, le JavaScript ne s'executait jamais, et les
-			# statistiques restaient en « Chargement… ».
-			#
-			# Cela ne fonctionnait en local que parce que la politique n'y
-			# etait PAS APPLIQUEE : dans nginx, un add_header declare dans
-			# un bloc location annule tous ceux herites du parent, et le
-			# « location / » en declarait un pour Cache-Control. La CSP
-			# etait donc silencieusement desactivee depuis le debut. Caddy,
-			# qui applique les en-tetes ensemble, l'a rendue effective.
-			#
-			# 'unsafe-inline' affaiblit la protection contre l'injection de
-			# script. La vraie correction est d'autoriser CE script par son
-			# empreinte sha256 — mais elle doit etre recalculee a chaque
-			# modification de la page, donc par la chaine de livraison.
-			# A faire quand Biblio evoluera moins vite.
-			# 'wasm-unsafe-eval' : ajoute le 12/08/2026 pour le lecteur de
-			# codes-barres. Safari n'implemente pas BarcodeDetector, il faut
-			# donc embarquer zbar compile en WebAssembly, et instancier un
-			# module WebAssembly releve de script-src. Ce mot-clef n'autorise
-			# QUE cela : il ne rouvre ni eval() ni les scripts distants.
-			# media-src blob: : l'apercu de la camera est un flux blob.
-			Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://covers.openlibrary.org https://books.google.com https://*.googleusercontent.com; connect-src 'self' https://www.googleapis.com; media-src 'self' blob:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+			# Une empreinte depend du contenu exact du script. L'ecrire ici, dans un
+			# fichier qu'on ne rejoue qu'a la main, garantirait qu'elle soit perimee
+			# des la livraison suivante — et une empreinte perimee bloque le script
+			# en silence.
+			import /etc/caddy/csp-biblio.conf
 			# L'application evolue : pas de version figee en cache.
 			Cache-Control "no-cache"
 			-Server

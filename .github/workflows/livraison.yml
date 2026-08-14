@@ -122,7 +122,7 @@ jobs:
 
       - name: Fabriquer le paquet
         run: |
-          tar czf paquet.tar.gz --exclude=node_modules api web db
+          tar czf paquet.tar.gz --exclude=node_modules api web db deploiement
           echo "poids : $(du -h paquet.tar.gz | cut -f1)"
 
       - uses: actions/upload-artifact@v4

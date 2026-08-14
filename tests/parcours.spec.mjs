@@ -280,6 +280,27 @@ test.describe("Ce qui doit rester fermé", () => {
       .toContain("'wasm-unsafe-eval'");
   });
 
+  /* La dette du 04/08/2026 : script-src autorisait 'unsafe-inline', c'est-à-
+     dire n'importe quel script injecté dans la page. Elle est remplacée par
+     des empreintes sha256 calculées à la livraison.
+
+     Ce contrôle ne se contente pas de constater l'absence du mot-clef : il
+     vérifie que des empreintes ont bien pris sa place. Une politique sans
+     'unsafe-inline' ET sans empreinte bloquerait tous les scripts — la page
+     serait servie, muette, exactement comme lors de la panne d'origine.
+     C'est le test « la page s'exécute » qui attraperait ce cas, mais autant
+     dire ici ce qu'on attend. */
+  test("les scripts sont autorisés par empreinte, pas par 'unsafe-inline'", async ({ request }) => {
+    const csp = (await request.get("/")).headers()["content-security-policy"] ?? "";
+    const scriptSrc = /script-src([^;]*)/.exec(csp)?.[1] ?? "";
+
+    const empreintes = scriptSrc.match(/'sha256-[A-Za-z0-9+/=]+'/g) ?? [];
+    expect(empreintes.length, "aucune empreinte dans script-src : " + scriptSrc.trim())
+      .toBeGreaterThan(0);
+    expect(scriptSrc, "'unsafe-inline' est encore là — les empreintes ne servent alors à rien")
+      .not.toContain("'unsafe-inline'");
+  });
+
   test("les tests et les dépendances ne sont pas servis", async ({ request }) => {
     for (const chemin of ["/test/test-fumee.js", "/node_modules/", "/test/"]) {
       const r = await request.get(chemin, { maxRedirects: 0 });
