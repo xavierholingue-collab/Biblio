@@ -99,20 +99,22 @@ biblio.xavier-holingue.eu {
 	handle {
 		root * /var/www/biblio
 		file_server
+		
+		# La politique de contenu vit dans un fichier a part, recalcule a chaque
+		# livraison par calculer-csp.mjs : chaque script en ligne y est autorise
+		# par son empreinte sha256, jamais par 'unsafe-inline'.
+		#
+		# ATTENTION A L'EMPLACEMENT. Le 14/08/2026, cet import avait ete place
+		# DANS le bloc header { }. Caddy n'y attend que des noms d'en-tetes : il
+		# a donc pose un en-tete nomme « import », et la politique a disparu
+		# entierement. Aucune erreur, aucun journal — seulement trois controles
+		# Playwright au rouge. L'import doit rester au niveau du handle.
+		import /etc/caddy/csp-biblio.conf
 		header {
 			X-Content-Type-Options "nosniff"
 			X-Frame-Options "DENY"
 			Referrer-Policy "no-referrer"
 			Strict-Transport-Security "max-age=31536000; includeSubDomains"
-			# La politique de contenu vit dans un fichier a part, recalcule a chaque
-			# livraison par calculer-csp.mjs : chaque script en ligne y est autorise
-			# par son empreinte sha256, jamais par 'unsafe-inline'.
-			#
-			# Une empreinte depend du contenu exact du script. L'ecrire ici, dans un
-			# fichier qu'on ne rejoue qu'a la main, garantirait qu'elle soit perimee
-			# des la livraison suivante — et une empreinte perimee bloque le script
-			# en silence.
-			import /etc/caddy/csp-biblio.conf
 			# L'application evolue : pas de version figee en cache.
 			Cache-Control "no-cache"
 			-Server
@@ -189,6 +191,32 @@ for n in xavier-holingue.eu biblio.xavier-holingue.eu blog.xavier-holingue.eu; d
     *)   echo "  A VOIR   ${n} : ${c}" ;;
   esac
 done
+echo
+echo "-- La politique de contenu est-elle SERVIE ? --"
+#
+# Ce controle manquait, et son absence a coute une livraison. Le 14/08/2026,
+# l'import avait ete pose dans le bloc header { } : Caddy l'a pris pour un
+# nom d'en-tete, la politique a disparu, et le script a conclu « 200, tout
+# va bien ». Verifier qu'une page repond ne dit rien de ce qu'elle repond.
+entetes=$(curl -sI --max-time 20 https://biblio.xavier-holingue.eu/ 2>/dev/null)
+csp=$(printf '%s' "${entetes}" | grep -i '^content-security-policy:' | head -1)
+
+if [ -z "${csp}" ]; then
+  echo "  ECHEC aucune politique de contenu servie."
+  echo "        L'import est-il au niveau du handle, hors du bloc header ?"
+  printf '%s' "${entetes}" | grep -i '^import:' | sed 's/^/        indice : /'
+  exit 1
+fi
+
+nb=$(printf '%s' "${csp}" | grep -o "sha256-" | wc -l)
+if [ "${nb}" -gt 0 ]; then
+  ok "politique servie : ${nb} empreinte(s) sha256"
+  printf '%s' "${csp}" | grep -q "unsafe-inline'.*script-src\|script-src[^;]*unsafe-inline" \
+    && echo "  A VOIR  'unsafe-inline' subsiste dans script-src : les empreintes ne servent alors a rien"
+else
+  ok "politique servie (repli, sans empreinte — la prochaine livraison la remplacera)"
+fi
+
 red=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' --max-time 25 https://www.xavier-holingue.eu 2>/dev/null)
 case "${red}" in
   301*) ok "www redirige : ${red}" ;;
