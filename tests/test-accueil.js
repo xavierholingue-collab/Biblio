@@ -93,8 +93,23 @@ w.fetch = (url) => {
 
 /* -------------------------------- Exécution ------------------------------- */
 
+/* ON NOMME CE QU'ON ATTEND, ON NE LE COMPTE PAS.
+ *
+ * Ce contrôle exigeait « un bloc de script ». Le 15/08/2026, l'ajout du
+ * bandeau de recette en a fait deux, et la chaîne s'est arrêtée sur une
+ * page parfaitement saine — DEUX FOIS, parce que le même défaut existait
+ * dans test-fumee.js et que je n'avais réparé que celui qui criait.
+ *
+ * Un compte de blocs est une propriété de la MISE EN FORME, pas du
+ * comportement : il tombe dès qu'on ajoute quelque chose de légitime, et
+ * il reste muet le jour où le script qui compte vraiment disparaît.
+ *
+ * Tous les blocs sont exécutés — la page en a besoin — mais c'est la
+ * PRÉSENCE de celui qui dessine la mosaïque qu'on vérifie. */
 const blocs = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => m[1]);
-verifier("un bloc de script trouvé", blocs.length === 1, "trouvé " + blocs.length);
+verifier("le script qui dessine la mosaïque est présent",
+  blocs.some(b => /dessinerMosaique|\/api\/statistiques/.test(b)),
+  "aucun des " + blocs.length + " blocs ne le contient");
 
 const attendre = ms => new Promise(r => setTimeout(r, ms));
 
