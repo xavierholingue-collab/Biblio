@@ -1,7 +1,9 @@
 /* ===========================================================================
    MULTI-LOCATAIRE — cloisonnement, visibilité, résumés par langue
 
-   Rejouable : tout est en « if not exists » ou en « create or replace ».
+   REJOUABLE, et cette fois c'est éprouvé : le fichier commence par lever
+   l'application des politiques au propriétaire, sans quoi son deuxième
+   passage échouerait sur les tables qu'il a lui-même protégées.
 
    ---------------------------------------------------------------------------
    CE QUI PROTÈGE, ET POURQUOI CE N'EST PAS L'APPLICATION
@@ -31,6 +33,43 @@
    Sous ce verrou, le plus précis l'emporte : l'ouvrage prime sur le rayon,
    qui prime sur la bibliothèque.
    =========================================================================== */
+
+/* =========================================================================
+   UNE MIGRATION NE DOIT PAS ÊTRE SOUMISE AU CLOISONNEMENT QU'ELLE INSTALLE.
+
+   Défaut trouvé EN RECETTE le 15/08/2026, au deuxième passage de ce fichier :
+
+     ERREUR : la nouvelle ligne viole la politique de sécurité au niveau
+              ligne pour la table « resumes »
+
+   Au premier passage tout va bien : les données sont écrites AVANT que la
+   RLS ne soit activée, plus bas dans ce même fichier. Au second, elle est
+   déjà là — et « force row level security » y soumet jusqu'au propriétaire
+   des tables. Ce fichier se retrouve alors incapable d'écrire dans les
+   tables qu'il vient de remplir la fois d'avant.
+
+   L'en-tête annonçait « rejouable ». C'était FAUX, et d'une façon vicieuse :
+   la première livraison réussissait, la deuxième échouait. Un commentaire
+   qui affirme une propriété qu'on n'a pas éprouvée est pire que pas de
+   commentaire — on s'y fie.
+
+   On lève donc l'application des politiques au propriétaire, le temps de la
+   migration. Les tables concernées sont exactement celles que ce fichier
+   remet sous « force » plus bas : si l'une manque ici, elle resterait
+   ouverte au propriétaire après la migration.
+   ========================================================================= */
+
+do $$
+declare t text;
+begin
+  foreach t in array array['books', 'resumes', 'rayons_ajoutes',
+                           'rayons_reglages', 'reading_quests']
+  loop
+    if to_regclass('public.' || t) is not null then
+      execute format('alter table public.%I no force row level security', t);
+    end if;
+  end loop;
+end $$;
 
 /* Pas d'extension pgcrypto : gen_random_uuid() est intégré à PostgreSQL
    depuis la version 13, et la production tourne en 17. Une extension de

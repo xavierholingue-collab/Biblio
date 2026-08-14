@@ -75,7 +75,8 @@ ok "tests : $(ls -1 "${DEPOT}/tests" 2>/dev/null | wc -l) fichiers"
 for t in test-fumee.js test-accueil.js parcours.spec.mjs playwright.config.mjs \
          test-cloisonnement.mjs test-contexte.mjs test-authentification.mjs \
          test-http-cloisonnement.mjs test-resumes-langues.mjs \
-         test-catalogue.mjs test-environnement.mjs banc-postgres.mjs; do
+         test-catalogue.mjs test-environnement.mjs test-rejeu.mjs \
+         banc-postgres.mjs; do
   [ -f "${DEPOT}/tests/${t}" ] || echec "tests/${t} absent — la CI l'appelle pourtant"
 done
 

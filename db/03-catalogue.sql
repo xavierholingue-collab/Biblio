@@ -132,8 +132,25 @@ create table if not exists public.resumes_ouvrages (
 do $$
 declare nb_avant integer; nb_apres integer; oublies integer;
 begin
+  /* LE GARDE-FOU DE REJOUABILITÉ DOIT VOIR, LUI AUSSI.
+   *
+   * « if exists (select 1 from possessions) » est une LECTURE, donc soumise
+   * au cloisonnement comme le reste. Au deuxième passage, sans locataire
+   * posé, elle ne rendrait rien : le fichier conclurait que la table est
+   * vide et relancerait la reprise sur une base déjà migrée.
+   *
+   * On lève donc les politiques AVANT de poser la question. Un garde-fou
+   * aveugle ne garde rien. */
+  alter table public.possessions      no force row level security;
+  alter table public.ouvrages         no force row level security;
+  alter table public.resumes_ouvrages no force row level security;
+
   if exists (select 1 from public.possessions) then
     raise notice 'possessions déjà rempli : reprise ignorée.';
+    -- On remet ce qu'on vient de lever, y compris dans ce chemin de sortie.
+    alter table public.possessions      force row level security;
+    alter table public.ouvrages         force row level security;
+    alter table public.resumes_ouvrages force row level security;
     return;
   end if;
 
