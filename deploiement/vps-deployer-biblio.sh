@@ -267,14 +267,52 @@ if [ -n "${URL}" ]; then
     done
     echo "  migrations appliquees a la copie"
 
-    if sudo -u postgres psql -v ON_ERROR_STOP=1 -d "${REPET}" -f "${VERIF}" \
-         >/tmp/verif-${BASE}.log 2>&1; then
+    # LE FICHIER DOIT ETRE LISIBLE PAR « postgres », ET IL NE L'ETAIT PAS.
+    #
+    # Defaut du 15/08/2026. « mktemp -d » cree le dossier en 700, appartenant
+    # a root ; l'utilisateur postgres n'y entre pas. psql rendait donc :
+    #
+    #   psql: erreur : .../verifier-migration.sql : Permission non accordee
+    #
+    # et le deploiement s'arretait en annoncant « la repetition ne concorde
+    # pas » — ce qui etait FAUX. Elle n'avait pas refuse : elle n'avait pas
+    # pu tourner. On a passe la production pour suspecte pendant une heure
+    # a cause d'un droit de lecture.
+    #
+    # C'est la meme distinction que « couverture absente » contre
+    # « couverture injoignable » : un controle qui ne peut pas s'executer
+    # doit le dire, jamais se faire passer pour un refus.
+    cp "${VERIF}" /tmp/verifier-migration.sql
+    chmod 644 /tmp/verifier-migration.sql
+
+    if sudo -u postgres psql -v ON_ERROR_STOP=1 -d "${REPET}" \
+         -f /tmp/verifier-migration.sql >/tmp/verif-${BASE}.log 2>&1; then
       grep -E '^(NOTICE|  )' /tmp/verif-${BASE}.log | sed 's/^NOTICE:  //' \
         | sed 's/^/       /' | head -20
     else
-      echo "  ECHEC la repetition ne concorde pas — LA PRODUCTION N'A PAS ETE TOUCHEE :"
-      grep -E 'ERROR|ERREUR' /tmp/verif-${BASE}.log | head -3 | sed 's/^/         /'
-      echo "         la copie reste en place pour examen : ${REPET}"
+      # ON MONTRE TOUT. Une premiere version filtrait sur « ERROR|ERREUR » et
+      # n'a RIEN affiche le 15/08/2026 : le journal est en francais, le
+      # message pouvait etre ailleurs, et l'operateur s'est retrouve devant
+      # « la repetition ne concorde pas » sans savoir quoi.
+      #
+      # Un rapport d'echec qui filtre risque de filtrer justement ce qu'on
+      # cherche. Quinze lignes de trop coutent moins qu'un aller-retour.
+      # « n'a pas pu tourner » et « a refuse » ne veulent pas dire la meme
+      # chose, et l'operateur n'a pas a le deviner.
+      if grep -qiE 'permission|denied|non accordee|could not connect|does not exist' \
+           /tmp/verif-${BASE}.log; then
+        echo "  ECHEC le controle N'A PAS PU S'EXECUTER — ce n'est pas un refus."
+        echo "        la migration n'a donc PAS ete eprouvee, et rien n'a ete migre."
+      else
+        echo "  ECHEC la repetition NE CONCORDE PAS — la migration abimerait vos donnees."
+      fi
+      echo "  LA PRODUCTION N'A PAS ETE TOUCHEE"
+      echo "  ---------------- ce que le controle a dit ----------------"
+      tail -25 /tmp/verif-${BASE}.log | sed 's/^/  /'
+      echo "  ----------------------------------------------------------"
+      echo "  la copie reste en place pour examen : ${REPET}"
+      echo "  pour rejouer le controle a la main :"
+      echo "    sudo -u postgres psql -d ${REPET} -f verifier-migration.sql"
       exit 1
     fi
   elif [ "${ENVIRONNEMENT}" != "recette" ]; then
