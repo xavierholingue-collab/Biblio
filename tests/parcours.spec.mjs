@@ -248,11 +248,15 @@ test.describe("Ce qui doit rester fermé", () => {
     expect(h["x-content-type-options"]).toBe("nosniff");
     expect(h["strict-transport-security"]).toContain("max-age=");
 
-    // Un rappel volontaire : tant que 'unsafe-inline' est là, la protection
-    // contre l'injection de script est affaiblie. Ce contrôle ne fait pas
-    // échouer la chaîne — il inscrit la dette dans le journal de livraison,
-    // pour qu'elle ne s'oublie pas.
-    if (csp.includes("'unsafe-inline'") && csp.includes("script-src")) {
+    /* Rappel de dette, s'il en reste une.
+       CORRIGÉ le 14/08/2026 : la condition cherchait 'unsafe-inline' dans la
+       politique ENTIÈRE. Or elle y figure encore légitimement — dans
+       style-src, que les empreintes ne peuvent pas couvrir puisque le script
+       pose des attributs style=. Le message s'affichait donc alors même que
+       script-src était devenu propre : un rapport qui annonce une dette
+       soldée est une désinformation, plus nuisible qu'un silence. */
+    const scriptSrc = /script-src([^;]*)/.exec(csp)?.[1] ?? "";
+    if (scriptSrc.includes("'unsafe-inline'")) {
       console.log("\n  DETTE : script-src autorise encore 'unsafe-inline'."
         + " La correction est une empreinte sha256 calculée à la livraison.\n");
     }
