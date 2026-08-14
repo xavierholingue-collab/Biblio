@@ -125,6 +125,44 @@ update public.reading_quests
    set tenant_id = (select id from public.tenants where identifiant = 'xavier')
  where tenant_id is null;
 
+/* =========================================================================
+   LES CLÉS PRIMAIRES DOIVENT INCLURE LE LOCATAIRE
+
+   Trouvé le 15/08/2026 en écrivant un contrôle : deux bibliothèques ne
+   peuvent pas contenir le même identifiant d'ouvrage. books.id était une
+   clé primaire GLOBALE.
+
+   Ce n'est pas une subtilité. Les identifiants sont du texte choisi par
+   chaque bibliothèque — « x042 », « b017 ». Le premier invité qui importe
+   son export interdit à tous les suivants d'avoir les mêmes, et l'erreur
+   ne dit rien d'utile : « duplicate key value violates unique constraint ».
+   L'invité conclurait que l'application refuse ses livres.
+
+   Le cloisonnement par lignes ne suffit donc pas : il fallait aussi
+   cloisonner l'espace des NOMS. Une politique de sécurité peut cacher la
+   ligne du voisin ; elle ne peut pas cacher qu'il a pris la place.
+
+   Idempotent : on ne touche à rien si la clé est déjà bonne.
+   ========================================================================= */
+
+do $$
+begin
+  if exists (select 1 from pg_constraint
+              where conrelid = 'public.books'::regclass and contype = 'p'
+                and array_length(conkey, 1) = 1) then
+    alter table public.books drop constraint books_pkey;
+    alter table public.books add primary key (tenant_id, id);
+  end if;
+
+  if exists (select 1 from pg_constraint
+              where conrelid = 'public.rayons_ajoutes'::regclass and contype = 'p'
+                and array_length(conkey, 1) = 2) then
+    alter table public.rayons_ajoutes drop constraint rayons_ajoutes_pkey;
+    alter table public.rayons_ajoutes alter column tenant_id set not null;
+    alter table public.rayons_ajoutes add primary key (tenant_id, categorie, libelle);
+  end if;
+end $$;
+
 /* ------------------------------------------------- Résumés, un par langue */
 
 create table if not exists public.resumes (
@@ -174,12 +212,28 @@ language sql stable security definer set search_path = public, pg_temp as $$
          is distinct from 'publique' then false
     when l.visibilite = 'privee'   then false
     when l.visibilite = 'publique' then true
-    -- Ouvrage hérité : on suit le rayon. Un rayon hérité suit la
-    -- bibliothèque, qui est publique à ce stade.
+    /* Ouvrage « hérité » : on suit le rayon — ET, EN L'ABSENCE DE RÉGLAGE,
+       ON NE PUBLIE PAS.
+
+       Une première version faisait l'inverse : un rayon sans réglage était
+       tenu pour hérité, donc suivait la bibliothèque, donc était public.
+       Le 15/08/2026, test-api.mjs l'a montré en une ligne — « fuite de
+       zz-test-1 » : un ouvrage personnel tout juste créé apparaissait sur
+       la page publique.
+
+       Le défaut n'était pas dans le SQL seul, il était dans le sens de la
+       règle. Une visibilité par défaut doit répondre à la question « que
+       fait-on quand PERSONNE n'a rien décidé ? », et la seule réponse
+       défendable pour une bibliothèque personnelle est : rien ne sort.
+       Publier par défaut fait porter l'erreur à l'utilisateur, en silence,
+       et il ne s'en aperçoit qu'une fois la donnée dehors.
+
+       Les ouvrages déjà publics ne sont pas concernés : la migration leur
+       pose « publique » explicitement à partir de la sphère Pro. */
     else coalesce((select r.visibilite from public.rayons_reglages r
                     where r.tenant_id = l.tenant_id
                       and r.categorie = l.categorie
-                      and r.sous_categorie = l.sous_categorie), 'heritee') <> 'privee'
+                      and r.sous_categorie = l.sous_categorie), 'privee') = 'publique'
   end;
 $$;
 

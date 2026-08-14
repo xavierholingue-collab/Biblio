@@ -4,8 +4,11 @@
 # CE QUE CHAQUE ÉTAGE PROUVE
 #
 #   Les contrôles montent une pile complète — PostgreSQL, schéma, API — et
-#   lui envoient les 44 vérifications de test-api.mjs. Ils attrapent une
+#   lui envoient les vérifications de test-api.mjs. Ils attrapent une
 #   régression de code ou de schéma avant qu'elle ne parte.
+#
+#   (Le nombre exact n'est plus écrit ici : il changeait à chaque ajout, et
+#   un chiffre périmé dans un commentaire finit par être cru.)
 #
 #   La vérification d'après-déploiement rejoue LE MÊME test contre
 #   l'instance installée. C'est le seul moment où l'on éprouve la
@@ -58,9 +61,19 @@ jobs:
       - name: Vérifier la syntaxe
         run: node --check api/server.js
 
+      # TOUS LES FICHIERS, ET DANS L'ORDRE DES NOMS — comme le fait le script
+      # de déploiement. Depuis le 15/08/2026 l'API exige le locataire par
+      # défaut (02) et la vue « livres » (03) : sans eux elle refuse de
+      # démarrer, ou tombe à la première requête. Ce refus est délibérément
+      # bruyant — une API qui démarrerait sans cloisonnement servirait tout
+      # à tout le monde.
       - name: Appliquer le schéma
         env: { PGPASSWORD: controle }
-        run: psql -h localhost -U biblio -d biblio -v ON_ERROR_STOP=1 -f db/01-schema.sql
+        run: |
+          for f in db/*.sql; do
+            echo "== ${f}"
+            psql -h localhost -U biblio -d biblio -v ON_ERROR_STOP=1 -f "${f}"
+          done
 
       - name: Installer les dépendances de l API
         working-directory: api
@@ -75,6 +88,9 @@ jobs:
           PGPASSWORD: controle
           PGDATABASE: biblio
           MOT_DE_PASSE: mot-de-passe-de-controle
+          # Persistant depuis le 15/08/2026 : un secret tire au hasard
+          # deconnecterait tout le monde a chaque livraison.
+          SECRET_SESSION: secret-de-controle-suffisamment-long-pour-passer
           # Pas de clef : les routes coûteuses doivent refuser proprement,
           # et c'est précisément ce que le test vérifie.
           ANTHROPIC_API_KEY: ''
@@ -120,27 +136,86 @@ jobs:
       - name: La page d accueil dit ce qu elle montre
         run: node tests/test-accueil.js
 
-      # ------------------------------------------------------------------
-      # CLOISONNEMENT ENTRE LOCATAIRES
+      # ==================================================================
+      # LES CONTROLES DE CLOISONNEMENT, TOUS SUR UN VRAI POSTGRESQL
       #
-      # Éprouve la Row-Level Security sur un vrai PostgreSQL, SOUS LE RÔLE
-      # APPLICATIF — sans quoi le contrôle ne prouverait rien : un
-      # superutilisateur contourne toutes les politiques en silence.
+      # Ils tournaient sur PGlite (PostgreSQL en WebAssembly) jusqu'au
+      # 15/08/2026. Deux defauts l'ont disqualifie :
       #
-      # Les trois mutations vérifiées le 15/08/2026 : accorder BYPASSRLS au
-      # rôle fait tomber 13 contrôles, retirer le verrou maître 3, rendre
-      # les politiques cumulatives 2.
+      #   — son unique role est superutilisateur, et un superutilisateur
+      #     traverse toutes les politiques EN SILENCE. Deux fichiers sont
+      #     passes au vert en montrant a chacun la bibliotheque de tous.
+      #   — il n'a qu'UNE session : l'observateur et l'observe la partagent,
+      #     et le controle finit par mesurer sa propre cecite.
       #
-      # NOTE : ce schéma n'est PAS encore appliqué en production. Activer la
-      # RLS avant que l'API ne pose app.tenant_id rendrait la bibliothèque
-      # invisible à sa propre application.
-      # ------------------------------------------------------------------
-      - name: Cloisonnement entre locataires
+      # DEUX COMPTES, et c'est le point :
+      #   biblio_app  celui de l'API. Proprietaire des tables, NI
+      #               superutilisateur NI BYPASSRLS. Le compte « biblio » du
+      #               service Docker est superutilisateur : s'en servir
+      #               ferait passer cet etage au vert quoi qu'il arrive.
+      #   biblio      l'observateur. Il doit voir ce que la base contient
+      #               REELLEMENT, sinon il ne distingue pas « la ligne a ete
+      #               protegee » de « je ne la vois pas ».
+      #
+      # Une base par fichier : chacun cree ses propres locataires, et deux
+      # jeux de donnees dans la meme base se marcheraient dessus.
+      # ==================================================================
+      - name: Preparer les comptes et les bases de controle
+        env: { PGPASSWORD: controle }
         run: |
-          npm install @electric-sql/pglite @electric-sql/pglite-socket pg \
-            --no-audit --no-fund --silent
-          node tests/test-cloisonnement.mjs
-          node tests/test-contexte.mjs
+          psql -h localhost -U biblio -d biblio -v ON_ERROR_STOP=1 -c \
+            "create role biblio_app login password 'controle' nosuperuser nobypassrls;"
+          for base in rls lang cat clois ctx; do
+            psql -h localhost -U biblio -d biblio -v ON_ERROR_STOP=1 -c \
+              "create database biblio_${base} owner biblio_app;"
+          done
+
+      - name: Cloisonnement, visibilite, catalogue, contexte
+        env: { PGPASSWORD: controle }
+        run: |
+          npm install pg --no-audit --no-fund --silent
+          lancer () {
+            echo "== $2"
+            PGURL=postgres://biblio_app:controle@localhost:5432/biblio_$1 \
+            PGURL_OEIL=postgres://biblio:controle@localhost:5432/biblio_$1 \
+              node tests/$2
+          }
+          lancer clois test-cloisonnement.mjs
+          lancer ctx   test-contexte.mjs
+          lancer cat   test-catalogue.mjs
+          lancer rls   test-http-cloisonnement.mjs
+          lancer lang  test-resumes-langues.mjs
+
+      # ------------------------------------------------------------------
+      # AUTHENTIFICATION PAR LIEN MAGIQUE
+      #
+      # Six des sept mutations essayees le 15/08/2026 sont attrapees. La
+      # septieme — remplacer timingSafeEqual par une comparaison ordinaire —
+      # n'en fait tomber aucune, et ne le peut pas : une attaque temporelle
+      # ne se voit pas dans un test de justesse. C'est ecrit en tete du
+      # fichier de test plutot que masque.
+      # ------------------------------------------------------------------
+      - name: Authentification par lien magique
+        run: |
+          npm install @electric-sql/pglite --no-audit --no-fund --silent
+          node tests/test-authentification.mjs
+
+      # ------------------------------------------------------------------
+      # LA RECETTE SE VOIT, LA PRODUCTION NE SE DEGUISE PAS
+      #
+      # Le bandeau n'est pas un ornement : c'est ce qui empeche d'effacer
+      # des donnees en croyant etre ailleurs. Eprouve DANS LES DEUX SENS —
+      # absent en recette il ne previent personne, present en production il
+      # devient un decor qu'on cesse de lire.
+      # ------------------------------------------------------------------
+      - name: L environnement s annonce
+        env: { PGPASSWORD: controle }
+        run: |
+          psql -h localhost -U biblio -d biblio -v ON_ERROR_STOP=1 -c \
+            "create database biblio_env owner biblio_app;"
+          PGURL=postgres://biblio_app:controle@localhost:5432/biblio_env \
+          PGURL_OEIL=postgres://biblio:controle@localhost:5432/biblio_env \
+            node tests/test-environnement.mjs
 
       - name: Fabriquer le paquet
         run: |
@@ -150,9 +225,73 @@ jobs:
       - uses: actions/upload-artifact@v7
         with: { name: paquet, path: paquet.tar.gz, retention-days: 7 }
 
+  # ==========================================================================
+  # LA RECETTE D'ABORD.
+  #
+  # C'est le seul endroit ou les migrations rencontrent une COPIE DE VOS
+  # DONNEES avant la production : pas trois cent vingt et un titres inventes,
+  # mais les vrais, avec leurs accents, leurs editeurs vides et leurs trois
+  # ASIN deguises en ISBN.
+  #
+  # « needs: recette » sur le travail suivant fait le reste : si la recette
+  # tombe, la production n'est jamais atteinte.
+  # ==========================================================================
+  recette:
+    name: Recette
+    needs: controles
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with: { name: paquet }
+
+      - name: Préparer l accès SSH
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "${{ secrets.CLE_DEPLOIEMENT_BIBLIO }}" > ~/.ssh/cle
+          chmod 600 ~/.ssh/cle
+          printf '%s\n' "${{ secrets.EMPREINTE_HOTE }}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Déployer en recette
+        run: |
+          ssh -i ~/.ssh/cle \
+              -o UserKnownHostsFile=~/.ssh/known_hosts \
+              -o StrictHostKeyChecking=yes -o ConnectTimeout=20 \
+              root@${{ secrets.HOTE_VPS }} "deployer biblio-recette" < paquet.tar.gz
+
+      # La recette est fermee par un mot de passe HTTP : sans lui, ce
+      # controle recevrait un 401 et conclurait que le service est mort.
+      - name: La recette repond, et se declare comme telle
+        env:
+          AUTH: ${{ secrets.AUTH_RECETTE_BIBLIO }}
+        timeout-minutes: 5
+        run: |
+          base=https://biblio-recette.xavier-holingue.eu
+          code=$(curl -s -o /dev/null -w '%{http_code}' -u "${AUTH}" --max-time 25 "${base}/")
+          echo "  page : ${code}"
+          [ "${code}" = "200" ] || exit 1
+
+          # LE CONTROLE QUI COMPTE ICI. Une recette qui se declare
+          # « production » serait pire qu'absente : on s'y croirait en
+          # securite pour y faire des betises.
+          env=$(curl -s -u "${AUTH}" --max-time 25 "${base}/api/session" \
+                | grep -o '"environnement":"[a-z]*"' | cut -d'"' -f4)
+          echo "  environnement annonce : ${env}"
+          [ "${env}" = "recette" ] || {
+            echo "  ECHEC la recette ne se declare pas comme telle"; exit 1; }
+
+          # Et elle ne doit pas etre indexable.
+          curl -sI -u "${AUTH}" --max-time 25 "${base}/" \
+            | grep -qi '^x-robots-tag:.*noindex' \
+            || { echo "  ECHEC la recette est indexable"; exit 1; }
+          echo "  noindex present"
+
   production:
     name: Production
-    needs: controles
+    needs: recette
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     environment: production
@@ -178,6 +317,15 @@ jobs:
               -o UserKnownHostsFile=~/.ssh/known_hosts \
               -o StrictHostKeyChecking=yes -o ConnectTimeout=20 \
               root@${{ secrets.HOTE_VPS }} "deployer biblio" < paquet.tar.gz
+
+      # La production, elle, ne doit SURTOUT PAS se declarer en recette.
+      - name: La production ne se deguise pas
+        run: |
+          env=$(curl -s --max-time 25 https://biblio.xavier-holingue.eu/api/session \
+                | grep -o '"environnement":"[a-z]*"' | cut -d'"' -f4)
+          echo "  environnement annonce : ${env:-absent}"
+          [ "${env}" != "recette" ] || {
+            echo "  ECHEC la production se declare en recette"; exit 1; }
 
       # LE contrôle qui compte : le même test, contre l instance réelle.
       - name: Vérifications de l API contre l instance déployée

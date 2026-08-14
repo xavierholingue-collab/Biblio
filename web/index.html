@@ -3,6 +3,18 @@
 <title>Une bibliothèque de travail</title>
 <meta name="description" content="Bibliothèque professionnelle : management, décision, industrie, numérique, philosophie et sciences sociales.">
 <style>
+  /* ------------------------------------------------- Bandeau de recette
+     Visible, mais pas decoratif : il repond a une question de securite.
+     On efface un jour des donnees en croyant etre ailleurs. */
+  #bandeau-recette {
+    position: sticky; top: 0; z-index: 999;
+    background: #8A3B4A; color: #fff;
+    padding: .5rem 1rem; text-align: center;
+    font: 600 .85rem/1.4 system-ui, sans-serif;
+    letter-spacing: .04em;
+  }
+  #bandeau-recette[hidden] { display: none; }
+
   :root {
     --paper:      #E9EBE6;
     --paper-2:    #F2F3EF;
@@ -140,6 +152,40 @@
   .erreur { padding: 24px; border: 1px solid var(--roman); color: var(--roman); font-size: 14px; margin: 34px 0; }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
+
+<div id="bandeau-recette" hidden>RECETTE — ces donnees sont une copie, rien de ce qui est fait ici n'atteint la bibliotheque reelle</div>
+
+<!-- Le bandeau a SON PROPRE script, classique et autonome. Deux raisons.
+
+     Une premiere version l'avait glisse dans le dernier bloc de la page —
+     qui se trouve etre le module du scanner de codes-barres. Le bandeau
+     dependait donc du chargement d'un module qui n'a rien a voir : s'il
+     echoue, ou si le navigateur le refuse, l'avertissement disparait
+     exactement quand on en aurait besoin.
+
+     Et il doit s'executer TOT. Un bandeau qui apparait apres qu'on a
+     commence a cliquer ne previent plus, il constate. -->
+<script>
+/* L'API dit quel environnement elle sert ; la page l'affiche. Une seule
+   source, celle du serveur — une page ne peut pas deviner ou elle tourne,
+   et un test sur le nom de domaine se tromperait des qu'on en ajoute un.
+
+   En cas d'echec de l'appel, on ne montre RIEN. Le sens de ce choix : un
+   bandeau affiche a tort en production serait embarrassant, tandis que son
+   absence en recette se remarque des le premier clic. */
+(async () => {
+  try {
+    const r = await fetch("/api/session", { credentials: "same-origin" });
+    if (!r.ok) return;
+    const s = await r.json();
+    if (s.environnement === "recette") {
+      const b = document.getElementById("bandeau-recette");
+      if (b) b.hidden = false;
+    }
+  } catch { /* silence : voir la note ci-dessus */ }
+})();
+</script>
+
 
 <div class="wrap">
   <header class="bandeau">
@@ -464,4 +510,5 @@ function dessinerListes(stats) {
       + ". Le serveur est-il démarré ?";
   }
 })();
+
 </script>

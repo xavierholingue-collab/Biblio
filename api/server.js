@@ -8,6 +8,7 @@ import { createServer } from "node:http";
 import { randomBytes, createHmac, timingSafeEqual } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import pg from "pg";
+import { avecContexte, avecVisiteur } from "./locataire.mjs";
 
 const PORT = Number(process.env.PORT ?? 3000);
 const MOT_DE_PASSE = process.env.MOT_DE_PASSE ?? "";
@@ -17,6 +18,11 @@ const FICHIER_AMORCE = process.env.FICHIER_AMORCE ?? "/seed/bibliotheque.json";
 // Faux par défaut : un visiteur anonyme ne doit pas pouvoir dépenser vos crédits.
 const IA_PUBLIQUE = process.env.IA_PUBLIQUE === "true";
 const DUREE_SESSION = 30 * 24 * 3600 * 1000; // 30 jours
+
+/* Le locataire auquel le mot de passe historique donne accès.
+   Tant qu'il n'y a qu'une bibliothèque, MOT_DE_PASSE ouvre celle-ci. */
+const TENANT_DEFAUT = process.env.TENANT_DEFAUT ?? "xavier";
+let ID_TENANT_DEFAUT = null;   // résolu au démarrage, voir attendreLaBase()
 
 /* Derrière un proxy inverse (Caddy sur le VPS), deux choses changent.
  *
@@ -32,6 +38,18 @@ const DUREE_SESSION = 30 * 24 * 3600 * 1000; // 30 jours
  * En local (docker compose), DERRIERE_PROXY est absent : le comportement
  * d'origine est conservé, et le cookie reste utilisable sur http://localhost. */
 const DERRIERE_PROXY = process.env.DERRIERE_PROXY === "1";
+
+/* QUEL ENVIRONNEMENT SERT CETTE PAGE.
+ *
+ * Renvoyé par /api/session, affiché en bandeau par les pages. On efface un
+ * jour des données en croyant être ailleurs ; autant que « ailleurs » soit
+ * écrit en haut de l'écran.
+ *
+ * La valeur par défaut est « production », et c'est le bon sens : un
+ * environnement mal configuré doit se comporter comme le plus prudent, pas
+ * comme le plus permissif. Un bandeau oublié en production serait gênant ;
+ * une recette qui se fait passer pour la production serait dangereuse. */
+const ENVIRONNEMENT = process.env.ENVIRONNEMENT === "recette" ? "recette" : "production";
 const COOKIE_SECURE = DERRIERE_PROXY ? " Secure;" : "";
 
 /** Adresse réelle du client, telle que la voit le proxy de confiance. */
@@ -56,9 +74,37 @@ if (!MOT_DE_PASSE) {
   process.exit(1);
 }
 
-// Secret de signature des sessions, régénéré à chaque démarrage :
-// redémarrer le conteneur déconnecte, ce qui est le comportement souhaité.
-const SECRET = randomBytes(32);
+/* SECRET DE SIGNATURE DES SESSIONS — pourquoi il doit survivre au redémarrage.
+ *
+ * Une première version le tirait au hasard à chaque démarrage. Pour un outil
+ * personnel, c'était défendable : redémarrer déconnectait, et il n'y avait
+ * qu'un utilisateur pour s'en apercevoir.
+ *
+ * Dès qu'il y a des invités, ce n'est plus tenable : CHAQUE LIVRAISON les
+ * déconnecterait tous, sans explication et sans qu'on le voie passer. Le
+ * secret vient donc de l'environnement.
+ *
+ * En production (derrière le proxy), son absence ARRÊTE le démarrage. Se
+ * rabattre en silence sur un secret aléatoire produirait exactement le défaut
+ * qu'on cherche à éviter, en plus discret : tout fonctionnerait, et les
+ * sessions tomberaient à chaque déploiement sans que rien ne le signale. */
+const SECRET = (() => {
+  const fourni = process.env.SECRET_SESSION ?? "";
+  if (fourni.length >= 32) return Buffer.from(fourni, "utf8");
+  if (fourni) {
+    console.error("SECRET_SESSION trop court : 32 caractères au minimum.");
+    process.exit(1);
+  }
+  if (DERRIERE_PROXY) {
+    console.error(
+      "SECRET_SESSION absent. En production, un secret tiré au hasard\n" +
+      "déconnecterait tout le monde à chaque livraison. Posez-le dans\n" +
+      "/etc/biblio/env :  SECRET_SESSION=$(openssl rand -base64 48)");
+    process.exit(1);
+  }
+  console.warn("SECRET_SESSION absent : secret volatil (développement local).");
+  return randomBytes(32);
+})();
 
 const bd = new pg.Pool({
   host: process.env.PGHOST ?? "db",
@@ -74,6 +120,18 @@ const bd = new pg.Pool({
   // requetes devant un vrai moteur avant de les livrer.
   max: Number(process.env.PGMAX ?? 8),
 });
+
+/* Plus de PGROLE ici.
+ *
+ * Une variable existait pour endosser un rôle restreint à l'ouverture de
+ * chaque connexion. Elle ne servait qu'au banc d'essai PGlite, dont l'unique
+ * rôle est superutilisateur — et un superutilisateur traverse toutes les
+ * politiques EN SILENCE.
+ *
+ * Les contrôles tournent désormais sur un vrai PostgreSQL, avec le compte de
+ * production. Le contournement n'a plus d'objet, et du code qui n'existe que
+ * pour le banc d'essai finit toujours par être exécuté en production.
+ */
 
 /* ---------------------------------------------------------------- Outils */
 
@@ -97,11 +155,11 @@ const SOUS_CATEGORIES = {
 /* Les rayons effectivement disponibles : le socle figé dans le code, plus
    ceux que vous avez acceptés en cours de route. Relu à chaque appel — la
    liste change rarement, et une liste périmée rangerait mal. */
-async function rayonsDisponibles() {
+async function rayonsDisponibles(client) {
   const listes = {};
   for (const c of Object.keys(SOUS_CATEGORIES)) listes[c] = [...SOUS_CATEGORIES[c]];
   try {
-    const { rows } = await bd.query(
+    const { rows } = await client.query(
       "select categorie, libelle from rayons_ajoutes order by libelle");
     for (const r of rows) {
       if (!listes[r.categorie] || listes[r.categorie].includes(r.libelle)) continue;
@@ -116,16 +174,22 @@ async function rayonsDisponibles() {
   return listes;
 }
 
-async function ajouterRayon({ categorie, libelle }) {
+async function ajouterRayon(client, { categorie, libelle }) {
   const l = String(libelle ?? "").replace(/\s+/g, " ").trim();
   if (!SOUS_CATEGORIES[categorie]) { const e = new Error("Catégorie inconnue."); e.statut = 400; throw e; }
   if (l.length < 2 || l.length > 60) { const e = new Error("Le nom du rayon doit faire 2 à 60 caractères."); e.statut = 400; throw e; }
   if (l === "Non classé") { const e = new Error("« Non classé » existe déjà."); e.statut = 400; throw e; }
 
-  await bd.query(
-    "insert into rayons_ajoutes (categorie, libelle) values ($1, $2) on conflict do nothing",
+  /* tenant_id explicite : la colonne est NOT NULL et la politique d'écriture
+     exige qu'elle vaille le locataire courant. On le lit dans le réglage de
+     session plutôt que de le faire circuler dans les paramètres — une seule
+     source, celle que PostgreSQL applique. */
+  await client.query(
+    `insert into rayons_ajoutes (categorie, libelle, tenant_id)
+     values ($1, $2, nullif(current_setting('app.tenant_id', true), '')::uuid)
+     on conflict do nothing`,
     [categorie, l]);
-  return { categorie, libelle: l, rayons: await rayonsDisponibles() };
+  return { categorie, libelle: l, rayons: await rayonsDisponibles(client) };
 }
 
 function json(rep, corps, statut = 200, entetes = {}) {
@@ -203,33 +267,82 @@ function noterEchec(ip) {
 
 /* --------------------------------------------------------------- Données */
 
-const COLONNES = `id, isbn, titre, auteur, editeur, annee, statut, note, categorie,
-  sous_categorie, sphere, cover_url, cover_statut, resume, resume_points,
-  resume_themes, resume_modele, resume_fiabilite, resume_genere_le`;
+/* =========================================================================
+   LE RÉSUMÉ N'EST PLUS DANS LA FICHE, IL EST À CÔTÉ — UN PAR LANGUE.
 
-// Un visiteur sans session ne voit que le périmètre professionnel.
-async function listerLivres(session) {
-  if (session) {
-    const { rows } = await bd.query(`select ${COLONNES} from books order by auteur, titre`);
-    return rows;
-  }
-  const { rows } = await bd.query(
-    `select ${COLONNES} from books where sphere = 'Pro' order by auteur, titre`);
+   Les colonnes books.resume* existent toujours : la migration les a
+   recopiées dans « resumes », et les supprimer serait irréversible. Mais
+   plus rien ne les lit ni ne les écrit. Une donnée écrite à deux endroits
+   finit toujours par diverger, et c'est la copie périmée qui s'affiche.
+
+   Les NOMS DE CHAMPS RENDUS PAR L'API NE CHANGENT PAS : la jointure les
+   rebaptise. Le front-end continue de lire « resume », « resume_points » et
+   les autres sans rien savoir de la table. C'est ce qui permet de faire
+   cette bascule sans toucher aux pages.
+   ========================================================================= */
+
+/* On NOMME les colonnes plutôt que d'écrire « b.* ».
+   La vue porte aussi tenant_id : l'étoile le renverrait au navigateur, et
+   personne ne s'en apercevrait avant de lire une réponse JSON. */
+const CHAMPS_LIVRE = `b.id, b.ouvrage_id, b.isbn, b.titre, b.auteur, b.editeur,
+  b.annee, b.pages, b.statut, b.note, b.categorie, b.sous_categorie, b.sphere,
+  b.cover_url, b.cover_statut, b.visibilite`;
+
+const CHAMPS_RESUME = `r.resume, r.points as resume_points, r.themes as resume_themes,
+  r.modele as resume_modele, r.fiabilite as resume_fiabilite,
+  r.genere_le as resume_genere_le, r.langue as resume_langue`;
+
+/* La langue est un PARAMÈTRE, jamais interpolée : elle vient de la requête
+   HTTP. « $1 » ici oblige les appelants à la passer en tête de leurs
+   propres paramètres — c'est contraignant, et c'est voulu : une jointure
+   sans langue rendrait autant de lignes que de traductions. */
+/* « livres » est la vue qui recolle le catalogue partagé et vos possessions.
+   Le résumé se rattache à l'OUVRAGE, pas à la possession : c'est tout
+   l'intérêt du partage. Sa lisibilité est décidée par la politique
+   resumes_ouvrages_lecture, pas ici. */
+const LIVRES_AVEC_RESUME = `select ${CHAMPS_LIVRE}, ${CHAMPS_RESUME}
+  from livres b
+  left join resumes_ouvrages r
+    on r.ouvrage_id = b.ouvrage_id and r.langue = $1`;
+
+const LANGUES = ["fr", "en"];
+
+/** Langue demandée : le paramètre d'URL prime, puis celle du locataire. */
+async function langueDemandee(client, url, session) {
+  const voulue = url?.searchParams?.get("langue");
+  if (LANGUES.includes(voulue)) return voulue;
+  if (!session) return "fr";
+  // « tenants » n'est pas cloisonnée : c'est la table qui DÉFINIT les
+  // locataires, elle ne peut pas dépendre de l'un d'eux.
+  const { rows } = await client.query(
+    "select langue from tenants where id = $1", [session.t]);
+  return LANGUES.includes(rows[0]?.langue) ? rows[0].langue : "fr";
+}
+
+/* PLUS AUCUN FILTRE ÉCRIT ICI — et c'est le point de toute la bascule.
+ *
+ * Avant, cette fonction ajoutait « where sphere = 'Pro' » pour un visiteur.
+ * Un filtre écrit à la main ne protège que la requête où on a pensé à
+ * l'écrire : il suffit d'une nouvelle route, d'un oubli, d'une jointure, et
+ * la donnée privée sort.
+ *
+ * Désormais le périmètre est décidé par PostgreSQL, à partir du locataire
+ * posé dans la transaction. Une requête qui oublie le filtre ne rend pas
+ * trop de lignes : elle n'en rend aucune. */
+async function listerLivres(client, langue) {
+  const { rows } = await client.query(
+    `${LIVRES_AVEC_RESUME} order by b.auteur, b.titre`, [langue]);
   return rows;
 }
 
 // Statistiques de la page d'accueil, calculées sur le périmètre visible.
-async function statistiques(session) {
-  const ou = session ? "" : "where sphere = 'Pro'";
-  const et = session ? "where" : "and";
-
-  const [general, sousCats, decennies, auteurs, recents] = await Promise.all([
-    bd.query(`select
+async function statistiques(client, session, langue) {
+  const [general, resumes, sousCats, decennies, auteurs, recents] = await Promise.all([
+    client.query(`select
         count(*)::int                                          as total,
         count(*) filter (where statut = 'Lu')::int              as lus,
         count(*) filter (where statut = 'En cours')::int        as en_cours,
         count(*) filter (where statut = 'A lire')::int          as a_lire,
-        count(resume)::int                                     as avec_resume,
         count(distinct auteur)::int                            as auteurs,
         count(distinct sous_categorie)::int                     as rayons,
         round(avg(note)::numeric, 2)                                    as note_moyenne,
@@ -247,29 +360,61 @@ async function statistiques(session) {
         count(pages)::int                                      as pages_connues,
         min(annee)::int                                        as annee_min,
         max(annee)::int                                        as annee_max
-      from books ${ou}`),
-    bd.query(`select sous_categorie, categorie, count(*)::int as n,
+      from livres`),
+
+    /* Le compte des résumés, dans une requête à part et PAR LANGUE.
+     *
+     * Une première version le calculait par sous-requête corrélée dans
+     * l'agrégat, ce qui imposait un « group by » — et un group by sur une
+     * bibliothèque VIDE ne rend aucune ligne : general.rows[0] devenait
+     * indéfini et la page d'accueil tombait. Le cas vide est précisément
+     * celui d'un nouvel invité.
+     *
+     * La jointure porte sur les deux clés : sans book_id, on compterait
+     * les résumés d'ouvrages effacés. */
+    client.query(
+      /* Compté à travers « livres », comme tout le reste de cette fonction.
+       *
+       * Une première version interrogeait possessions directement, avec un
+       * simple « exists ». Depuis que la politique de lecture est permissive
+       * — à vous OU public —, ce « exists » attrapait aussi les ouvrages
+       * publics des autres : les statistiques de votre bibliothèque
+       * grossissaient à mesure que des invités rendaient des livres publics.
+       *
+       * La vue porte déjà la distinction « ma bibliothèque » / « ce qui est
+       * public ». S'en servir, c'est n'avoir qu'un seul endroit où cette
+       * règle est écrite. */
+      `select count(*)::int as n
+         from livres l
+         join resumes_ouvrages r
+           on r.ouvrage_id = l.ouvrage_id and r.langue = $1
+        where r.resume is not null`,
+      [langue]),
+
+    client.query(`select sous_categorie, categorie, count(*)::int as n,
                      count(*) filter (where statut = 'Lu')::int as lus,
                      coalesce(sum(pages), 0)::bigint as pages_volume,
                      count(pages)::int as pages_connues
-              from books ${ou}
+              from livres
               group by sous_categorie, categorie
               order by n desc`),
-    bd.query(`select (annee / 10 * 10)::int as decennie, count(*)::int as n
-              from books ${ou} ${et} annee is not null
+    client.query(`select (annee / 10 * 10)::int as decennie, count(*)::int as n
+              from livres where annee is not null
               group by 1 order by 1`),
-    bd.query(`select auteur, count(*)::int as n
-              from books ${ou}
+    client.query(`select auteur, count(*)::int as n
+              from livres
               group by auteur having count(*) > 1
               order by n desc, auteur limit 10`),
-    bd.query(`select id, titre, auteur, annee, sous_categorie
-              from books ${ou} ${et} annee is not null
+    client.query(`select id, titre, auteur, annee, sous_categorie
+              from livres where annee is not null
               order by annee desc, titre limit 8`),
   ]);
 
   return {
     perimetre: session ? "complet" : "professionnel",
+    langue,
     ...general.rows[0],
+    avec_resume: resumes.rows[0].n,
     note_moyenne: general.rows[0].note_moyenne === null ? null : Number(general.rows[0].note_moyenne),
     // pg rend les BIGINT en CHAINE, pour ne pas perdre de precision au-dela
     // de 2^53. Sans cette conversion, « volume + volume » concatenerait deux
@@ -283,44 +428,156 @@ async function statistiques(session) {
 }
 
 // Insertion ou mise à jour d'un lot d'ouvrages, en une seule requête.
-async function enregistrerLivres(livres) {
+async function enregistrerLivres(client, livres) {
   if (!livres.length) return 0;
-  const champs = ["id", "isbn", "titre", "auteur", "editeur", "annee", "statut", "note",
-    "categorie", "sous_categorie", "sphere", "cover_url", "cover_statut", "resume",
-    "resume_points", "resume_themes", "resume_modele", "resume_fiabilite", "resume_genere_le"];
 
-  const valeurs = [];
-  const lignes = livres.map((l, i) => {
-    const base = i * champs.length;
-    valeurs.push(
-      l.id, l.isbn || null, l.titre, l.auteur, l.editeur || null,
-      l.annee ?? null, l.statut ?? "A lire", l.note ?? null,
-      l.categorie, l.sous_categorie ?? l.sousCategorie,
-      l.sphere ?? (l.categorie === "Académique" ? "Pro" : "Perso"),
-      l.cover_url ?? l.coverUrl ?? null,
-      l.cover_statut ?? l.coverStatut ?? "inconnu",
-      l.resume ?? null,
-      l.resume_points ?? l.resumePoints ?? null,
-      l.resume_themes ?? l.resumeThemes ?? null,
-      l.resume_modele ?? l.resumeModele ?? null,
-      l.resume_fiabilite ?? l.resumeFiabilite ?? null,
-      l.resume_genere_le ?? l.resumeGenereLe ?? null,
-    );
-    return "(" + champs.map((_, j) => `$${base + j + 1}`).join(",") + ")";
+  /* =======================================================================
+     ENREGISTRER, C'EST DÉSORMAIS DEUX GESTES DISTINCTS
+
+       1. le CATALOGUE   — ce que le livre est. Partagé.
+       2. la POSSESSION  — ce que vous en faites. À vous.
+
+     Et un troisième, facultatif : corriger le catalogue. Il vient EN
+     DERNIER, une fois la possession écrite, parce que la politique
+     « ouvrages_correction » n'autorise à corriger que ce qu'on possède.
+     Dans l'autre ordre, votre première correction serait refusée.
+     ======================================================================= */
+
+  const norme = (v) => String(v ?? "").replace(/[^0-9Xx]/g, "");
+  const entrees = livres.map((l) => {
+    const isbn = norme(l.isbn);
+    const sphere = l.sphere ?? (l.categorie === "Académique" ? "Pro" : "Perso");
+    return {
+      id: l.id,
+      isbn: isbn.length === 13 ? isbn : null,
+      titre: l.titre,
+      auteur: l.auteur,
+      editeur: l.editeur || null,
+      annee: l.annee ?? null,
+      pages: l.pages ?? null,
+      cover_url: l.cover_url ?? l.coverUrl ?? null,
+      cover_statut: l.cover_statut ?? l.coverStatut ?? "inconnu",
+      statut: l.statut ?? "A lire",
+      note: l.note ?? null,
+      categorie: l.categorie,
+      sous_categorie: l.sous_categorie ?? l.sousCategorie,
+      sphere,
+
+      /* VISIBILITÉ D'UN OUVRAGE NOUVEAU.
+       *
+       * La colonne vaut « heritee » par défaut, et un ouvrage hérité qui ne
+       * trouve aucun réglage de rayon reste PRIVÉ (voir possession_publique
+       * dans 03-catalogue.sql). Sans cette ligne, tout ouvrage ajouté après
+       * la bascule disparaîtrait de la page publique, y compris les
+       * professionnels — l'inverse du comportement actuel.
+       *
+       * On reproduit donc la règle d'avant : Pro est public, Perso ne l'est
+       * pas. C'est un point de départ, pas une fatalité.
+       *
+       * ATTENTION POUR LE MENU DE RÉGLAGES À VENIR : la mise à jour écrase
+       * ce champ. Le client DEVRA renvoyer la visibilité qu'il détient,
+       * sans quoi chaque enregistrement effacerait le choix de
+       * l'utilisateur. */
+      visibilite: l.visibilite ?? (sphere === "Pro" ? "publique" : "privee"),
+    };
   });
 
-  const misAJour = champs.slice(1).map(c => `${c} = excluded.${c}`).join(", ");
-  await bd.query(
-    `insert into books (${champs.join(",")}) values ${lignes.join(",")}
-     on conflict (id) do update set ${misAJour}`,
-    valeurs,
-  );
+  /* Un seul paramètre : le tableau d'objets, décomposé par PostgreSQL.
+     Cent livres feraient sinon mille quatre cents paramètres numérotés à la
+     main, et une erreur de décalage y serait indétectable à la lecture. */
+  const charge = JSON.stringify(entrees);
+
+  /* La CLÉ est calculée côté base, à partir du locataire courant — jamais
+     d'un champ envoyé par le client. Un ouvrage sans ISBN valide reçoit une
+     identité locale : mieux vaut ne rien mutualiser que mutualiser sur une
+     clé fausse. */
+  const CLE = `case when e.isbn is not null then 'isbn:' || e.isbn
+                    else 'local:' || current_setting('app.tenant_id', true) || ':' || e.id end`;
+
+  const SOURCE = `jsonb_to_recordset($1::jsonb) as e(
+      id text, isbn text, titre text, auteur text, editeur text, annee int,
+      pages int, cover_url text, cover_statut text, statut text, note numeric,
+      categorie text, sous_categorie text, sphere text, visibilite text)`;
+
+  const MOI = `nullif(current_setting('app.tenant_id', true), '')::uuid`;
+
+  /* ENREGISTRER SANS L'ISBN NE DOIT PAS DÉTACHER LE LIVRE DU CATALOGUE.
+   *
+   * Défaut trouvé le 15/08/2026. Une fiche renvoyée sans son ISBN — parce
+   * que le champ est vide, parce qu'un formulaire ne le porte pas — se
+   * voyait attribuer une clé LOCALE, donc un ouvrage neuf, donc PLUS AUCUN
+   * RÉSUMÉ. Un texte payé disparaissait sur une sauvegarde anodine.
+   *
+   * Règle retenue : on ne change l'ouvrage rattaché QUE si la fiche porte
+   * un ISBN valide. Sans ISBN, on garde le rattachement existant. Changer
+   * d'identité est un geste délibéré ; l'absence d'information n'en est
+   * pas un.
+   *
+   * Conséquence sur l'étape 1 : inutile de créer un ouvrage local pour une
+   * possession qui en a déjà un — ce serait une entrée orpheline dans un
+   * catalogue partagé. */
+
+  // 1. Le catalogue. « do nothing » : un enregistrement en lot ne réécrit
+  //    jamais un ouvrage déjà connu — la correction est un geste séparé.
+  await client.query(
+    `insert into ouvrages (cle, isbn, titre, auteur, editeur, annee, pages,
+                           cover_url, cover_statut)
+     select distinct on (cle) * from (
+       select ${CLE} as cle, e.isbn, e.titre, e.auteur, e.editeur, e.annee,
+              e.pages, e.cover_url, coalesce(e.cover_statut, 'inconnu')
+         from ${SOURCE}
+         left join possessions p on p.tenant_id = ${MOI} and p.id = e.id
+        where e.isbn is not null or p.id is null) t
+     on conflict (cle) do nothing`, [charge]);
+
+  // 2. La possession. Le locataire vient du réglage de session, celui-là
+  //    même que la politique d'écriture vérifie.
+  await client.query(
+    `insert into possessions (tenant_id, id, ouvrage_id, statut, note,
+                              categorie, sous_categorie, sphere, visibilite, maj_le)
+     select ${MOI}, e.id,
+            case when e.isbn is not null then o.id
+                 else coalesce(p.ouvrage_id, o.id) end,
+            coalesce(e.statut, 'A lire'), e.note,
+            e.categorie, e.sous_categorie, e.sphere, e.visibilite, now()
+       from ${SOURCE}
+       left join possessions p on p.tenant_id = ${MOI} and p.id = e.id
+       left join ouvrages o on o.cle = ${CLE}
+      where o.id is not null or p.ouvrage_id is not null
+     on conflict (tenant_id, id) do update set
+       ouvrage_id = excluded.ouvrage_id, statut = excluded.statut,
+       note = excluded.note, categorie = excluded.categorie,
+       sous_categorie = excluded.sous_categorie, sphere = excluded.sphere,
+       visibilite = excluded.visibilite, maj_le = now()`, [charge]);
+
+  /* 3. La correction du catalogue, pour les ouvrages qu'on possède.
+   *
+   * C'est ici que se paie le partage : corriger un titre le corrige POUR
+   * TOUS ceux qui ont la même édition. C'est voulu — une coquille est une
+   * coquille pour tout le monde — mais cela veut dire qu'une saisie
+   * approximative se propage aussi.
+   *
+   * La politique « ouvrages_correction » limite la casse : on ne touche
+   * qu'à ce qu'on possède. Une modification qu'elle refuse ne lève pas
+   * d'erreur, elle touche zéro ligne. */
+  await client.query(
+    `update ouvrages o set
+       titre = e.titre, auteur = e.auteur, editeur = e.editeur, annee = e.annee,
+       pages = coalesce(e.pages, o.pages),
+       cover_url = coalesce(e.cover_url, o.cover_url),
+       cover_statut = case when e.cover_url is not null
+                           then coalesce(e.cover_statut, 'inconnu')
+                           else o.cover_statut end,
+       maj_le = now()
+       from ${SOURCE}
+      where o.cle = ${CLE} and e.isbn is not null`, [charge]);
+
   return livres.length;
 }
 
 // Amorçage au premier démarrage, depuis l'export JSON de l'ancienne application.
-async function amorcerSiVide() {
-  const { rows } = await bd.query("select count(*)::int as n from books");
+async function amorcerSiVide(client) {
+  const { rows } = await client.query("select count(*)::int as n from possessions");
   if (rows[0].n > 0) {
     console.log(`Base déjà peuplée : ${rows[0].n} ouvrages.`);
     return;
@@ -337,7 +594,7 @@ async function amorcerSiVide() {
   if (!Array.isArray(contenu) || !contenu.length) return;
   const lot = 200;
   for (let i = 0; i < contenu.length; i += lot) {
-    await enregistrerLivres(contenu.slice(i, i + lot));
+    await enregistrerLivres(client, contenu.slice(i, i + lot));
   }
   console.log(`Amorçage : ${contenu.length} ouvrages importés.`);
 }
@@ -392,13 +649,27 @@ function extraireJson(texte) {
 
 /* ------------------------------------------------------------- Endpoints */
 
-async function resumerLivre({ bookId, forcer }) {
-  const { rows } = await bd.query(`select ${COLONNES} from books where id = $1`, [bookId]);
+/* « dans » et non « client » — la différence tient à la durée.
+ *
+ * Un appel au modèle avec recherche web dure des dizaines de secondes. Le
+ * tenir à l'intérieur d'une transaction immobiliserait une connexion du pool
+ * tout ce temps, et il n'y en a que huit : quelques résumés simultanés et
+ * l'application entière cesse de répondre, y compris pour la page publique.
+ *
+ * On ouvre donc DEUX contextes courts — un pour lire, un pour écrire — et le
+ * modèle est appelé entre les deux, sans connexion en main. */
+async function resumerLivre(dans, langue, { bookId, forcer }) {
+  const rows = await dans((c) =>
+    c.query(`${LIVRES_AVEC_RESUME} where b.id = $2`, [langue, bookId]).then(r => r.rows));
   const l = rows[0];
   if (!l) { const e = new Error("Ouvrage introuvable"); e.statut = 404; throw e; }
 
+  /* Le cache est PAR LANGUE. Un résumé français déjà écrit ne dispense pas
+     d'en produire un anglais : sans ce détail, demander l'anglais rendrait
+     le français, et personne ne s'en apercevrait avant de le lire. */
   if (l.resume && !forcer) {
-    return { resume: l.resume, points: l.resume_points ?? [], themes: l.resume_themes ?? [], cache: true };
+    return { resume: l.resume, points: l.resume_points ?? [], themes: l.resume_themes ?? [],
+             langue, cache: true };
   }
 
   const consigne = `Tu résumes un ouvrage pour la fiche de lecture d'une bibliothèque personnelle.
@@ -431,28 +702,39 @@ Termine en appelant l'outil enregistrer_resume. N'écris rien d'autre.`;
   const info = appel?.input
     ?? extraireJson(blocs.filter(b => b.type === "text").map(b => b.text).join("\n"));
 
-  await bd.query(
-    `update books set resume = $2, resume_points = $3, resume_themes = $4,
-       resume_modele = $5, resume_fiabilite = $6, resume_genere_le = now()
-     where id = $1`,
-    [bookId, info.resume ?? null,
+  /* Le locataire vient du réglage de session, pas des paramètres : c'est
+     celui-là même que la politique d'écriture vérifie. */
+  /* Le résumé se range sous l'OUVRAGE : produit une fois, lu par tous ceux
+     qui possèdent la même édition. C'est l'économie principale de la
+     découpe — la génération est la seule opération qui coûte de l'argent. */
+  await dans((c) => c.query(
+    `insert into resumes_ouvrages (ouvrage_id, langue, resume, points, themes,
+                                   modele, fiabilite, genere_le)
+     select p.ouvrage_id, $2, $3, $4, $5, $6, $7, now()
+       from possessions p
+      where p.id = $1
+        and p.tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid
+     on conflict (ouvrage_id, langue) do update
+        set resume = excluded.resume, points = excluded.points,
+            themes = excluded.themes, modele = excluded.modele,
+            fiabilite = excluded.fiabilite, genere_le = excluded.genere_le`,
+    [bookId, langue, info.resume ?? null,
      Array.isArray(info.points) ? info.points : null,
      Array.isArray(info.themes) ? info.themes.map(t => String(t).toLowerCase()) : null,
-     MODELE, info.fiabilite ?? null],
-  );
+     MODELE, info.fiabilite ?? null]));
 
   return { resume: info.resume ?? "", points: info.points ?? [], themes: info.themes ?? [],
-           fiabilite: info.fiabilite ?? null, cache: false };
+           fiabilite: info.fiabilite ?? null, langue, cache: false };
 }
 
-async function recommander({ intention, sphere, inclureExternes }) {
+async function recommander(dans, langue, { intention, sphere, inclureExternes }) {
   intention = String(intention ?? "").trim().slice(0, 600);
   if (intention.length < 3) { const e = new Error("Décrivez ce que vous voulez apprendre."); e.statut = 400; throw e; }
 
   const perimetreValide = sphere === "Perso" || sphere === "Pro" ? sphere : null;
-  const { rows: livres } = perimetreValide
-    ? await bd.query(`select ${COLONNES} from books where sphere = $1 order by auteur`, [perimetreValide])
-    : await bd.query(`select ${COLONNES} from books order by auteur`);
+  const livres = await dans((c) => (perimetreValide
+    ? c.query(`${LIVRES_AVEC_RESUME} where b.sphere = $2 order by b.auteur`, [langue, perimetreValide])
+    : c.query(`${LIVRES_AVEC_RESUME} order by b.auteur`, [langue])).then(r => r.rows));
 
   if (!livres.length) { const e = new Error("Aucun ouvrage dans ce périmètre"); e.statut = 400; throw e; }
 
@@ -509,22 +791,22 @@ Réponds UNIQUEMENT par un objet JSON, sans texte autour ni balises Markdown :
     .sort((a, b) => (a.ordre ?? 99) - (b.ordre ?? 99));
   if (inclureExternes === false) info.suggestions_externes = [];
 
-  await bd.query(
-    "insert into reading_quests (intention, reponse, modele) values ($1, $2, $3)",
-    [perimetreValide ? `[${perimetreValide}] ${intention}` : intention, info, MODELE],
-  );
+  await dans((c) => c.query(
+    `insert into reading_quests (intention, reponse, modele, tenant_id)
+     values ($1, $2, $3, nullif(current_setting('app.tenant_id', true), '')::uuid)`,
+    [perimetreValide ? `[${perimetreValide}] ${intention}` : intention, info, MODELE]));
 
   return info;
 }
 
-async function chercherLivre({ requete }) {
+async function chercherLivre(dans, { requete }) {
   requete = String(requete ?? "").trim().slice(0, 300);
   if (!requete) { const e = new Error("Indiquez un ISBN ou un titre."); e.statut = 400; throw e; }
 
   // La liste proposee au modele doit inclure les rayons que vous avez
   // acceptes depuis : sinon il rangerait en « Non classé » un ouvrage dont
   // le rayon existe desormais.
-  const RAYONS = await rayonsDisponibles();
+  const RAYONS = await dans((c) => rayonsDisponibles(c));
 
   const consigne = `Trouve les informations bibliographiques du livre correspondant à : "${requete}".
 Utilise la recherche web pour vérifier. N'invente aucune donnée : si une information
@@ -609,7 +891,8 @@ const serveur = createServer(async (req, rep) => {
         return json(rep, { error: "Mot de passe incorrect" }, 401);
       }
       tentatives.delete(ip);
-      const jeton = signer({ expire: Date.now() + DUREE_SESSION });
+      if (!ID_TENANT_DEFAUT) return json(rep, { error: "Bibliothèque non configurée." }, 503);
+      const jeton = signer({ t: ID_TENANT_DEFAUT, expire: Date.now() + DUREE_SESSION });
       return json(rep, { ok: true }, 200, {
         "Set-Cookie": `session=${jeton}; HttpOnly;${COOKIE_SECURE} SameSite=Strict; Path=/; Max-Age=${DUREE_SESSION / 1000}`,
       });
@@ -619,25 +902,56 @@ const serveur = createServer(async (req, rep) => {
       return json(rep, { ok: true }, 200, { "Set-Cookie": `session=; HttpOnly;${COOKIE_SECURE} SameSite=Strict; Path=/; Max-Age=0` });
     }
 
-    const session = verifier(lireCookie(req, "session"));
+    /* Une session sans locataire n'en est pas une.
+       Les jetons émis avant la bascule n'en portent pas ; ils sont de toute
+       façon invalidés par le changement de secret, mais on ne s'appuie pas
+       sur cet effet de bord — on refuse explicitement. */
+    const brut = verifier(lireCookie(req, "session"));
+    const session = brut && typeof brut.t === "string" ? brut : null;
 
-    /* --- Routes ouvertes : consultation du périmètre professionnel --- */
+    /* =====================================================================
+       LE SEUL ENDROIT DE L'APPLICATION QUI POSE UN LOCATAIRE.
+
+       Toute lecture et toute écriture passe par « dans ». Une route qui
+       oublierait de s'en servir ne verrait pas trop de choses : elle
+       n'en verrait aucune, puisque sans app.tenant_id la politique de
+       cloisonnement ne laisse rien passer.
+
+       C'est la propriété qui rend la bascule sûre — l'oubli est visible
+       immédiatement, au lieu de fuir en silence.
+       ===================================================================== */
+    const dans = (travail) => session
+      ? avecContexte(bd, session.t, travail)
+      : avecVisiteur(bd, travail);
+
+    /* La langue des résumés. Résolue UNE fois par requête, à l'intérieur
+       d'un contexte — la lecture de « tenants » n'est pas cloisonnée, mais
+       la faire ici garde toutes les décisions au même endroit. */
+    const langue = await dans((c) => langueDemandee(c, url, session));
+
+    /* --- Routes ouvertes : ce que le locataire a rendu public --- */
     if (chemin === "/api/session") {
-      return json(rep, { connecte: !!session, ia_publique: IA_PUBLIQUE });
+      return json(rep, {
+        connecte: !!session, ia_publique: IA_PUBLIQUE, langue,
+        environnement: ENVIRONNEMENT,
+        // Une recette sans clef ne peut pas produire de résumé. Le dire
+        // évite d'attendre une réponse qui ne viendra pas.
+        ia_disponible: Boolean(CLE_ANTHROPIC),
+      });
     }
 
     if (chemin === "/api/livres" && req.method === "GET") {
-      return json(rep, await listerLivres(session));
+      return json(rep, await dans((c) => listerLivres(c, langue)));
     }
 
     if (chemin === "/api/statistiques" && req.method === "GET") {
-      return json(rep, await statistiques(session));
+      return json(rep, await dans((c) => statistiques(c, session, langue)));
     }
 
     // Lecture ouverte : la liste des rayons n'est pas une donnee sensible,
     // et la page publique en a besoin pour nommer ce qu'elle affiche.
     if (chemin === "/api/rayons" && req.method === "GET") {
-      return json(rep, await rayonsDisponibles());
+      return json(rep, await dans((c) => rayonsDisponibles(c)));
     }
 
     /* --- Les traitements qui coûtent de l'argent --- */
@@ -656,42 +970,61 @@ const serveur = createServer(async (req, rep) => {
     if (chemin === "/api/livres" && req.method === "PUT") {
       const corps = await lireCorps(req);
       const livres = Array.isArray(corps) ? corps : [corps];
-      return json(rep, { enregistres: await enregistrerLivres(livres) });
+      return json(rep, { enregistres: await dans((c) => enregistrerLivres(c, livres)) });
     }
 
     // Mise à jour partielle : uniquement les couvertures résolues par le navigateur.
     if (chemin === "/api/couvertures" && req.method === "POST") {
       const lot = await lireCorps(req);
       if (!Array.isArray(lot)) return json(rep, { error: "Tableau attendu" }, 400);
-      for (const c of lot.slice(0, 500)) {
-        await bd.query(
-          "update books set cover_url = $2, cover_statut = $3 where id = $1",
-          [c.id, c.cover_url ?? null, c.cover_statut ?? "inconnu"],
-        );
-      }
+      /* Un SEUL contexte pour tout le lot : cinq cents transactions
+         successives, c'est cinq cents allers-retours et autant d'occasions
+         de laisser le lot à moitié appliqué. */
+      /* La couverture est une propriété du LIVRE, pas de votre exemplaire :
+         elle s'écrit donc dans le catalogue partagé, et profite à tous ceux
+         qui possèdent la même édition. La politique ouvrages_correction
+         limite l'écriture aux ouvrages qu'on possède — d'où la jointure par
+         possessions, qui est aussi ce qui traduit VOTRE identifiant en
+         identifiant d'ouvrage. */
+      await dans(async (client) => {
+        for (const c of lot.slice(0, 500)) {
+          await client.query(
+            `update ouvrages o set cover_url = $2, cover_statut = $3, maj_le = now()
+               from possessions p
+              where p.ouvrage_id = o.id and p.id = $1
+                and p.tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid`,
+            [c.id, c.cover_url ?? null, c.cover_statut ?? "inconnu"]);
+        }
+      });
       return json(rep, { enregistrees: Math.min(lot.length, 500) });
     }
 
     if (chemin.startsWith("/api/livres/") && req.method === "DELETE") {
       const id = decodeURIComponent(chemin.slice("/api/livres/".length));
-      await bd.query("delete from books where id = $1", [id]);
+      /* On retire la POSSESSION. L'ouvrage reste au catalogue : il peut
+         appartenir à quelqu'un d'autre, et sa fiche bibliographique n'est
+         pas la vôtre à supprimer. « on delete restrict » sur la clé
+         étrangère garantit d'ailleurs qu'on ne peut pas l'effacer tant
+         qu'une bibliothèque le référence. */
+      await dans((c) => c.query("delete from possessions where id = $1", [id]));
       return json(rep, { ok: true });
     }
 
     if (chemin === "/api/resume" && req.method === "POST") {
-      return json(rep, await resumerLivre(await lireCorps(req)));
+      return json(rep, await resumerLivre(dans, langue, await lireCorps(req)));
     }
 
     if (chemin === "/api/recommandation" && req.method === "POST") {
-      return json(rep, await recommander(await lireCorps(req)));
+      return json(rep, await recommander(dans, langue, await lireCorps(req)));
     }
 
     if (chemin === "/api/rayons" && req.method === "POST") {
-      return json(rep, await ajouterRayon(await lireCorps(req)));
+      const corpsRayon = await lireCorps(req);
+      return json(rep, await dans((c) => ajouterRayon(c, corpsRayon)));
     }
 
     if (chemin === "/api/recherche-livre" && req.method === "POST") {
-      return json(rep, await chercherLivre(await lireCorps(req)));
+      return json(rep, await chercherLivre(dans, await lireCorps(req)));
     }
 
     return json(rep, { error: "Route inconnue" }, 404);
@@ -712,7 +1045,29 @@ async function attendreLaBase(essais = 30) {
 }
 
 await attendreLaBase();
-await amorcerSiVide();
+
+/* Le locataire par défaut, résolu UNE fois au démarrage.
+ *
+ * Cette lecture porte sur « tenants », qui n'est pas cloisonnée : c'est la
+ * table qui DÉFINIT les locataires, elle ne peut pas dépendre de l'un d'eux.
+ * Sans elle, la connexion par mot de passe ne saurait pas quelle
+ * bibliothèque ouvrir. */
+{
+  const { rows } = await bd.query(
+    "select id from tenants where identifiant = $1", [TENANT_DEFAUT]);
+  if (!rows.length) {
+    console.error(`Locataire « ${TENANT_DEFAUT} » absent de la base.\n` +
+      "Le schéma db/02-multi-locataire.sql n a probablement pas été appliqué.");
+    process.exit(1);
+  }
+  ID_TENANT_DEFAUT = rows[0].id;
+  console.log(`Locataire par défaut : ${TENANT_DEFAUT} (${ID_TENANT_DEFAUT}).`);
+}
+
+/* L'amorçage écrit des ouvrages : il lui faut donc un locataire, comme à
+   toute écriture. Hors contexte, le compte rendrait zéro et l'insertion
+   serait refusée — on ré-amorcerait à chaque démarrage, dans le vide. */
+await avecContexte(bd, ID_TENANT_DEFAUT, (c) => amorcerSiVide(c));
 serveur.listen(PORT, () => console.log(`API prête sur le port ${PORT}`));
 
 for (const signal of ["SIGTERM", "SIGINT"]) {

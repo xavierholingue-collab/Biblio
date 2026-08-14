@@ -1,176 +1,175 @@
 /* =========================================================================
-   CLOISONNEMENT ET VISIBILITÉ — le contrôle qui compte
+   LA MATRICE DE VISIBILITÉ, ÉPROUVÉE CAS PAR CAS
 
-   Éprouve la Row-Level Security et la règle de visibilité sur un PostgreSQL
-   réel (PGlite), SOUS LE RÔLE APPLICATIF.
+   Trois niveaux de réglage — bibliothèque, rayon, ouvrage — font huit
+   combinaisons. Une règle de visibilité ne se vérifie pas « en gros » : ce
+   sont les cas particuliers qui font sortir une donnée, et ils ne se
+   présentent jamais pendant qu'on regarde.
 
-   POURQUOI « SOUS LE RÔLE APPLICATIF » EST ÉCRIT EN MAJUSCULES
+   LA RÈGLE, EN DEUX PHRASES
 
-   Le 15/08/2026, la première version de ce test s'exécutait en
-   superutilisateur. Les politiques étaient en place, correctement écrites,
-   et alice voyait les données de bob : un superutilisateur contourne toute
-   la RLS, silencieusement. Le test aurait déclaré le cloisonnement conforme
-   en ne prouvant strictement rien.
+     La bibliothèque est un VERROU MAÎTRE : privée, elle ferme tout, sans
+     exception. Un ouvrage explicitement public dans une bibliothèque privée
+     reste invisible. C'est la seule règle qu'on tient en tête, et la seule
+     où le geste de panique — « je passe tout en privé » — fonctionne.
 
-   Un contrôle de sécurité qui ne peut pas échouer est pire que pas de
-   contrôle : il donne la tranquillité sans la garantie.
+     Sous ce verrou, le plus précis l'emporte : l'ouvrage prime sur le rayon,
+     qui prime sur la bibliothèque. Et SANS AUCUNE DÉCISION, rien ne sort.
+
+   ---------------------------------------------------------------------------
+   CE FICHIER TOURNAIT SUR PGlite JUSQU'AU 15/08/2026.
+
+   Deux raisons de l'avoir déplacé sur un vrai PostgreSQL :
+
+     — PGlite n'a qu'UNE session. L'observateur et l'observé la partagent,
+       et le contrôle finit par mesurer sa propre cécité.
+     — son unique rôle est superutilisateur, qui traverse toutes les
+       politiques EN SILENCE. Ce fichier a passé au vert, deux fois, en
+       montrant à chacun la bibliothèque de tous.
 
    USAGE
      node tests/test-cloisonnement.mjs
    ========================================================================= */
 
-import { PGlite } from "@electric-sql/pglite";
-import fs from "node:fs";
-import path from "node:path";
-
-const CANDIDATS = ["db", path.join("..", "db"), path.join(process.cwd(), "db")];
-const DB = CANDIDATS.find(c => fs.existsSync(path.join(c, "01-schema.sql")));
-if (!DB) { console.error("  ECHEC db/ introuvable"); process.exit(1); }
+import { ouvrirBanc } from "./banc-postgres.mjs";
 
 const ok = [], ko = [];
-const verifier = (nom, condition, detail) =>
-  (condition ? ok : ko).push(nom + (condition ? "" : " — " + (detail ?? "")));
+const verifier = (nom, cond, detail) =>
+  (cond ? ok : ko).push(nom + (cond ? "" : " — " + (detail ?? "")));
 
-const db = await PGlite.create();
-for (const f of ["01-schema.sql", "02-multi-locataire.sql"]) {
-  await db.exec(fs.readFileSync(path.join(DB, f), "utf8"));
-}
-verifier("les deux schémas s'appliquent", true);
+const banc = await ouvrirBanc({ port: 55503 });
+const { q, dans, semer, resumer, locataire } = banc;
 
-/* Deux locataires, et de quoi éprouver les huit combinaisons de visibilité. */
-const t = async (sql, p) => (await db.query(sql, p)).rows;
+/* --------------------------------------------------------- Le montage */
 
-const [alice] = await t(
-  `insert into tenants (identifiant, nom, visibilite) values ('alice','Alice','publique')
-   returning id`);
-const [bob] = await t(
-  `insert into tenants (identifiant, nom, visibilite) values ('bob','Bob','privee')
-   returning id`);
+const alice = await locataire("alice", "publique");
+const bob   = await locataire("bob",   "privee");
 
-const poser = async (tenant, id, sous, vis) =>
-  db.query(`insert into books (id,isbn,titre,auteur,categorie,sous_categorie,sphere,tenant_id,visibilite)
-            values ($1,'978'||$1,'T'||$1,'A','Académique',$2,'Pro',$3,$4)`,
-           [id, sous, tenant, vis]);
+// Chez alice, bibliothèque PUBLIQUE.
+await semer({ tenant: alice, id: "a-pub",  isbn: "9790000000001", visibilite: "publique" });
+await semer({ tenant: alice, id: "a-priv", isbn: "9790000000002", visibilite: "privee" });
+await semer({ tenant: alice, id: "a-her",  isbn: "9790000000003", visibilite: "heritee" });
+await semer({ tenant: alice, id: "a-her-rayonpriv", isbn: "9790000000004",
+              sous_categorie: "Économie", visibilite: "heritee" });
+await semer({ tenant: alice, id: "a-pub-rayonpriv", isbn: "9790000000005",
+              sous_categorie: "Économie", visibilite: "publique" });
+await semer({ tenant: alice, id: "a-her-rayonpub", isbn: "9790000000006",
+              sous_categorie: "Innovation & entrepreneuriat", visibilite: "heritee" });
 
-// Chez alice (bibliothèque PUBLIQUE)
-await poser(alice.id, "a-pub",  "Philosophie", "publique");
-await poser(alice.id, "a-priv", "Philosophie", "privee");
-await poser(alice.id, "a-her",  "Philosophie", "heritee");
-await poser(alice.id, "a-her-rayonpriv", "Économie", "heritee");
-await poser(alice.id, "a-pub-rayonpriv", "Économie", "publique");
-await db.query(`insert into rayons_reglages (tenant_id,categorie,sous_categorie,visibilite)
-                values ($1,'Académique','Économie','privee')`, [alice.id]);
+await q(`insert into rayons_reglages (tenant_id, categorie, sous_categorie, visibilite)
+         values ($1,'Académique','Économie','privee'),
+                ($1,'Académique','Innovation & entrepreneuriat','publique')`, [alice]);
 
-// Chez bob (bibliothèque PRIVÉE) — dont un ouvrage explicitement public
-await poser(bob.id, "b-pub", "Philosophie", "publique");
-await poser(bob.id, "b-her", "Philosophie", "heritee");
+// Chez bob, bibliothèque PRIVÉE — dont un ouvrage explicitement public.
+await semer({ tenant: bob, id: "b-pub", isbn: "9790000000007", visibilite: "publique" });
+await semer({ tenant: bob, id: "b-her", isbn: "9790000000008", visibilite: "heritee" });
 
-/* Le rôle applicatif : ni superutilisateur, ni BYPASSRLS — comme « biblio »
-   en production, vérifié le 15/08/2026 (rolsuper=f, rolbypassrls=f). */
-await db.exec(`
-  create role app nosuperuser nobypassrls;
-  grant usage on schema public to app;
-  grant select, insert, update, delete on all tables in schema public to app;
-`);
-await db.exec("set role app");
+/* --------------------------------------------- Le rôle applicatif n'est pas roi */
 
-const titres = async () =>
-  (await db.query("select id from books order by id")).rows.map(r => r.id);
+const [privileges] = await q(
+  `select r.rolsuper, r.rolbypassrls from pg_roles r
+    where r.rolname = (select usename from pg_user u
+                        where u.usename = current_user limit 1)`);
+const [qui] = await banc.appli.query(
+  `select current_user as nom, usesuper from pg_user where usename = current_user`)
+  .then(r => r.rows);
+verifier("le rôle qui interroge n'est PAS superutilisateur",
+  qui.usesuper === false, JSON.stringify(qui));
 
-/* ------------------------------------------------- 1. Le cloisonnement */
+/* -------------------------------------------------- Cloisonnement de base */
 
-/* set_config() plutôt que SET : la commande SET n'accepte pas de paramètre.
-   Côté API, cela compte doublement — interpoler un identifiant dans une
-   chaîne SET ouvrirait une injection SQL au cœur du mécanisme censé isoler
-   les locataires. La forme paramétrée est la seule sûre. */
-const poserLocataire = (id) => db.query("select set_config('app.tenant_id', $1, false)", [id ?? ""]);
-
-await poserLocataire("");
-const vusVisiteur = await titres();
-verifier("sans locataire, un visiteur ne voit QUE du public",
-  JSON.stringify(vusVisiteur) === JSON.stringify(["a-her", "a-pub", "a-pub-rayonpriv"]),
-  JSON.stringify(vusVisiteur));
-
-await poserLocataire(alice.id);
-const vusAlice = await titres();
-verifier("alice voit ses cinq ouvrages", vusAlice.length === 5, JSON.stringify(vusAlice));
+const vusAlice = (await dans(alice, "select id from livres order by id")).map(r => r.id);
+verifier("alice voit ses six ouvrages, et eux seuls",
+  vusAlice.length === 6, JSON.stringify(vusAlice));
 verifier("alice ne voit AUCUN ouvrage de bob",
   !vusAlice.some(x => x.startsWith("b-")), JSON.stringify(vusAlice));
 
-await poserLocataire(bob.id);
-const vusBob = await titres();
-/* Un locataire connecté ne voit QUE sa bibliothèque — pas même les ouvrages
-   publics des autres. Sans quoi sa liste, ses statistiques et sa mosaïque
-   mêleraient les livres d'inconnus aux siens. */
-verifier("bob ne voit aucun ouvrage d'alice, même public",
-  !vusBob.some(x => x.startsWith("a-")), JSON.stringify(vusBob));
-verifier("bob voit ses deux ouvrages", vusBob.length === 2, JSON.stringify(vusBob));
+const vusBob = (await dans(bob, "select id from livres order by id")).map(r => r.id);
+verifier("bob ne voit que les siens",
+  JSON.stringify(vusBob) === JSON.stringify(["b-her", "b-pub"]), JSON.stringify(vusBob));
 
-/* L'écriture aussi : lire n'est pas le seul risque. */
-await poserLocataire(alice.id);
-const maj = await db.query("update books set titre = 'DETOURNE' where id = 'b-pub'");
-verifier("alice ne peut pas MODIFIER un ouvrage de bob",
-  (maj.affectedRows ?? 0) === 0, `${maj.affectedRows} ligne(s) modifiée(s)`);
+/* ------------------------------------------------------- Le visiteur */
 
-let refusInsertion = false;
-try {
-  await db.query(`insert into books (id,isbn,titre,auteur,categorie,sous_categorie,sphere,tenant_id)
-                  values ('intrus','978x','X','A','Académique','Philosophie','Pro',$1)`, [bob.id]);
-} catch { refusInsertion = true; }
-verifier("alice ne peut pas ÉCRIRE chez bob", refusInsertion);
+const vusVisiteur = (await dans(null, "select id from livres order by id")).map(r => r.id);
+verifier("sans locataire, un visiteur ne voit QUE du public",
+  JSON.stringify(vusVisiteur) === JSON.stringify(["a-her-rayonpub", "a-pub", "a-pub-rayonpriv"]),
+  JSON.stringify(vusVisiteur));
 
-/* ------------------------------------ 2. La règle de visibilité publique */
+/* ==========================================================================
+   LA MATRICE, CAS PAR CAS
 
-await poserLocataire("");
-const publics = await titres();
+   « a-her » est absent des visibles, et c'est voulu : depuis le 15/08/2026,
+   un ouvrage hérité dont le rayon n'a AUCUN réglage reste privé.
 
-const attendu = [
-  ["biblio publique + ouvrage public",              "a-pub",           true],
-  ["biblio publique + ouvrage privé",               "a-priv",          false],
-  ["biblio publique + ouvrage hérité",              "a-her",           true],
-  ["biblio publique + rayon privé + ouvrage hérité","a-her-rayonpriv", false],
-  ["biblio publique + rayon privé + ouvrage public","a-pub-rayonpriv", true],
-  ["biblio PRIVÉE + ouvrage public → invisible",    "b-pub",           false],
-  ["biblio PRIVÉE + ouvrage hérité",                "b-her",           false],
+   Avant, il suivait la bibliothèque et devenait public. test-api.mjs l'a
+   montré en clair — un ouvrage personnel créé après la bascule apparaissait
+   sur la page publique. Une visibilité par défaut répond à la question
+   « que fait-on quand personne n'a rien décidé ? », et la seule réponse
+   défendable pour une bibliothèque personnelle est : rien ne sort.
+
+   Ce que cela ne change PAS : les ouvrages déjà publics. La migration leur
+   pose « publique » explicitement à partir de la sphère Pro, et l'API fait
+   de même pour les nouveaux.
+   ========================================================================== */
+
+const CAS = [
+  ["biblio publique + ouvrage public",                "a-pub",           true],
+  ["biblio publique + ouvrage privé",                 "a-priv",          false],
+  ["biblio publique + ouvrage hérité, aucun réglage", "a-her",           false],
+  ["biblio publique + rayon public + ouvrage hérité", "a-her-rayonpub",  true],
+  ["biblio publique + rayon privé + ouvrage hérité",  "a-her-rayonpriv", false],
+  ["biblio publique + rayon privé + ouvrage public",  "a-pub-rayonpriv", true],
+  ["biblio PRIVÉE + ouvrage public — le verrou maître prime", "b-pub",   false],
+  ["biblio PRIVÉE + ouvrage hérité",                  "b-her",           false],
 ];
-for (const [nom, id, doitEtreVisible] of attendu) {
-  verifier(nom, publics.includes(id) === doitEtreVisible,
-    publics.includes(id) ? "visible" : "invisible");
+
+for (const [nom, id, attendu] of CAS) {
+  const visible = vusVisiteur.includes(id);
+  verifier(nom, visible === attendu, `visible=${visible}, attendu=${attendu}`);
 }
 
-/* Le verrou maître : bob ferme, plus rien ne sort — même l'ouvrage public. */
-await db.exec("reset role");
-await db.query("update tenants set visibilite = 'publique' where id = $1", [bob.id]);
-await db.exec("set role app");
-await poserLocataire("");
-verifier("bob ouvre sa bibliothèque : son ouvrage public apparaît",
-  (await titres()).includes("b-pub"));
+/* ------------------------------------------------------- Les résumés */
 
-await db.exec("reset role");
-await db.query("update tenants set visibilite = 'privee' where id = $1", [bob.id]);
-await db.exec("set role app");
-await poserLocataire("");
-const apresFermeture = await titres();
-verifier("bob referme : TOUT disparaît, y compris l'ouvrage public",
-  !apresFermeture.some(x => x.startsWith("b-")), JSON.stringify(apresFermeture));
+const [ouvragePublic] = await q("select ouvrage_id from possessions where id = 'a-pub'");
+const [ouvragePrive]  = await q("select ouvrage_id from possessions where id = 'a-priv'");
+await resumer(ouvragePublic.ouvrage_id, "fr", "Résumé visible");
+await resumer(ouvragePublic.ouvrage_id, "en", "Visible summary");
+await resumer(ouvragePrive.ouvrage_id,  "fr", "Résumé confidentiel");
 
-/* ------------------------------------------- 3. Les résumés suivent */
+const lusParVisiteur = await dans(null, "select resume from resumes_ouvrages order by resume");
+verifier("le visiteur lit les deux langues d'un ouvrage public",
+  lusParVisiteur.length === 2, JSON.stringify(lusParVisiteur.map(r => r.resume)));
 
-await db.exec("reset role");
-await db.query(`insert into resumes (tenant_id, book_id, langue, resume)
-                values ($1,'a-priv','fr','résumé d un ouvrage privé')`, [alice.id]);
-await db.query(`insert into resumes (tenant_id, book_id, langue, resume)
-                values ($1,'a-pub','fr','résumé public'), ($1,'a-pub','en','public summary')`,
-               [alice.id]);
-await db.exec("set role app");
-await poserLocataire("");
-const res = (await db.query("select book_id, langue from resumes order by book_id, langue")).rows;
-verifier("le résumé d'un ouvrage privé n'est pas lisible publiquement",
-  !res.some(r => r.book_id === "a-priv"), JSON.stringify(res));
-verifier("les deux langues d'un ouvrage public sont lisibles",
-  res.filter(r => r.book_id === "a-pub").length === 2, JSON.stringify(res));
+verifier("mais rien de l'ouvrage privé — l'existence du résumé le trahirait",
+  !lusParVisiteur.some(r => r.resume === "Résumé confidentiel"),
+  JSON.stringify(lusParVisiteur.map(r => r.resume)));
+
+verifier("bob non plus ne lit pas le résumé privé d'alice",
+  (await dans(bob, "select resume from resumes_ouvrages")).length === 2);
+
+/* ---------------------------------------------- Écrire chez le voisin */
+
+await dans(bob, "update possessions set statut = 'Lu' where id = 'a-pub'");
+const [intact] = await q("select statut from possessions where id = 'a-pub'");
+verifier("bob ne peut pas modifier une possession d'alice",
+  intact?.statut === "A lire", JSON.stringify(intact));
+
+await dans(bob, "delete from possessions where id = 'a-priv'");
+const restant = await q("select id from possessions where id = 'a-priv'");
+verifier("bob ne peut pas effacer une possession d'alice",
+  restant.length === 1, JSON.stringify(restant));
+
+let refuse = false;
+try {
+  await dans(bob, `insert into possessions (tenant_id, id, ouvrage_id, categorie, sous_categorie)
+                   values ($1, 'intrus', $2, 'Roman', 'Classique')`,
+             [alice, ouvragePublic.ouvrage_id]);
+} catch { refuse = true; }
+verifier("bob ne peut pas écrire une possession AU NOM d'alice", refuse);
 
 /* --------------------------------------------------------------- Bilan */
+
+await banc.fermer();
 
 console.log("\n=== Cloisonnement et visibilité ===\n");
 ok.forEach(o => console.log("  ok   " + o));
