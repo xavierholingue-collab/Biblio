@@ -43,7 +43,7 @@ function verifier(nom, condition, detail) {
    effectifs, les rapports 2:1 doivent se retrouver dans la géométrie. Un
    jeu de données uniforme ne prouverait rien.                               */
 const RAYONS = [
-  { sous_categorie: "Politique, société & géopolitique", categorie: "Académique", n: 40, lus: 40 },
+  { sous_categorie: "Politique, société & géopolitique", categorie: "Académique", n: 40, lus: 40, pages_volume: 12000, pages_connues: 30 },
   { sous_categorie: "Philosophie",                       categorie: "Académique", n: 20, lus: 10 },
   { sous_categorie: "Management & leadership",           categorie: "Académique", n: 10, lus: 5 },
   { sous_categorie: "Économie",                          categorie: "Académique", n: 5,  lus: 0 },
@@ -56,7 +56,10 @@ const STATS = {
   total: TOTAL, lus: 56, en_cours: 0, a_lire: 20,
   avec_resume: 70, auteurs: 60, rayons: RAYONS.length,
   note_moyenne: 4.32,
-  notes: 19,                       // 19 ouvrages notés sur 76 : c'est le point
+  notes: 19,
+  // 12 000 pages connues sur 30 ouvrages seulement : le taux de couverture
+  // doit apparaitre, sinon le chiffre se lirait comme le volume des 76.
+  pages_volume: 12000, pages_connues: 30,                       // 19 ouvrages notés sur 76 : c'est le point
   annee_min: 1949, annee_max: 2025,
   sous_categories: RAYONS,
   decennies: [{ decennie: 2010, n: 30 }, { decennie: 2020, n: 46 }],
@@ -169,8 +172,16 @@ const attendre = ms => new Promise(r => setTimeout(r, ms));
   verifier("la note moyenne n'est pas présentée comme portant sur tous les ouvrages",
     !/note moyenne(?!\s*\()/.test(chiffres.replace(/\s+/g, " ")));
 
+  verifier("le volume de pages dit sur combien d'ouvrages il porte",
+    /12\s*000/.test(chiffres.replace(/\s+/g, " ")) && /30 ouvrages sur 76/.test(chiffres.replace(/\s+/g, " ")),
+    chiffres.replace(/\s+/g, " ").slice(0, 240));
+  verifier("le volume n'est pas présenté comme celui de la bibliothèque",
+    !/12 000\s*pages\s*$/.test(chiffres.trim()));
+
   const legende = d.getElementById("legendeMosaique").textContent;
   verifier("la légende explique ce que l'aire encode", /[Aa]ire/.test(legende), legende.slice(0, 120));
+  verifier("la légende dit que l'aire n'est PAS le volume",
+    /pas à leur volume/.test(legende), legende.slice(0, 200));
   verifier("la légende annonce le périmètre", /professionnel/.test(legende));
 
   /* ------------------ La figure décorative a bien disparu ------------------ */

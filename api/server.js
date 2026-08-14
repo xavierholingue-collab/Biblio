@@ -239,11 +239,19 @@ async function statistiques(session) {
         -- etaient notes. Ils sont 57. Une moyenne sans son effectif est une
         -- affirmation qu'on ne peut pas evaluer.
         count(note)::int                                       as notes,
+        -- Le volume ET l'effectif sur lequel il porte, toujours ensemble.
+        -- sum() ignore les valeurs nulles : « 68 000 pages » a cote de
+        -- « 244 ouvrages » se lirait comme le volume de la bibliotheque
+        -- entiere, alors qu'il ne couvre que les ouvrages pagines.
+        coalesce(sum(pages), 0)::bigint                         as pages_volume,
+        count(pages)::int                                      as pages_connues,
         min(annee)::int                                        as annee_min,
         max(annee)::int                                        as annee_max
       from books ${ou}`),
     bd.query(`select sous_categorie, categorie, count(*)::int as n,
-                     count(*) filter (where statut = 'Lu')::int as lus
+                     count(*) filter (where statut = 'Lu')::int as lus,
+                     coalesce(sum(pages), 0)::bigint as pages_volume,
+                     count(pages)::int as pages_connues
               from books ${ou}
               group by sous_categorie, categorie
               order by n desc`),
@@ -263,7 +271,11 @@ async function statistiques(session) {
     perimetre: session ? "complet" : "professionnel",
     ...general.rows[0],
     note_moyenne: general.rows[0].note_moyenne === null ? null : Number(general.rows[0].note_moyenne),
-    sous_categories: sousCats.rows,
+    // pg rend les BIGINT en CHAINE, pour ne pas perdre de precision au-dela
+    // de 2^53. Sans cette conversion, « volume + volume » concatenerait deux
+    // textes au lieu d'additionner deux nombres.
+    pages_volume: Number(general.rows[0].pages_volume ?? 0),
+    sous_categories: sousCats.rows.map(r => ({ ...r, pages_volume: Number(r.pages_volume ?? 0) })),
     decennies: decennies.rows,
     auteurs_recurrents: auteurs.rows,
     plus_recents: recents.rows,

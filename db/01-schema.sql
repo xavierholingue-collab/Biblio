@@ -88,3 +88,26 @@ create table if not exists public.rayons_ajoutes (
   cree_le     timestamptz not null default now(),
   primary key (categorie, libelle)
 );
+
+/* ---------------------------------------------------------------------------
+   PAGINATION
+
+   Ajoutée le 14/08/2026. Volontairement NULLABLE, et c'est le cœur du sujet :
+   une pagination inconnue doit rester inconnue.
+
+   La tentation serait de mettre 0, ou la moyenne du rayon. Les deux mentent :
+   la première efface un ouvrage réel des totaux, la seconde invente un volume
+   et le rend indiscernable d'une mesure. C'est la même faute que le zéro sur
+   une dimension non mesurée dans les rapports Adapsis.
+
+   Les statistiques exposent donc TOUJOURS le volume ET le nombre d'ouvrages
+   sur lequel il porte. Un total sans son effectif n'est pas interprétable.
+   --------------------------------------------------------------------------- */
+alter table public.books add column if not exists pages integer
+  check (pages is null or (pages > 0 and pages < 20000));
+
+-- « absente » signifie : toutes les sources ont été interrogées, aucune ne
+-- l'a. Sans cette colonne, on ne saurait pas distinguer un ouvrage jamais
+-- cherché d'un ouvrage cherché en vain — et on le rechercherait sans fin.
+alter table public.books add column if not exists pages_statut text
+  check (pages_statut is null or pages_statut in ('trouvee', 'absente'));

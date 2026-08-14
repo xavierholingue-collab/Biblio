@@ -315,7 +315,17 @@ function dessinerMosaique() {
       t.sous_categorie + " : " + t.n + " ouvrage" + (t.n > 1 ? "s" : "")
       + ", " + (t.lus || 0) + " lu" + ((t.lus || 0) > 1 ? "s" : "")
       + ". Ouvrir ce rayon.");
-    a.title = t.sous_categorie + " — " + t.n + " ouvrages, " + partLue + " % lus";
+    /* Le volume du rayon vit dans l'infobulle, jamais dans la géométrie :
+       l'aire encode le nombre d'ouvrages, et elle seule. Mêler les deux
+       rendrait la figure illisible — on ne saurait plus si une grande tuile
+       contient beaucoup de livres ou de gros livres. */
+    const pagesRayon = t.pages_connues ?? 0;
+    a.title = t.sous_categorie + " — " + t.n + " ouvrage" + (t.n > 1 ? "s" : "")
+      + ", " + partLue + " % lus"
+      + (pagesRayon
+          ? ` · ${Number(t.pages_volume ?? 0).toLocaleString("fr-FR")} pages connues `
+            + `sur ${pagesRayon} ouvrage${pagesRayon > 1 ? "s" : ""}`
+          : " · pagination inconnue");
 
     const haut = document.createElement("div");
     const nom = document.createElement("div");
@@ -375,6 +385,20 @@ function dessinerListes(stats) {
       : notes === 0        ? "aucune note"
       : "note moyenne (" + nombre(notes) + " notés)";
 
+    /* Le volume de pages est une mesure SÉPARÉE, et son étiquette dit sur
+       combien d'ouvrages elle porte.
+
+       On aurait pu dimensionner les tuiles de la mosaïque au volume plutôt
+       qu'au nombre d'ouvrages. Cela aurait obligé à inventer une aire pour
+       les ouvrages sans pagination — zéro les aurait effacés, la moyenne du
+       rayon aurait fabriqué un volume indiscernable d'une mesure. On garde
+       donc deux mesures distinctes, chacune avec son effectif. */
+    const pagesConnues = s.pages_connues ?? 0;
+    const volume = s.pages_volume ?? 0;
+    const vignettePages = pagesConnues === 0
+      ? chiffre("—", "pagination inconnue")
+      : chiffre(nombre(volume), "pages (" + nombre(pagesConnues) + " ouvrages sur " + nombre(s.total) + ")");
+
     document.getElementById("chiffres").innerHTML = [
       chiffre(nombre(s.total), "ouvrages"),
       chiffre(nombre(s.lus), "lus (" + partLus + " %)"),
@@ -383,6 +407,7 @@ function dessinerListes(stats) {
       chiffre(nombre(s.auteurs), "auteurs"),
       chiffre(s.note_moyenne !== null && notes ? s.note_moyenne.toFixed(2).replace(".", ",") : "—",
               etiquetteNote),
+      vignettePages,
     ].join("");
 
     STATS = s;
@@ -397,8 +422,13 @@ function dessinerListes(stats) {
       (complet
         ? "Bibliothèque complète — " + nombre(s.total) + " ouvrages, tous rayons confondus. "
         : "Périmètre professionnel — " + nombre(s.total) + " ouvrages académiques. ")
-      + "L'aire de chaque tuile est proportionnelle au nombre d'ouvrages ; "
-      + "la barre du bas indique la part déjà lue. Cliquez un rayon pour l'ouvrir.");
+      + "L'aire de chaque tuile est proportionnelle au nombre d'ouvrages — "
+      + "pas à leur volume. La barre du bas indique la part déjà lue. "
+      + "Cliquez un rayon pour l'ouvrir."
+      + (pagesConnues
+          ? " Le volume de pages, affiché au survol, ne porte que sur les "
+            + nombre(pagesConnues) + " ouvrages dont la pagination est connue."
+          : ""));
 
     if (complet) {
       texte(document.getElementById("clePerso"), "Session ouverte");
