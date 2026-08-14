@@ -131,14 +131,61 @@ fi
 # convertit des donnees et active le cloisonnement. Une erreur a mi-parcours
 # laisserait la base dans un etat qu'aucun « if not exists » ne rattrape.
 if [ -n "${URL}" ]; then
+  # LA SAUVEGARDE SE FAIT PAR UN COMPTE PRIVILEGIE, ET C'EST INDISPENSABLE.
+  #
+  # Defaut trouve le 15/08/2026 EN RECETTE — exactement ce pour quoi elle
+  # existe. Le dump tournait sous « biblio », le compte applicatif. Une fois
+  # « force row level security » actif, PostgreSQL le REFUSE :
+  #
+  #   ERREUR : la requete pourrait etre affectee par une politique de
+  #            securite au niveau ligne pour la table « books »
+  #
+  # Et c'est un excellent comportement de sa part. S'il avait accepte, la
+  # sauvegarde n'aurait contenu que les ouvrages PUBLICS — un filet qui ne
+  # rattrape qu'un tiers de la bibliotheque, sans que rien ne le signale.
+  # On ne s'en serait apercu qu'en essayant de restaurer.
+  #
+  # « sudo -u postgres » : le superutilisateur traverse les politiques. Ici
+  # c'est ce qu'on veut, et c'est le seul endroit du deploiement ou on le
+  # veut — une sauvegarde doit voir TOUT, par definition.
   SAUVEGARDE="/var/backups/${BASE}-avant-migration-$(date +%Y%m%d-%H%M%S).sql.gz"
   install -d -m 700 /var/backups
-  if PGPASSWORD="${URL}" pg_dump -h 127.0.0.1 -U biblio -d "${BASE}" \
-       | gzip > "${SAUVEGARDE}" && [ -s "${SAUVEGARDE}" ]; then
+  if sudo -u postgres pg_dump -d "${BASE}" | gzip > "${SAUVEGARDE}" \
+     && [ -s "${SAUVEGARDE}" ]; then
     chmod 600 "${SAUVEGARDE}"
     echo "  sauvegarde : $(du -h "${SAUVEGARDE}" | cut -f1) -> ${SAUVEGARDE}"
   else
     echo "  ECHEC sauvegarde impossible — aucune migration ne sera tentee"
+    exit 1
+  fi
+
+  # LA SAUVEGARDE EST-ELLE COMPLETE ? Le poids ne dit rien : un dump
+  # tronque pese quand meme quelque chose. On compte les lignes de donnees
+  # de la table principale et on les compare a ce que la base contient.
+  #
+  # Sans ce controle, une sauvegarde partielle passerait pour bonne, et on
+  # ne le decouvrirait qu'au moment de s'en servir — c'est-a-dire au pire
+  # moment possible.
+  table=possessions
+  sudo -u postgres psql -tAd "${BASE}" -c "select 1 from possessions limit 1" \
+    >/dev/null 2>&1 || table=books
+  attendu=$(sudo -u postgres psql -tAd "${BASE}" -c "select count(*) from ${table}")
+  # awk en guillemets SIMPLES et comparaison litterale du terminateur.
+  # Une premiere version passait le motif a travers les couches shell : le
+  # « \. » de fin de COPY n'etait plus reconnu, le drapeau restait leve, et
+  # le compteur additionnait les lignes des tables suivantes. Il annoncait
+  # cinq lignes la ou il y en avait trois — un controle de completude qui
+  # comptait faux aurait ete pire que pas de controle.
+  copie=$(gunzip -c "${SAUVEGARDE}" | awk -v t="public.${table}" '
+    $0 ~ "^COPY " t " " { f=1; next }
+    f && $0 == "\\."   { f=0; next }
+    f                    { n++ }
+    END { print n+0 }')
+  if [ "${copie}" = "${attendu}" ]; then
+    echo "  sauvegarde verifiee : ${copie} lignes de ${table}"
+  else
+    echo "  ECHEC sauvegarde INCOMPLETE : ${copie} lignes sauvegardees, ${attendu} en base"
+    echo "        aucune migration ne sera tentee"
     exit 1
   fi
 
@@ -246,7 +293,7 @@ if [ -n "${URL}" ]; then
     else
       echo "  ECHEC schema (${nom}) :"; tail -5 /tmp/mig-${BASE}.log | sed 's/^/         /'
       echo "         retour arriere :"
-      echo "           gunzip -c ${SAUVEGARDE} | psql -h 127.0.0.1 -U biblio -d ${BASE}"
+      echo "           gunzip -c ${SAUVEGARDE} | sudo -u postgres psql -d ${BASE}"
       exit 1
     fi
   done

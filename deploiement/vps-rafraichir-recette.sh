@@ -99,8 +99,13 @@ trap relancer EXIT INT TERM
 TMP=$(mktemp -d); chmod 700 "${TMP}"
 trap 'rm -rf "${TMP}"; relancer' EXIT INT TERM
 
+# Par « postgres », pas par « biblio ». Meme raison que dans le deployeur :
+# le compte applicatif est soumis a « force row level security », et
+# PostgreSQL refuse alors de produire un dump qui serait filtre. S'il ne
+# refusait pas, on copierait un tiers de la bibliotheque en croyant l'avoir
+# copiee entiere.
 echo "  copie en cours..."
-if ! PGPASSWORD="${MDP_PG}" pg_dump -h 127.0.0.1 -U biblio -d "${SOURCE}" \
+if ! sudo -u postgres pg_dump -d "${SOURCE}" \
      > "${TMP}/copie.sql" 2>"${TMP}/erreur.log"; then
   echo "  ECHEC lecture de ${SOURCE} :"; tail -3 "${TMP}/erreur.log" | sed 's/^/         /'
   exit 1
