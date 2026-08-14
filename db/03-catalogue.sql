@@ -31,10 +31,19 @@
    qu'espéré. Le niveau « œuvre » (identifiant OpenLibrary) est la vraie
    réponse ; c'est un chantier distinct, pas un oubli.
 
-   Sur les 321 ouvrages mesurés le 15/08/2026, 318 portent un ISBN-13 valide.
-   Les 3 autres sont des ASIN Amazon préfixés « 978 » — ils ressemblent à des
-   ISBN sans en être. Ils reçoivent une identité LOCALE, non partagée : mieux
-   vaut ne rien mutualiser que mutualiser sur une clé fausse.
+   Mesuré le 15/08/2026 SUR UN EXPORT de 321 ouvrages : 318 portaient un
+   ISBN-13 valide, et les 3 autres des ASIN Amazon préfixés « 978 » — qui
+   ressemblent à des ISBN sans en être.
+
+   Ce chiffre décrit un export, pas la production : le jour même, la base en
+   comptait 324. Il est laissé ici comme ORDRE DE GRANDEUR, pas comme
+   vérité — un nombre exact dans un commentaire vieillit sans prévenir, et
+   finit par être cru. Le compte qui fait foi est celui qu'imprime
+   verifier-migration.sql à chaque livraison.
+
+   La règle, elle, ne dépend d'aucun chiffre : ce qui n'est pas un ISBN-13
+   valide reçoit une identité LOCALE, non partagée. Mieux vaut ne rien
+   mutualiser que mutualiser sur une clé fausse.
 
    ---------------------------------------------------------------------------
    REJOUABLE. Le remplissage ne s'exécute que si possessions est vide, et les
