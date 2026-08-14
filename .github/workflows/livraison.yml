@@ -270,9 +270,42 @@ jobs:
         timeout-minutes: 5
         run: |
           base=https://biblio-recette.xavier-holingue.eu
-          code=$(curl -s -o /dev/null -w '%{http_code}' -u "${AUTH}" --max-time 25 "${base}/")
+
+          # LE SECRET D'ABORD, ET ON LE DIT.
+          #
+          # Sans cette verification, curl recevait « -u "" », restait sur
+          # « Enter host password for user '' » et rendait un 401. Le journal
+          # affichait donc « page : 401 » — un code qui laisse croire a un
+          # probleme de serveur alors qu'il manque un secret dans GitHub.
+          #
+          # Un message qui n'explique pas coute un aller-retour ; celui-la en
+          # a coute un le 15/08/2026.
+          case "${AUTH}" in
+            "")  echo "  ECHEC secret AUTH_RECETTE_BIBLIO absent."
+                 echo "        Settings > Secrets and variables > Actions"
+                 echo "        valeur attendue : recette:<mot de passe HTTP>"
+                 exit 1 ;;
+            *:*) ;;
+            *)   echo "  ECHEC AUTH_RECETTE_BIBLIO mal forme : il manque « : »"
+                 echo "        valeur attendue : recette:<mot de passe HTTP>"
+                 exit 1 ;;
+          esac
+
+          # « -f » sur l'invite : curl ne doit jamais attendre une saisie dans
+          # une chaine automatisee, sinon l'etape expire sans rien dire.
+          code=$(curl -s -o /dev/null -w '%{http_code}' --no-progress-meter \
+                   -u "${AUTH}" --max-time 25 "${base}/" </dev/null)
           echo "  page : ${code}"
-          [ "${code}" = "200" ] || exit 1
+          case "${code}" in
+            200) ;;
+            401) echo "  ECHEC 401 : le mot de passe HTTP ne correspond pas."
+                 echo "        le refaire : vps-installer-recette-biblio.sh --refaire-le-mot-de-passe-http"
+                 exit 1 ;;
+            000) echo "  ECHEC 000 : pas de reponse — certificat TLS en cours d'emission ?"
+                 echo "        c'est souvent transitoire, relancer la livraison"
+                 exit 1 ;;
+            *)   echo "  ECHEC code inattendu"; exit 1 ;;
+          esac
 
           # LE CONTROLE QUI COMPTE ICI. Une recette qui se declare
           # « production » serait pire qu'absente : on s'y croirait en
