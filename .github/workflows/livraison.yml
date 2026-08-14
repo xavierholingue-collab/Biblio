@@ -120,6 +120,26 @@ jobs:
       - name: La page d accueil dit ce qu elle montre
         run: node tests/test-accueil.js
 
+      # ------------------------------------------------------------------
+      # CLOISONNEMENT ENTRE LOCATAIRES
+      #
+      # Éprouve la Row-Level Security sur un vrai PostgreSQL, SOUS LE RÔLE
+      # APPLICATIF — sans quoi le contrôle ne prouverait rien : un
+      # superutilisateur contourne toutes les politiques en silence.
+      #
+      # Les trois mutations vérifiées le 15/08/2026 : accorder BYPASSRLS au
+      # rôle fait tomber 13 contrôles, retirer le verrou maître 3, rendre
+      # les politiques cumulatives 2.
+      #
+      # NOTE : ce schéma n'est PAS encore appliqué en production. Activer la
+      # RLS avant que l'API ne pose app.tenant_id rendrait la bibliothèque
+      # invisible à sa propre application.
+      # ------------------------------------------------------------------
+      - name: Cloisonnement entre locataires
+        run: |
+          npm install @electric-sql/pglite --no-audit --no-fund --silent
+          node tests/test-cloisonnement.mjs
+
       - name: Fabriquer le paquet
         run: |
           tar czf paquet.tar.gz --exclude=node_modules api web db deploiement
