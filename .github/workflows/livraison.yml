@@ -50,9 +50,9 @@ jobs:
         ports: ['5432:5432']
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with: { node-version: '22' }
 
       - name: Vérifier la syntaxe
@@ -125,7 +125,7 @@ jobs:
           tar czf paquet.tar.gz --exclude=node_modules api web db deploiement
           echo "poids : $(du -h paquet.tar.gz | cut -f1)"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with: { name: paquet, path: paquet.tar.gz, retention-days: 7 }
 
   production:
@@ -136,8 +136,8 @@ jobs:
     environment: production
 
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with: { name: paquet }
 
       - name: Préparer l accès SSH
@@ -186,7 +186,7 @@ jobs:
       # Cet étage regarde la page à notre place, dans Chromium, sur écran
       # de bureau et sur mobile.
       # ------------------------------------------------------------------
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with: { node-version: '22' }
 
       - name: Installer Playwright
@@ -206,7 +206,7 @@ jobs:
 
       # En cas d'échec, la capture d'écran et la trace disent ce que le
       # navigateur voyait — bien plus utile qu'un message d'assertion.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: playwright-preuves
