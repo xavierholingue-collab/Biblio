@@ -158,8 +158,29 @@ w.fetch = (url, options = {}) => {
 
 /* ------------------------------- Exécution -------------------------------- */
 
+/* ON NOMME CE QU'ON ATTEND, ON NE LE COMPTE PAS.
+ *
+ * Ce contrôle exigeait « deux blocs de script ». Le 15/08/2026, l'ajout du
+ * bandeau de recette en a fait trois, et la chaîne s'est arrêtée sur une
+ * page parfaitement saine.
+ *
+ * Un compte est une propriété de la MISE EN FORME, pas du comportement :
+ * il tombe dès qu'on ajoute quelque chose de légitime, et il ne dit rien
+ * quand le script qui compte vraiment disparaît. Même erreur que le
+ * contrôle qui exigeait six vignettes et cassait à la septième.
+ *
+ * On vérifie donc la présence de ce dont la page a BESOIN. */
 const blocs = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => m[1]);
-verifier("deux blocs de script trouvés", blocs.length === 2, "trouvé " + blocs.length);
+verifier("au moins un bloc de script", blocs.length >= 1, "trouvé " + blocs.length);
+
+const ATTENDUS = [
+  ["le script principal de l'application", /function\s+rafraichir|entrerDansApp/],
+  ["le bandeau d'environnement",           /bandeau-recette/],
+];
+for (const [nom, motif] of ATTENDUS) {
+  verifier(nom, blocs.some(b => motif.test(b)),
+    "aucun des " + blocs.length + " blocs ne correspond");
+}
 
 const attendre = ms => new Promise(r => setTimeout(r, ms));
 
