@@ -62,8 +62,25 @@ test.describe("Page d'accueil publique", () => {
 
   test("les chiffres sont réellement affichés", async ({ page }) => {
     await page.goto("/", { waitUntil: "networkidle" });
+    /* On vérifie que les mesures ATTENDUES sont là, pas qu'il y en ait un
+       certain nombre.
+
+       Ce contrôle exigeait exactement six vignettes. L'ajout d'une septième —
+       le volume de pages — l'a fait échouer le 14/08/2026, sans rien révéler
+       du système : la page allait parfaitement bien. Un test qui tombe à
+       chaque enrichissement finit par être assoupli sans qu'on y pense, et
+       c'est alors la disparition d'une mesure qui passera inaperçue.
+
+       Nommer ce qu'on attend attrape le vrai risque — une mesure qui
+       disparaît — sans punir l'ajout. */
     const vignettes = page.locator("#chiffres .chiffre");
-    await expect(vignettes).toHaveCount(6);
+    await expect(vignettes.first()).toBeVisible();
+
+    const etiquettes = (await page.locator("#chiffres .quoi").allTextContents())
+      .join(" | ").toLowerCase();
+    for (const attendue of ["ouvrages", "lus", "sur la pile", "résumés", "auteurs", "note"]) {
+      expect(etiquettes, `mesure disparue : ${attendue}`).toContain(attendue);
+    }
 
     // Aucun « — » ni case vide : une vignette sans valeur signale que la
     // donnée n'est pas arrivée jusqu'à la page.
