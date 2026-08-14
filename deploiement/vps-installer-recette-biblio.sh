@@ -37,6 +37,20 @@
 
 set -uo pipefail
 
+# « could not change directory to "/root" » : l'utilisateur postgres n'a pas
+# le droit d'entrer dans /root, et chaque « sudo -u postgres » le signale.
+# C'est sans consequence, mais du bruit dans une sortie qu'on lit pour y
+# reperer des anomalies finit par masquer les vraies.
+cd / || exit 1
+
+REFAIRE_HTTP=0
+for arg in "$@"; do
+  case "${arg}" in
+    --refaire-le-mot-de-passe-http) REFAIRE_HTTP=1 ;;
+    *) echo "Option inconnue : ${arg}"; exit 1 ;;
+  esac
+done
+
 PORT=3007
 BASE=biblio_recette
 SERVICE=biblio-recette-api
@@ -178,9 +192,13 @@ ok "unite systemd ${SERVICE} installee (non demarree : pas encore de code)"
 # refaire a chaque execution changerait le mot de passe en silence.
 echo
 echo "-- Acces HTTP --"
+# LE MOT DE PASSE HTTP EST IRRECUPERABLE une fois pose : Caddy n'en garde
+# qu'un condensat bcrypt, et c'est bien ce qu'on veut. La seule facon de le
+# retrouver est donc de le REFAIRE — d'ou cette option.
 FICHIER_AUTH=/etc/caddy/recette-biblio-auth.conf
-if [ -f "${FICHIER_AUTH}" ]; then
+if [ -f "${FICHIER_AUTH}" ] && [ "${REFAIRE_HTTP}" = "0" ]; then
   ok "mot de passe HTTP deja pose, conserve"
+  echo "         (--refaire-le-mot-de-passe-http si vous l'avez perdu)"
   MDP_HTTP=""
 else
   MDP_HTTP=$(openssl rand -base64 15 | tr -d '/+=' | cut -c1-16)
@@ -301,16 +319,65 @@ csp=$(curl -sI --max-time 20 https://biblio.xavier-holingue.eu/ 2>/dev/null \
   && ok "politique de contenu toujours servie en production" \
   || echo "  A VOIR  la production ne sert plus de politique de contenu"
 
+# --- CE QU'IL RESTE A FAIRE, CONSTATE ET NON RECITE ----------------------
+#
+# Une premiere version recitait une liste figee — « poser le DNS », « mettre
+# a jour la clef » — y compris quand c'etait deja fait. Une consigne qui ne
+# regarde pas l'etat reel finit par etre survolee, et le jour ou elle dit
+# quelque chose d'important, on ne la lit plus.
 echo
-echo "== FIN =="
-echo
-echo "  A FAIRE, dans cet ordre :"
-echo "    1. DNS : ${DOMAINE} -> l'adresse de ce serveur"
-echo "    2. la clef de deploiement doit accepter « deployer biblio-recette »"
-echo "       (relancer vps-poser-cle-biblio.sh apres mise a jour)"
-echo "    3. remplir la base :  bash vps-rafraichir-recette.sh"
-echo "    4. premier deploiement depuis GitHub"
-[ "${nouveau_mdp}" = "1" ] && echo "    mot de passe de l'application : ${ancien_mdp}"
-[ -n "${MDP_HTTP}" ] && echo "    mot de passe HTTP : recette / ${MDP_HTTP}"
-echo
-echo "  Notez-les MAINTENANT : ils ne seront pas reaffiches."
+echo "-- Ce qu'il reste a faire --"
+
+ip_dns=$(getent hosts "${DOMAINE}" 2>/dev/null | awk '{print $1; exit}')
+mon_ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+if [ -z "${ip_dns}" ]; then
+  echo "  A FAIRE  DNS : ${DOMAINE} ne resout pas encore"
+elif [ "${ip_dns}" = "${mon_ip}" ] || [ "${ip_dns}" = "195.110.35.206" ]; then
+  ok "DNS : ${DOMAINE} -> ${ip_dns}"
+else
+  echo "  A VOIR   DNS : ${DOMAINE} -> ${ip_dns}, or ce serveur est ${mon_ip}"
+fi
+
+if grep -q '"deployer biblio-recette"' /usr/local/bin/deployer-biblio 2>/dev/null; then
+  ok "la clef de deploiement accepte « deployer biblio-recette »"
+else
+  echo "  A FAIRE  le deployeur ne connait pas encore « deployer biblio-recette »"
+  echo "           envoyer vps-deployer-biblio.sh puis relancer vps-poser-cle-biblio.sh"
+fi
+
+nb=$(sudo -u postgres psql -tAd "${BASE}" -c \
+  "select count(*) from possessions" 2>/dev/null \
+  || sudo -u postgres psql -tAd "${BASE}" -c "select count(*) from books" 2>/dev/null)
+if [ -n "${nb}" ] && [ "${nb}" -gt 0 ] 2>/dev/null; then
+  ok "la base contient ${nb} ouvrages"
+else
+  echo "  A FAIRE  base vide :  bash /root/vps-rafraichir-recette.sh"
+fi
+
+if systemctl is-active "${SERVICE}" >/dev/null 2>&1; then
+  ok "${SERVICE} tourne"
+else
+  echo "  A FAIRE  premier deploiement depuis GitHub (le service attend son code)"
+fi
+
+# --- Les secrets, affiches SEULEMENT s'il y a quelque chose a montrer ----
+#
+# « Notez-les MAINTENANT » sous une liste vide est un message qui ment. On
+# ne l'ecrit que quand il y a effectivement quelque chose a noter.
+if [ "${nouveau_mdp}" = "1" ] || [ -n "${MDP_HTTP}" ]; then
+  echo
+  echo "=========================================================================="
+  echo " A NOTER MAINTENANT — ces valeurs ne seront pas reaffichees"
+  [ "${nouveau_mdp}" = "1" ] && echo "   mot de passe de l'application : ${ancien_mdp}"
+  [ -n "${MDP_HTTP}" ] && {
+    echo "   mot de passe HTTP             : recette / ${MDP_HTTP}"
+    echo "   secret GitHub AUTH_RECETTE_BIBLIO = recette:${MDP_HTTP}"
+  }
+  echo "=========================================================================="
+else
+  echo
+  echo "  (aucun secret cree cette fois : tout etait deja en place)"
+  echo "   mot de passe de l'application : sed -n 's/^MOT_DE_PASSE=//p' ${ENVF}"
+  echo "   mot de passe HTTP : irrecuperable — le refaire avec"
+  echo "     bash ${0##*/} --refaire-le-mot-de-passe-http"
+fi

@@ -31,6 +31,11 @@
 
 set -uo pipefail
 
+# Meme raison que dans l'installeur : « could not change directory to /root »
+# a chaque appel de sudo -u postgres brouille une sortie qu'on lit pour y
+# reperer des anomalies.
+cd / || exit 1
+
 SOURCE=biblio
 CIBLE=biblio_recette
 SERVICE=biblio-recette-api
