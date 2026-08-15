@@ -811,6 +811,24 @@ function versApp(r) {
     id: r.id, isbn: r.isbn, titre: r.titre, auteur: r.auteur, editeur: r.editeur,
     annee: r.annee, statut: r.statut, note: r.note === null ? null : Number(r.note),
     categorie: r.categorie, sousCategorie: r.sous_categorie, sphere: r.sphere,
+
+    /* EN LECTURE SEULE, ET L'ASYMÉTRIE EST VOULUE.
+     *
+     * « visibilite » entre ici mais ne repart PAS dans versBase(). La page se
+     * contente donc de la connaître ; c'est l'écran de réglages qui la
+     * décide, et l'API traite son absence comme « je ne me prononce pas ».
+     *
+     * La renvoyer à l'enregistrement rouvrirait le défaut du 15/08 sous une
+     * autre forme : deux onglets ouverts, la visibilité changée dans l'un,
+     * une note modifiée dans l'autre — et le second écraserait le premier
+     * avec une valeur périmée.
+     *
+     * Ce champ manquait, et son absence rendait VACUE une vérification
+     * Playwright écrite le 16/08 : « aucun ouvrage privé chargé par la page »
+     * ne trouvait jamais rien, faute de champ à regarder. Un contrôle qui ne
+     * peut pas échouer ne contrôle rien. */
+    visibilite: r.visibilite,
+
     coverUrl: r.cover_url, coverStatut: r.cover_statut,
     resume: r.resume, resumePoints: r.resume_points, resumeThemes: r.resume_themes,
     resumeModele: r.resume_modele, resumeGenereLe: r.resume_genere_le,

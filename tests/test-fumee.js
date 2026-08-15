@@ -107,7 +107,7 @@ w.fetch = (url, options = {}) => {
   }
   if (chemin === "/api/statistiques") {
     const vus = connecte ? table : table.filter(l => l.sphere === "Pro");
-    return reponse({ perimetre: connecte ? "complet" : "professionnel",
+    return reponse({ perimetre: connecte ? "complet" : "public",
                      total: vus.length, lus: vus.length, en_cours: 0, a_lire: 0,
                      avec_resume: 0, auteurs: vus.length, rayons: 1, note_moyenne: 4.5,
                      sous_categories: [], decennies: [], auteurs_recurrents: [],

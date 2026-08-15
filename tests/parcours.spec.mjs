@@ -223,13 +223,35 @@ test.describe("Ajout d'un ouvrage", () => {
 
 test.describe("Ce qui doit rester fermé", () => {
 
-  test("aucun ouvrage personnel dans la page servie à un visiteur", async ({ page, request }) => {
+  /* ======================================================================
+     ON VÉRIFIE LA VISIBILITÉ, PLUS LA SPHÈRE.
+
+     Ce contrôle exigeait « aucun ouvrage de sphère Perso n'est servi à un
+     visiteur ». C'était juste tant que « Pro = public, Perso = privé » était
+     une règle écrite dans le code.
+
+     Le menu de réglages, livré le 16/08/2026, l'a remplacée par une décision
+     de l'utilisateur. Le soir même, deux romans personnels — les tomes 1 et 4
+     du « Guide du voyageur galactique » — ont été publiés volontairement, et
+     ce contrôle a annoncé « des ouvrages personnels sont exposés
+     publiquement ». Il disait vrai, et il avait tort : c'était une
+     publication, pas une fuite.
+
+     Septième occurrence de la même famille en une semaine, et la seconde
+     fois que je répare celui qui crie sans chercher les autres. D'où la
+     recherche systématique qui a suivi : « sphere » est un CLASSEMENT — Pro,
+     Perso — et n'a plus aucun rapport avec ce qui se montre.
+
+     La propriété, elle, ne dépend d'aucun réglage et ne périmera pas :
+     RIEN DE CE QUI EST MARQUÉ PRIVÉ NE DOIT SORTIR.
+     ====================================================================== */
+  test("aucun ouvrage marqué privé n'est servi à un visiteur", async ({ page, request }) => {
     const livres = await (await request.get("/api/livres")).json();
     const liste = Array.isArray(livres) ? livres
       : Object.values(livres).find(v => Array.isArray(v)) ?? [];
     expect(liste.length, "aucun ouvrage retourné").toBeGreaterThan(0);
-    expect(liste.filter(l => l.sphere === "Perso"),
-      "des ouvrages personnels sont exposés publiquement").toEqual([]);
+    expect(liste.filter(l => l.visibilite === "privee").map(l => l.titre),
+      "des ouvrages marqués privés sont exposés publiquement").toEqual([]);
 
     await page.goto("/ma-bibliotheque.html", { waitUntil: "networkidle" });
 
@@ -245,12 +267,37 @@ test.describe("Ce qui doit rester fermé", () => {
     // LEXICALE : elle est visible sous le nom « livres », mais n'apparaît
     // pas sur globalThis. Passer par globalThis.livres rendrait undefined
     // et ferait échouer ce contrôle sans qu'aucun ouvrage soit exposé.
-    const spheres = await page.evaluate(() => {
+    const charges = await page.evaluate(() => {
       if (typeof livres === "undefined" || !Array.isArray(livres)) return null;
-      return [...new Set(livres.map(l => l.sphere))];
+      return {
+        combien: livres.length,
+        prives: livres.filter(l => l.visibilite === "privee").map(l => l.titre),
+        // Le champ est-il seulement là ? Sans lui, le filtre ci-dessus ne
+        // trouve jamais rien et ce contrôle devient une formalité.
+        renseignes: livres.filter(l => typeof l.visibilite === "string").length,
+      };
     });
-    expect(spheres, "impossible de lire les ouvrages chargés").not.toBeNull();
-    expect(spheres, "un visiteur voit des ouvrages hors du périmètre Pro").toEqual(["Pro"]);
+    expect(charges, "impossible de lire les ouvrages chargés").not.toBeNull();
+
+    /* LE CONTRÔLE DU CONTRÔLE.
+       « visibilite » ne traversait pas versApp() jusqu'au 16/08/2026 : la
+       vérification ci-dessous cherchait un champ absent, ne trouvait rien, et
+       passait au vert quoi qu'il arrive. On vérifie donc d'abord qu'il y a
+       quelque chose à regarder. */
+    expect(charges.renseignes,
+      "la page ne connaît la visibilité d'aucun ouvrage : le contrôle suivant serait vide")
+      .toBe(charges.combien);
+    expect(charges.combien, "la page n'a chargé aucun ouvrage").toBeGreaterThan(0);
+    expect(charges.prives,
+      "la page détient en mémoire des ouvrages marqués privés").toEqual([]);
+
+    /* LA PAGE NE DOIT PAS EN DÉTENIR PLUS QUE L'API N'EN SERT.
+       Comparer les deux ensembles attrape ce qu'aucune règle sur les champs
+       ne verrait — un cache, un jeu d'amorce oublié, une seconde requête
+       faite dans un autre contexte. */
+    expect(charges.combien,
+      "la page détient plus d'ouvrages que l'API n'en sert à un visiteur")
+      .toBe(liste.length);
   });
 
   test("les en-têtes de sécurité sont bien servis", async ({ request }) => {

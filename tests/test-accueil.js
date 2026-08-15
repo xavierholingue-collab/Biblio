@@ -52,7 +52,7 @@ const RAYONS = [
 const TOTAL = RAYONS.reduce((s, r) => s + r.n, 0);   // 76
 
 const STATS = {
-  perimetre: "professionnel",
+  perimetre: "public",
   total: TOTAL, lus: 56, en_cours: 0, a_lire: 20,
   avec_resume: 70, auteurs: 60, rayons: RAYONS.length,
   note_moyenne: 4.32,
@@ -197,7 +197,7 @@ const attendre = ms => new Promise(r => setTimeout(r, ms));
   verifier("la légende explique ce que l'aire encode", /[Aa]ire/.test(legende), legende.slice(0, 120));
   verifier("la légende dit que l'aire n'est PAS le volume",
     /pas à leur volume/.test(legende), legende.slice(0, 200));
-  verifier("la légende annonce le périmètre", /professionnel/.test(legende));
+  verifier("la légende annonce le périmètre", /publié/.test(legende), legende.slice(0, 120));
 
   /* ------------------ La figure décorative a bien disparu ------------------ */
 

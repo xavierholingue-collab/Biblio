@@ -99,7 +99,7 @@ try {
 
   r = await appel("/api/statistiques", { sansCookie: true });
   const statsPub = r.corps ?? {};
-  verifier("statistiques publiques", r.statut === 200 && statsPub.perimetre === "professionnel",
+  verifier("statistiques publiques", r.statut === 200 && statsPub.perimetre === "public",
     "statut " + r.statut + " / " + statsPub.perimetre);
   verifier("statistiques cohérentes avec la liste publique",
     statsPub.total === publics.length, statsPub.total + " vs " + publics.length);

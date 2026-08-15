@@ -435,7 +435,17 @@ async function statistiques(client, session, langue) {
   ]);
 
   return {
-    perimetre: session ? "complet" : "professionnel",
+    /* « public » et non « professionnel ».
+     *
+     * L'étiquette datait de l'époque où le périmètre visible ÉTAIT la sphère
+     * Pro. Depuis le menu de réglages, un visiteur peut voir un roman
+     * personnel que le propriétaire a choisi de publier — et c'est arrivé le
+     * soir même de la livraison. La page d'accueil annonçait alors
+     * « ouvrages académiques » en affichant deux Douglas Adams.
+     *
+     * Une étiquette qui décrit une règle disparue est un mensonge tranquille :
+     * personne ne la relit, et elle finit par être crue. */
+    perimetre: session ? "complet" : "public",
     langue,
     ...general.rows[0],
     avec_resume: resumes.rows[0].n,
