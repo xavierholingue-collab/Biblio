@@ -9,6 +9,22 @@
 <meta name="apple-mobile-web-app-title" content="Bibliothèque">
 <meta name="theme-color" content="#E9EBE6">
 <title>Ma bibliothèque</title>
+<!-- Telemetrie d'audience (Umami), servie en first-party.
+     Le script vient de /stats/s.js, c'est-a-dire du domaine de Biblio via
+     le proxy Caddy : script-src 'self' et connect-src 'self' le couvrent
+     deja, la politique de contenu n'a pas eu a changer. Script externe,
+     donc hors du calcul des empreintes sha256 de calculer-csp.mjs.
+
+     data-host-url est INDISPENSABLE : sans lui, la collecte partirait sur
+     /api/send et tomberait dans l'API metier (handle /api/* -> :3006).
+     data-domains limite l'envoi a la production : la recette ne pollue pas.
+     Aucune donnee personnelle, aucun cookie. -->
+<script defer
+        src="/stats/s.js"
+        data-website-id="e0fddae3-1198-42ee-a580-324af31bbcdf"
+        data-host-url="/stats"
+        data-domains="biblio.xavier-holingue.eu"></script>
+
 <style>
   /* ------------------------------------------------- Bandeau de recette
      Visible, mais pas decoratif : il repond a une question de securite.
