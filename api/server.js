@@ -259,13 +259,86 @@ function verifier(jeton) {
   } catch { return null; }
 }
 
+/* ===========================================================================
+   LE NOM DU COOKIE DE SESSION, ET POURQUOI IL PORTE UN PRÉFIXE
+
+   « __Host- » n'est pas décoratif : c'est une contrainte que le NAVIGATEUR
+   fait respecter. Un cookie ainsi nommé n'est accepté que s'il est Secure,
+   de chemin « / », et SANS attribut Domain.
+
+   Ce que cela empêche concrètement : biblio.xavier-holingue.eu partage son
+   domaine parent avec blog.xavier-holingue.eu et le site principal. N'importe
+   lequel de ces voisins peut poser un cookie « session » valable pour
+   « .xavier-holingue.eu », qui serait alors envoyé à la bibliothèque en même
+   temps que le vrai. Selon l'ordre choisi par le navigateur, l'application
+   lirait celui de l'intrus — au mieux une déconnexion, au pire une session
+   imposée. C'est le « cookie tossing », et il ne demande aucune faille : il
+   suffit qu'un sous-domaine voisin serve un jour du contenu qu'on ne maîtrise
+   pas entièrement.
+
+   Un cookie « __Host- » ne peut PAS être posé de cette façon. Le navigateur
+   le refuse à l'émission.
+
+   EN LOCAL, PAS DE PRÉFIXE : il exige Secure, donc HTTPS, et la pile locale
+   tourne en http://localhost. On garde donc l'ancien nom hors production.
+
+   ON LIT LES DEUX, ON N'ÉCRIT QUE LE BON. Sans cela, la livraison qui
+   introduit ce changement déconnecterait tout le monde — et une déconnexion
+   inexpliquée est exactement ce qu'on s'est promis d'éviter depuis le 15/08. */
+const COOKIE_SESSION = DERRIERE_PROXY ? "__Host-session" : "session";
+const COOKIES_ACCEPTES = ["__Host-session", "session"];
+
 function lireCookie(req, nom) {
   const brut = req.headers.cookie ?? "";
   for (const part of brut.split(";")) {
     const [c, ...v] = part.trim().split("=");
-    if (c === nom) return decodeURIComponent(v.join("="));
+    if (c !== nom) continue;
+    /* UN COOKIE MAL FORMÉ NE DOIT PAS FAIRE TOMBER LA REQUÊTE.
+       decodeURIComponent lève sur « %ZZ ». Sans ce filet, l'exception
+       remontait au routeur, qui répondait 500 : un cookie abîmé — posé par
+       accident, ou par un voisin de domaine — rendait le site inutilisable
+       pour la personne visée, y compris ses pages publiques. */
+    try { return decodeURIComponent(v.join("=")); }
+    catch { return null; }
   }
   return null;
+}
+
+/** Le jeton de session, quel que soit le nom sous lequel il est arrivé. */
+function lireSession(req) {
+  for (const nom of COOKIES_ACCEPTES) {
+    const v = lireCookie(req, nom);
+    if (v) return v;
+  }
+  return null;
+}
+
+/* ===========================================================================
+   L'ORIGINE DE LA REQUÊTE, POUR LES ÉCRITURES
+
+   SameSite=Strict protège des sites TIERS, et c'est déjà beaucoup. Mais
+   « site » se compte au domaine enregistrable : blog.xavier-holingue.eu est
+   le MÊME site que biblio.xavier-holingue.eu du point de vue du navigateur.
+   Une page servie par un voisin peut donc envoyer une requête avec votre
+   cookie de session attaché.
+
+   Pour les méthodes simples — un POST de formulaire — aucune vérification
+   préalable n'est demandée par le navigateur : la requête part et s'exécute.
+   L'attaquant ne lit pas la réponse, mais il n'en a pas besoin pour écrire.
+
+   On exige donc que l'origine annoncée, QUAND ELLE EST ANNONCÉE, corresponde
+   à l'hôte visé. Une origine absente — curl, un contrôle, un client qui n'est
+   pas un navigateur — reste acceptée : les navigateurs, eux, en envoient
+   toujours une sur les requêtes qui écrivent. Refuser l'absence casserait les
+   outils sans rien protéger de plus.
+   =========================================================================== */
+function origineEtrangere(req) {
+  const origine = req.headers.origin;
+  if (!origine) return false;
+  let hote;
+  try { hote = new URL(origine).host; } catch { return true; }
+  // Derrière Caddy, l'hôte demandé est celui de l'en-tête Host.
+  return hote !== req.headers.host;
 }
 
 function motDePasseValide(propose) {
@@ -284,6 +357,23 @@ function tropDeTentatives(ip) {
   return t.nombre >= 10;
 }
 function noterEchec(ip) {
+  /* LE LIMITEUR NE DOIT PAS DEVENIR L'ATTAQUE.
+     Chaque adresse ayant échoué une fois laissait une entrée, effacée
+     seulement si cette même adresse revenait après un quart d'heure. Un
+     attaquant changeant d'adresse à chaque essai — un /64 IPv6 en fournit
+     des milliards — faisait donc grossir cette table jusqu'à la mémoire du
+     serveur. Le dispositif censé protéger la connexion devenait le moyen
+     d'arrêter le service.
+     On balaie donc les entrées périmées dès que la table dépasse une taille
+     raisonnable, et on refuse de dépasser un plafond dur. */
+  if (tentatives.size > 5000) {
+    const limite = Date.now() - 15 * 60 * 1000;
+    for (const [cle, v] of tentatives) if (v.debut < limite) tentatives.delete(cle);
+    // Toujours pleine après le balayage : ce sont des entrées récentes, donc
+    // une attaque en cours. On cesse d'en accepter de nouvelles plutôt que
+    // de grossir — les adresses déjà notées restent limitées.
+    if (tentatives.size > 5000 && !tentatives.has(ip)) return;
+  }
   const t = tentatives.get(ip) ?? { debut: Date.now(), nombre: 0 };
   t.nombre += 1;
   tentatives.set(ip, t);
@@ -1021,7 +1111,51 @@ Réponds UNIQUEMENT par un objet JSON, sans texte autour ni balises Markdown :
   info.parcours = (Array.isArray(info.parcours) ? info.parcours : [])
     .filter(p => connus.has(p.id))
     .sort((a, b) => (a.ordre ?? 99) - (b.ordre ?? 99));
-  if (inclureExternes === false) info.suggestions_externes = [];
+
+  /* ===================================================================
+     LA RÉPONSE DU MODÈLE EST UNE ENTRÉE COMME UNE AUTRE.
+
+     « parcours » était filtré — chaque id devait exister —, mais
+     « suggestions_externes » sortait brut. Or l'année y était interpolée
+     SANS échappement dans la page, l'auteur ayant supposé un nombre.
+
+     Ce que cela ouvre : le modèle reçoit dans sa consigne des titres et des
+     auteurs venus du CATALOGUE PARTAGÉ, c'est-à-dire de tables qu'un autre
+     locataire peut écrire. Un titre rédigé pour détourner la consigne peut
+     donc faire produire au modèle une « année » contenant du HTML, qui
+     s'exécuterait dans le navigateur du LECTEUR — pas de celui qui l'a posé.
+
+     Aujourd'hui il n'y a qu'un locataire, donc pas de chemin réel. C'est
+     précisément pour cela qu'on répare maintenant : le jour où il y en a
+     deux, le chemin existe sans que rien ne l'annonce.
+
+     On borne donc chaque champ à son type et à sa longueur, ici, une fois,
+     plutôt que de compter sur l'échappement de chaque page. */
+  const texteCourt = (v, n) =>
+    String(v ?? "").replace(/[ -]/g, " ").trim().slice(0, n);
+
+  info.lecture_de_la_demande = texteCourt(info.lecture_de_la_demande, 600);
+  info.lacune = texteCourt(info.lacune, 600);
+  for (const p of info.parcours) {
+    p.pourquoi = texteCourt(p.pourquoi, 600);
+    p.a_chercher = texteCourt(p.a_chercher, 300);
+    p.ordre = Number.isFinite(Number(p.ordre)) ? Number(p.ordre) : 99;
+  }
+
+  info.suggestions_externes = inclureExternes === false ? []
+    : (Array.isArray(info.suggestions_externes) ? info.suggestions_externes : [])
+        .slice(0, 5)
+        .map(s => ({
+          titre: texteCourt(s.titre, 300),
+          auteur: texteCourt(s.auteur, 200),
+          editeur: texteCourt(s.editeur, 150),
+          // Un nombre, ou rien. Jamais une chaîne venue du modèle.
+          annee: Number.isInteger(Number(s.annee)) && Number(s.annee) > 0
+                 && Number(s.annee) < 2200 ? Number(s.annee) : null,
+          isbn: String(s.isbn ?? "").replace(/[^0-9Xx]/g, "").slice(0, 13),
+          pourquoi: texteCourt(s.pourquoi, 600),
+        }))
+        .filter(s => s.titre);
 
   await dans((c) => c.query(
     `insert into reading_quests (intention, reponse, modele, tenant_id)
@@ -1113,6 +1247,14 @@ const serveur = createServer(async (req, rep) => {
   try {
     if (chemin === "/api/sante") return json(rep, { ok: true });
 
+    /* TOUTE ÉCRITURE DOIT VENIR D'ICI.
+       Placé avant la connexion elle-même : sans cela, une page voisine
+       pourrait ouvrir une session dans votre navigateur avec un mot de passe
+       qu'elle connaît, et l'utiliser ensuite pour écrire chez vous. */
+    if (req.method !== "GET" && req.method !== "HEAD" && origineEtrangere(req)) {
+      return json(rep, { error: "Origine non autorisée." }, 403);
+    }
+
     /* --- Connexion --- */
     if (chemin === "/api/connexion" && req.method === "POST") {
       if (tropDeTentatives(ip)) return json(rep, { error: "Trop de tentatives. Réessayez dans un quart d'heure." }, 429);
@@ -1126,19 +1268,20 @@ const serveur = createServer(async (req, rep) => {
       if (!ID_TENANT_DEFAUT) return json(rep, { error: "Bibliothèque non configurée." }, 503);
       const jeton = signer({ t: ID_TENANT_DEFAUT, expire: Date.now() + DUREE_SESSION });
       return json(rep, { ok: true }, 200, {
-        "Set-Cookie": `session=${jeton}; HttpOnly;${COOKIE_SECURE} SameSite=Strict; Path=/; Max-Age=${DUREE_SESSION / 1000}`,
+        "Set-Cookie": `${COOKIE_SESSION}=${jeton}; HttpOnly;${COOKIE_SECURE} SameSite=Strict; Path=/; Max-Age=${DUREE_SESSION / 1000}`,
       });
     }
 
     if (chemin === "/api/deconnexion" && req.method === "POST") {
-      return json(rep, { ok: true }, 200, { "Set-Cookie": `session=; HttpOnly;${COOKIE_SECURE} SameSite=Strict; Path=/; Max-Age=0` });
+      return json(rep, { ok: true }, 200, { "Set-Cookie": COOKIES_ACCEPTES
+          .map(n => `${n}=; HttpOnly;${COOKIE_SECURE} SameSite=Strict; Path=/; Max-Age=0`) });
     }
 
     /* Une session sans locataire n'en est pas une.
        Les jetons émis avant la bascule n'en portent pas ; ils sont de toute
        façon invalidés par le changement de secret, mais on ne s'appuie pas
        sur cet effet de bord — on refuse explicitement. */
-    const brut = verifier(lireCookie(req, "session"));
+    const brut = verifier(lireSession(req));
     const session = brut && typeof brut.t === "string" ? brut : null;
 
     /* =====================================================================
@@ -1202,6 +1345,14 @@ const serveur = createServer(async (req, rep) => {
     if (chemin === "/api/livres" && req.method === "PUT") {
       const corps = await lireCorps(req);
       const livres = Array.isArray(corps) ? corps : [corps];
+      /* Une borne au lot. Le corps est déjà limité à 8 Mo, ce qui laisse
+         passer plusieurs dizaines de milliers de fiches dans UNE transaction :
+         de quoi immobiliser une connexion du pool — il y en a huit — et
+         rendre le service muet pour tout le monde, y compris la page
+         publique. Mille tient largement pour un import de bibliothèque. */
+      if (livres.length > 1000) {
+        return json(rep, { error: "Lot trop volumineux : 1000 ouvrages au maximum." }, 413);
+      }
       return json(rep, { enregistres: await dans((c) => enregistrerLivres(c, livres)) });
     }
 
@@ -1282,8 +1433,16 @@ const serveur = createServer(async (req, rep) => {
 
     return json(rep, { error: "Route inconnue" }, 404);
   } catch (e) {
-    console.error(chemin, e.message);
-    return json(rep, { error: e.message }, e.statut ?? 500);
+    console.error(chemin, e.stack ?? e.message);
+    /* CE QUI SORT N'EST PAS CE QU'ON JOURNALISE.
+       Une erreur inattendue vient presque toujours de PostgreSQL, et son
+       message nomme la table, la colonne, la contrainte — parfois la valeur
+       qui l'a violée. Renvoyé au client, il dessine la structure de la base
+       à qui sait lire, et peut recopier une donnée d'autrui dans la réponse.
+       Les erreurs DÉLIBÉRÉES, elles, portent un statut : celles-là sont
+       écrites pour être lues, on les laisse passer telles quelles. */
+    if (e.statut) return json(rep, { error: e.message }, e.statut);
+    return json(rep, { error: "Erreur interne." }, 500);
   }
 });
 

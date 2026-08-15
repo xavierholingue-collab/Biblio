@@ -1531,7 +1531,7 @@ function afficherQuete(info) {
       const c = document.createElement("div");
       c.className = "c";
       c.innerHTML = `<div class="t">${echapper(s.titre)}</div>
-        <div class="a">${echapper(s.auteur)}${s.editeur ? " · " + echapper(s.editeur) : ""}${s.annee ? " · " + s.annee : ""}</div>
+        <div class="a">${echapper(s.auteur)}${s.editeur ? " · " + echapper(s.editeur) : ""}${s.annee ? " · " + echapper(s.annee) : ""}</div>
         <div class="p">${echapper(s.pourquoi || "")}</div>`;
       const b = document.createElement("button");
       b.className = "btn creux mini";

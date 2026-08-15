@@ -1,0 +1,623 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Biblio — revue de sécurité</title>
+<style>
+  :root {
+    --paper: #E9EBE6; --paper-2: #F2F3EF; --ink: #1A1F1C; --ink-soft: #5E665F;
+    --rule: #C9CEC5; --acad: #2F5D62; --bd: #A9722A; --roman: #8A3B4A;
+    --serif: Georgia, "Iowan Old Style", "Times New Roman", serif;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink);
+         font-family: var(--sans); font-size: 16px; line-height: 1.6;
+         -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 0 24px 120px; }
+
+  header.tete { padding: 64px 0 30px; border-bottom: 2px solid var(--ink); }
+  h1 { font-family: var(--serif); font-weight: 400; font-size: clamp(30px, 6vw, 44px);
+       letter-spacing: -0.02em; margin: 0 0 12px; line-height: 1.1; }
+  .chapeau { font-family: var(--serif); font-size: 19px; max-width: 64ch; margin: 0; }
+  .daté { font-family: var(--mono); font-size: 12px; color: var(--ink-soft);
+          letter-spacing: .05em; margin-top: 18px; }
+
+  h2 { font-family: var(--serif); font-weight: 400; font-size: 27px; margin: 56px 0 4px;
+       padding-top: 22px; border-top: 1px solid var(--rule); }
+  h3 { font-family: var(--serif); font-weight: 400; font-size: 19px; margin: 32px 0 4px; }
+  p { max-width: 68ch; }
+  .sous { color: var(--ink-soft); font-size: 14.5px; margin-top: 0; max-width: 68ch; }
+  code { font-family: var(--mono); font-size: .88em; background: var(--paper-2);
+         border: 1px solid var(--rule); padding: 1px 5px; border-radius: 2px; }
+  pre { background: var(--paper-2); border: 1px solid var(--rule); border-left: 3px solid var(--acad);
+        padding: 13px 15px; overflow-x: auto; font-family: var(--mono); font-size: 12.5px;
+        line-height: 1.55; }
+  pre code { background: none; border: none; padding: 0; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 14.5px; margin: 18px 0; }
+  th { text-align: left; font-size: 11.5px; text-transform: uppercase; letter-spacing: .07em;
+       color: var(--ink-soft); padding: 0 12px 8px 0; border-bottom: 1px solid var(--rule); }
+  td { padding: 9px 12px 9px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+
+  .g { font-family: var(--mono); font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase;
+       padding: 3px 8px; border-radius: 2px; white-space: nowrap; border: 1px solid; display: inline-block; }
+  .g.haut   { color: #fff; background: var(--roman); border-color: var(--roman); }
+  .g.moyen  { color: var(--bd); border-color: var(--bd); }
+  .g.bas    { color: var(--ink-soft); border-color: var(--rule); }
+  .g.ok     { color: var(--acad); border-color: var(--acad); }
+
+  .fiche { border: 1px solid var(--rule); border-left: 4px solid var(--rule);
+           background: var(--paper-2); padding: 18px 22px; margin: 24px 0; }
+  .fiche.haut  { border-left-color: var(--roman); }
+  .fiche.moyen { border-left-color: var(--bd); }
+  .fiche.bas   { border-left-color: var(--ink-soft); }
+  .fiche.corrige { border-left-color: var(--acad); }
+  .fiche h3 { margin-top: 0; }
+  .fiche .entete { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 2px; }
+  .fiche dl { margin: 14px 0 0; font-size: 14.5px; }
+  .fiche dt { font-size: 11.5px; text-transform: uppercase; letter-spacing: .07em;
+              color: var(--ink-soft); margin-top: 12px; }
+  .fiche dd { margin: 3px 0 0; max-width: 66ch; }
+
+  nav.sommaire { background: var(--paper-2); border: 1px solid var(--rule);
+                 padding: 20px 24px; margin: 34px 0 0; }
+  nav.sommaire ol { margin: 0; padding-left: 20px; font-size: 14.5px; }
+  nav.sommaire li { margin-bottom: 5px; }
+  nav.sommaire a { color: inherit; text-decoration: none; border-bottom: 1px solid var(--rule); }
+  ul.serre li { margin-bottom: 8px; max-width: 68ch; }
+  footer { margin-top: 70px; padding-top: 22px; border-top: 2px solid var(--ink);
+           font-size: 14px; color: var(--ink-soft); }
+  @media print { body { background: #fff; } .fiche { break-inside: avoid; } }
+</style>
+
+<div class="wrap">
+<header class="tete">
+  <h1>Biblio — revue de sécurité</h1>
+  <p class="chapeau">
+    Revue du code et de la configuration, à la recherche de ce qui pourrait
+    être exploité. Sept défauts corrigés dans la foulée, cinq laissés ouverts
+    parce qu'ils demandent une décision.
+  </p>
+  <p class="daté">16 août 2026 — code au commit <code>74f0902</code></p>
+</header>
+
+<nav class="sommaire">
+  <ol>
+    <li><a href="#methode">Comment cette revue a été faite, et ce qu'elle ne couvre pas</a></li>
+    <li><a href="#synthese">Synthèse</a></li>
+    <li><a href="#corriges">Les sept défauts corrigés</a></li>
+    <li><a href="#ouverts">Ce qui reste ouvert, et la décision à prendre</a></li>
+    <li><a href="#sain">Ce qui a été éprouvé et qui tient</a></li>
+    <li><a href="#avant-invite">Avant d'inviter quelqu'un</a></li>
+  </ol>
+</nav>
+
+<!-- ==================================================================== -->
+<h2 id="methode">1. Comment cette revue a été faite</h2>
+<p class="sous">Et surtout : ce qu'elle ne dit pas.</p>
+
+<p>
+  Lecture du code de l'API, des migrations, des politiques PostgreSQL, de la
+  configuration Caddy et systemd, de la chaîne de livraison. Chaque hypothèse
+  de faille a été <strong>éprouvée sur un banc d'essai</strong> — un vrai
+  PostgreSQL, deux locataires, la vraie API lancée en HTTP — plutôt que
+  déduite par la lecture. Aucune requête n'a été envoyée à votre serveur.
+</p>
+<p>
+  Les corrections apportées sont couvertes par <strong>24 nouvelles
+  vérifications</strong>, et chacune a été <strong>cassée volontairement</strong>
+  pour confirmer qu'un contrôle tombe. Sept mutations, sept détections.
+</p>
+
+<div class="fiche bas">
+  <h3>Ce que cette revue ne couvre pas</h3>
+  <ul class="serre">
+    <li><strong>Le serveur lui-même.</strong> Je n'ai pas pu regarder l'état
+        réel du VPS : version du noyau, correctifs appliqués, pare-feu,
+        <code>fail2ban</code>, comptes SSH existants, ports réellement à
+        l'écoute. Ce document décrit ce que les scripts <em>installent</em>, pas
+        ce qui <em>tourne</em>.</li>
+    <li><strong>La cryptographie.</strong> HMAC-SHA256 et l'usage de
+        <code>timingSafeEqual</code> ont été lus, pas analysés formellement.</li>
+    <li><strong>Une attaque temporelle.</strong> Elle ne se voit dans aucun
+        test de justesse. C'est une limite reconnue, déjà notée dans le
+        fichier d'authentification.</li>
+    <li><strong>Les dépendances au-delà du direct.</strong>
+        <code>npm audit</code> ne remonte aucune vulnérabilité — l'API n'a
+        qu'une dépendance, <code>pg</code> — mais un audit n'est pas une preuve.</li>
+  </ul>
+</div>
+
+<!-- ==================================================================== -->
+<h2 id="synthese">2. Synthèse</h2>
+
+<table>
+  <tr><th>Constat</th><th>Gravité</th><th>État</th></tr>
+  <tr><td>Écriture possible depuis un sous-domaine voisin (CSRF même-site)</td>
+      <td><span class="g moyen">Moyen</span></td><td><span class="g ok">Corrigé</span></td></tr>
+  <tr><td>Cookie de session usurpable par un voisin de domaine</td>
+      <td><span class="g moyen">Moyen</span></td><td><span class="g ok">Corrigé</span></td></tr>
+  <tr><td>Les messages d'erreur PostgreSQL repartaient au client</td>
+      <td><span class="g moyen">Moyen</span></td><td><span class="g ok">Corrigé</span></td></tr>
+  <tr><td>Sortie du modèle insérée sans assainissement (XSS)</td>
+      <td><span class="g moyen">Moyen</span></td><td><span class="g ok">Corrigé</span></td></tr>
+  <tr><td>Le limiteur de tentatives pouvait épuiser la mémoire</td>
+      <td><span class="g moyen">Moyen</span></td><td><span class="g ok">Corrigé</span></td></tr>
+  <tr><td>Un cookie mal formé rendait le site inutilisable</td>
+      <td><span class="g bas">Faible</span></td><td><span class="g ok">Corrigé</span></td></tr>
+  <tr><td>Un lot d'écriture sans borne immobilisait le pool</td>
+      <td><span class="g bas">Faible</span></td><td><span class="g ok">Corrigé</span></td></tr>
+  <tr><td><strong>L'API tourne sous le compte root</strong></td>
+      <td><span class="g haut">Élevé</span></td><td>Ouvert — décision</td></tr>
+  <tr><td><strong>Aucune sauvegarde hors de la machine</strong></td>
+      <td><span class="g haut">Élevé</span></td><td>Ouvert — décision</td></tr>
+  <tr><td><strong>Détournement de consigne du modèle par le catalogue partagé</strong></td>
+      <td><span class="g haut">Élevé*</span></td><td>Ouvert — décision</td></tr>
+  <tr><td>Actions GitHub épinglées sur une étiquette, pas une empreinte</td>
+      <td><span class="g moyen">Moyen</span></td><td>Ouvert — décision</td></tr>
+  <tr><td>Aucune limitation de débit sur les lectures publiques</td>
+      <td><span class="g bas">Faible</span></td><td>Ouvert — décision</td></tr>
+</table>
+<p class="sous">
+  * Élevé <em>le jour où une deuxième personne utilise le service</em>. Aujourd'hui,
+  sans exploitation possible : vous êtes seul.
+</p>
+
+<!-- ==================================================================== -->
+<h2 id="corriges">3. Les sept défauts corrigés</h2>
+
+<div class="fiche corrige">
+  <div class="entete"><h3>3.1 — Écrire chez vous depuis un sous-domaine voisin</h3>
+    <span class="g moyen">Moyen</span></div>
+  <dl>
+    <dt>Le défaut</dt>
+    <dd>
+      Le cookie de session porte <code>SameSite=Strict</code>, qui protège des
+      sites <em>tiers</em>. Mais « site » se compte au domaine enregistrable :
+      pour le navigateur, <code>blog.xavier-holingue.eu</code> est le
+      <strong>même site</strong> que <code>biblio.xavier-holingue.eu</code>. Une
+      page servie par un voisin peut donc émettre une requête avec votre cookie
+      de session attaché.
+    </dd>
+    <dt>Ce qu'un attaquant en fait</dt>
+    <dd>
+      Un POST de formulaire ne demande aucune vérification préalable au
+      navigateur : il part et s'exécute. L'attaquant ne lit pas la réponse — il
+      n'en a pas besoin pour <em>écrire</em>. Ajouter un ouvrage, publier votre
+      bibliothèque entière, épuiser votre quota d'appels au modèle.
+    </dd>
+    <dt>Pourquoi c'est réel malgré tout</dt>
+    <dd>
+      <code>blog.xavier-holingue.eu</code> est aujourd'hui une page vide sous
+      votre contrôle. Mais la faiblesse est structurelle : elle s'active le jour
+      où un sous-domaine sert un contenu que vous ne maîtrisez pas entièrement —
+      un générateur de blog, un outil tiers, un formulaire.
+    </dd>
+    <dt>La correction</dt>
+    <dd>
+      Toute requête qui écrit doit annoncer une origine correspondant à l'hôte
+      visé. Une origine absente reste acceptée — <code>curl</code>, les
+      contrôles, un client qui n'est pas un navigateur — car les navigateurs en
+      envoient toujours une sur les requêtes qui écrivent. Le contrôle est placé
+      <strong>avant la connexion elle-même</strong> : sans cela, un voisin
+      pourrait ouvrir une session dans votre navigateur, puis s'en servir.
+    </dd>
+  </dl>
+</div>
+
+<div class="fiche corrige">
+  <div class="entete"><h3>3.2 — Un voisin de domaine pouvait poser votre cookie</h3>
+    <span class="g moyen">Moyen</span></div>
+  <dl>
+    <dt>Le défaut</dt>
+    <dd>
+      Le cookie s'appelait <code>session</code>, sans protection de nom.
+      N'importe quel sous-domaine voisin peut poser un cookie
+      <code>session</code> valable pour <code>.xavier-holingue.eu</code>, qui
+      sera envoyé à la bibliothèque <em>en plus</em> du vrai. L'application lit
+      le premier trouvé, et l'ordre dépend du navigateur.
+    </dd>
+    <dt>Ce qu'un attaquant en fait</dt>
+    <dd>
+      Au mieux vous déconnecter en boucle sans que vous compreniez pourquoi. Au
+      pire vous imposer une session qu'il contrôle — et vous faire travailler
+      dans une bibliothèque qui n'est pas la vôtre.
+    </dd>
+    <dt>La correction</dt>
+    <dd>
+      Le cookie s'appelle désormais <code>__Host-session</code>. Ce préfixe
+      n'est pas décoratif : c'est le <em>navigateur</em> qui refuse d'accepter un
+      cookie ainsi nommé s'il n'est pas <code>Secure</code>, de chemin racine, et
+      <strong>sans attribut Domain</strong>. Un voisin ne peut donc plus en poser
+      un. L'ancien nom reste <em>lu</em> — sans quoi la livraison qui introduit ce
+      changement déconnecterait tout le monde.
+    </dd>
+  </dl>
+</div>
+
+<div class="fiche corrige">
+  <div class="entete"><h3>3.3 — Les erreurs de la base repartaient au client</h3>
+    <span class="g moyen">Moyen</span></div>
+  <dl>
+    <dt>Le défaut</dt>
+    <dd>
+      Le gestionnaire final renvoyait <code>{ error: e.message }</code> avec le
+      statut 500. Une erreur inattendue vient presque toujours de PostgreSQL, et
+      son message nomme la table, la colonne, la contrainte — parfois la valeur
+      qui l'a violée.
+    </dd>
+    <dt>Ce qu'un attaquant en fait</dt>
+    <dd>
+      Il envoie des requêtes malformées jusqu'à dessiner la structure complète de
+      la base, ce qui prépare toute la suite. Et dans le cas d'une contrainte
+      d'unicité, le message peut recopier une donnée d'autrui dans la réponse.
+    </dd>
+    <dt>La correction</dt>
+    <dd>
+      Les erreurs <em>délibérées</em> — celles qui portent un statut, écrites pour
+      être lues — passent inchangées. Tout le reste devient
+      <code>« Erreur interne. »</code>, et le détail complet, pile d'appels
+      comprise, part dans le journal du serveur.
+    </dd>
+  </dl>
+</div>
+
+<div class="fiche corrige">
+  <div class="entete"><h3>3.4 — La réponse du modèle était insérée sans contrôle</h3>
+    <span class="g moyen">Moyen</span></div>
+  <dl>
+    <dt>Le défaut</dt>
+    <dd>
+      Dans une recommandation, le champ <code>parcours</code> était filtré — chaque
+      identifiant devait exister — mais <code>suggestions_externes</code> sortait
+      brut. Or l'<strong>année</strong> y était interpolée <em>sans échappement</em>
+      dans la page, l'auteur ayant supposé un nombre.
+    </dd>
+    <dt>Ce qu'un attaquant en fait</dt>
+    <dd>
+      C'est ici que le catalogue partagé change tout. Les titres et auteurs qui
+      entrent dans la consigne du modèle viennent de <code>ouvrages</code>, table
+      qu'<strong>un autre locataire peut écrire</strong> dès qu'il possède le même
+      ISBN. Un titre rédigé pour détourner la consigne peut faire produire au
+      modèle une « année » contenant du HTML — qui s'exécute dans le navigateur
+      du <em>lecteur</em>, pas de celui qui l'a posée.
+    </dd>
+    <dt>La correction</dt>
+    <dd>
+      Chaque champ de la réponse est borné à son type et à sa longueur, côté
+      serveur, une fois — plutôt que de dépendre de l'échappement de chaque page.
+      L'année est un entier ou rien. L'échappement manquant a été rétabli dans la
+      page par surcroît : deux barrières valent mieux qu'une.
+    </dd>
+  </dl>
+</div>
+
+<div class="fiche corrige">
+  <div class="entete"><h3>3.5 — Le limiteur de tentatives était l'attaque</h3>
+    <span class="g moyen">Moyen</span></div>
+  <dl>
+    <dt>Le défaut</dt>
+    <dd>
+      Chaque adresse ayant échoué une fois laissait une entrée en mémoire,
+      effacée seulement si cette <em>même</em> adresse revenait après un quart
+      d'heure. Rien ne bornait la table.
+    </dd>
+    <dt>Ce qu'un attaquant en fait</dt>
+    <dd>
+      Il change d'adresse à chaque essai — un préfixe IPv6 ordinaire en fournit
+      des milliards — et fait grossir la table jusqu'à épuiser la mémoire du
+      serveur. Le dispositif censé protéger la connexion devient le moyen
+      d'arrêter le service.
+    </dd>
+    <dt>La correction</dt>
+    <dd>
+      Balayage des entrées périmées au-delà de cinq mille, puis refus d'en
+      accepter de nouvelles. Les adresses déjà notées restent limitées : une
+      attaque en cours ne s'achète pas l'oubli en saturant la table.
+    </dd>
+  </dl>
+</div>
+
+<div class="fiche corrige">
+  <div class="entete"><h3>3.6 — Un cookie abîmé rendait le site inutilisable</h3>
+    <span class="g bas">Faible</span></div>
+  <dl>
+    <dt>Le défaut</dt>
+    <dd>
+      <code>decodeURIComponent</code> lève une exception sur une séquence
+      invalide comme <code>%ZZ</code>. Elle remontait au routeur, qui répondait
+      500 — <em>sur toutes les routes</em>, y compris les pages publiques.
+    </dd>
+    <dt>Ce qu'un attaquant en fait</dt>
+    <dd>
+      Combiné au défaut 3.2, un voisin de domaine posait un cookie abîmé et la
+      personne visée ne pouvait plus rien consulter, sans comprendre pourquoi ni
+      savoir quoi effacer.
+    </dd>
+    <dt>La correction</dt>
+    <dd>
+      Un cookie illisible est traité comme un cookie absent : son porteur devient
+      un visiteur. C'est le comportement fermé et silencieux qu'on veut ici.
+    </dd>
+  </dl>
+</div>
+
+<div class="fiche corrige">
+  <div class="entete"><h3>3.7 — Un lot d'écriture sans borne</h3>
+    <span class="g bas">Faible</span></div>
+  <dl>
+    <dt>Le défaut</dt>
+    <dd>
+      Le corps d'une requête est limité à 8 Mo, ce qui laisse passer plusieurs
+      dizaines de milliers de fiches dans <em>une</em> transaction.
+    </dd>
+    <dt>Ce qu'un attaquant en fait</dt>
+    <dd>
+      Il immobilise une connexion du pool — il y en a huit — et quelques requêtes
+      suffisent à rendre le service muet pour tout le monde, page publique
+      comprise. Il faut être authentifié, ce qui en limite la portée aujourd'hui,
+      mais plus le jour où d'autres personnes ont un compte.
+    </dd>
+    <dt>La correction</dt>
+    <dd>
+      Mille ouvrages par lot, refusés au-delà avec un code <code>413</code>.
+      C'est largement au-dessus d'un import de bibliothèque complète.
+    </dd>
+  </dl>
+</div>
+
+<!-- ==================================================================== -->
+<h2 id="ouverts">4. Ce qui reste ouvert</h2>
+<p class="sous">Chacun demande un arbitrage, un accès au serveur, ou les deux.</p>
+
+<div class="fiche haut">
+  <div class="entete"><h3>4.1 — L'API tourne sous le compte root</h3>
+    <span class="g haut">Élevé</span></div>
+  <dl>
+    <dt>Le constat</dt>
+    <dd>
+      L'unité systemd porte <code>User=root</code>, en production comme en
+      recette. Les protections <code>ProtectSystem=strict</code>,
+      <code>NoNewPrivileges</code>, <code>ProtectHome</code> et
+      <code>PrivateTmp</code> sont bien là et réduisent la surface — mais le
+      processus reste root.
+    </dd>
+    <dt>Ce que ça coûte le jour où ça compte</dt>
+    <dd>
+      Toute exécution de code arbitraire dans Node — une faille de
+      <code>pg</code>, une dépendance compromise, une erreur de ma part — devient
+      root sur une machine qui héberge aussi <code>supperf.io</code> et
+      <code>y-factor.fr</code>. Ce n'est pas une faille en soi ; c'est le
+      multiplicateur de toutes les autres.
+    </dd>
+    <dt>La correction proposée</dt>
+    <dd>
+      Un compte dédié sans interpréteur de commandes, propriétaire du seul
+      dossier de l'API. La difficulté n'est pas technique, elle est
+      opérationnelle : il faut changer le propriétaire des fichiers, et une
+      erreur laisse le service à l'arrêt. À faire avec les deux mains sur le
+      clavier, pas au détour d'une livraison.
+      <pre><code>useradd --system --no-create-home --shell /usr/sbin/nologin biblio-api
+chown -R biblio-api: /opt/biblio-api
+chown root:biblio-api /etc/biblio/env &amp;&amp; chmod 640 /etc/biblio/env
+# puis dans l'unité : User=biblio-api</code></pre>
+    </dd>
+  </dl>
+</div>
+
+<div class="fiche haut">
+  <div class="entete"><h3>4.2 — Aucune sauvegarde hors de la machine</h3>
+    <span class="g haut">Élevé</span></div>
+  <dl>
+    <dt>Le constat</dt>
+    <dd>
+      La base n'est sauvegardée qu'<em>avant chaque migration</em>, donc les jours
+      où vous livrez. Entre deux livraisons, rien. Et les archives dorment dans
+      <code>/var/backups</code>, sur la machine même qu'elles protègent.
+    </dd>
+    <dt>Ce que ça coûte</dt>
+    <dd>
+      Ce n'est pas une faille d'attaquant, c'est une perte définitive. Un disque
+      perdu, un compte d'hébergeur suspendu, un effacement malheureux — et il ne
+      reste rien. C'est le seul point de ce document dont la défaillance est
+      <strong>irréversible</strong>.
+    </dd>
+    <dt>La correction proposée</dt>
+    <dd>
+      Une tâche quotidienne, un chiffrement au repos, un envoi vers un stockage
+      objet chez un autre fournisseur, une rétention de trente jours — et surtout
+      <strong>une restauration éprouvée</strong>. Une sauvegarde qu'on n'a jamais
+      restaurée n'est pas une sauvegarde, c'est une intention.
+    </dd>
+  </dl>
+</div>
+
+<div class="fiche haut">
+  <div class="entete"><h3>4.3 — Le catalogue partagé peut détourner la consigne du modèle</h3>
+    <span class="g haut">Élevé une fois à plusieurs</span></div>
+  <dl>
+    <dt>Le constat</dt>
+    <dd>
+      La route de recommandation place <strong>toute votre bibliothèque</strong>
+      dans la consigne — titres, auteurs, rayons, y compris les ouvrages
+      personnels — <em>et</em> active la recherche web du modèle. Or les titres
+      viennent du catalogue partagé, écrit par quiconque possède le même ISBN.
+    </dd>
+    <dt>Ce qu'un attaquant en fait</dt>
+    <dd>
+      Il possède un livre courant, en rédige le titre comme une instruction, et
+      attend que vous demandiez une recommandation. Le modèle a alors sous les
+      yeux votre bibliothèque entière <em>et</em> un moyen de sortir : une
+      recherche web dont la requête peut contenir vos titres privés. Les données
+      partent sans jamais transiter par une réponse que vous liriez.
+    </dd>
+    <dt>Ce qui est déjà fait</dt>
+    <dd>
+      L'assainissement de la <em>réponse</em> (défaut 3.4) empêche le retour
+      d'exécuter quoi que ce soit chez vous. Il n'empêche pas la <em>sortie</em>.
+    </dd>
+    <dt>Les deux façons de fermer, et leur prix</dt>
+    <dd>
+      <strong>Séparer les deux capacités.</strong> Ne jamais donner au modèle, dans
+      le même appel, vos données privées <em>et</em> un accès au web. Concrètement :
+      un premier appel sans outil choisit dans votre bibliothèque, un second avec
+      recherche web propose des lectures extérieures à partir des seuls thèmes.
+      C'est la seule barrière structurelle — un modèle ne peut pas divulguer ce
+      qu'il n'a pas. <em>Prix : deux appels au lieu d'un, donc deux fois le quota
+      sur cette route.</em>
+      <br><br>
+      <strong>Ou renoncer aux suggestions extérieures</strong> quand la
+      bibliothèque contient des ouvrages privés. Gratuit, et cela retire une
+      fonction que vous utilisez.
+      <br><br>
+      Aucune consigne de prudence ajoutée au texte ne remplace ces deux options :
+      une instruction qui demande au modèle d'ignorer les instructions reste une
+      instruction.
+    </dd>
+  </dl>
+</div>
+
+<div class="fiche moyen">
+  <div class="entete"><h3>4.4 — Les actions GitHub sont épinglées sur une étiquette</h3>
+    <span class="g moyen">Moyen</span></div>
+  <dl>
+    <dt>Le constat</dt>
+    <dd>
+      <code>actions/checkout@v7</code>, <code>setup-node@v7</code>,
+      <code>upload-artifact@v7</code>, <code>download-artifact@v8</code>. Une
+      étiquette est mobile : elle peut être déplacée vers un autre commit.
+    </dd>
+    <dt>Ce que ça coûte</dt>
+    <dd>
+      Le travail de production détient la clé SSH de déploiement et le secret de
+      session. Une action compromise s'exécute avec eux. Le risque est faible —
+      ce sont des actions publiées par GitHub — mais il n'est pas nul, et il ne
+      coûte rien à supprimer.
+    </dd>
+    <dt>La correction proposée</dt>
+    <dd>
+      Épingler sur l'empreinte du commit
+      (<code>actions/checkout@8f4b7f8...</code>). La clé SSH, elle, est déjà
+      contrainte : elle ne peut lancer qu'une seule commande, sans terminal ni
+      redirection de port. C'est ce qui limite déjà beaucoup les dégâts.
+    </dd>
+  </dl>
+</div>
+
+<div class="fiche bas">
+  <div class="entete"><h3>4.5 — Aucune limitation de débit sur les lectures publiques</h3>
+    <span class="g bas">Faible</span></div>
+  <dl>
+    <dt>Le constat</dt>
+    <dd>
+      <code>GET /api/livres</code> rend 246 ouvrages <em>avec leurs résumés
+      complets</em> — plusieurs centaines de kilooctets — sans authentification,
+      sans cache (<code>Cache-Control: no-cache</code>) et sans limitation.
+    </dd>
+    <dt>Ce que ça coûte</dt>
+    <dd>
+      Une boucle sur cette route consomme la bande passante et le processeur du
+      VPS, et l'ennui ne s'arrête pas à Biblio : le serveur héberge deux autres
+      sites derrière le même Caddy.
+    </dd>
+    <dt>La correction proposée</dt>
+    <dd>
+      Le plus efficace n'est pas une limitation mais une <strong>séparation</strong> :
+      la page publique n'a pas besoin des résumés entiers pour dessiner sa
+      mosaïque. Une route allégée réglerait le sujet et rendrait la page plus
+      rapide. À défaut, Caddy sait limiter le débit par adresse.
+    </dd>
+  </dl>
+</div>
+
+<!-- ==================================================================== -->
+<h2 id="sain">5. Ce qui a été éprouvé et qui tient</h2>
+<p class="sous">Une revue qui ne liste que des défauts ne dit pas où est la solidité.</p>
+
+<ul class="serre">
+  <li><strong>Aucune injection SQL possible.</strong> Toutes les requêtes sont
+      paramétrées. Le seul fragment construit dynamiquement —
+      <code>update tenants set …</code> — assemble des noms de colonnes tirés
+      d'une liste fermée, et les valeurs restent liées.</li>
+  <li><strong>Le cloisonnement ne dépend pas du code de l'API.</strong> Dix tables
+      sous <code>force row level security</code>, vérifié dans
+      <code>pg_class</code> à chaque livraison. Une requête qui oublierait de
+      poser le locataire ne rend pas trop de lignes : elle n'en rend aucune.</li>
+  <li><strong>Un locataire ne peut ni en créer un autre ni en modifier un.</strong>
+      Éprouvé : l'écriture chez autrui touche zéro ligne, et l'API refuse
+      désormais explicitement au lieu de répondre « enregistré ».</li>
+  <li><strong>Le mot de passe est comparé en temps constant</strong>, et dix
+      échecs bloquent un quart d'heure.</li>
+  <li><strong>Le module de lien magique est solide</strong> — empreinte du jeton
+      stockée et non le jeton, usage unique garanti par la base et non par une
+      vérification en deux temps, quinze minutes, aucune énumération possible.
+      Il n'est simplement pas encore branché.</li>
+  <li><strong>La politique de contenu autorise chaque script par son
+      empreinte</strong>, jamais par <code>'unsafe-inline'</code>, et elle est
+      recalculée à chaque livraison sur les pages réellement posées.</li>
+  <li><strong>Les pages échappent ce qu'elles insèrent.</strong> Le résumé passe
+      par <code>textContent</code> ; les champs libres par une fonction
+      d'échappement. Le seul champ non échappé — le statut — est verrouillé par
+      une contrainte de la base à trois valeurs.</li>
+  <li><strong>La clé SSH de déploiement ne peut lancer qu'une commande.</strong>
+      Ni terminal, ni redirection de port, ni agent.</li>
+  <li><strong>Aucun secret ne peut partir dans le dépôt</strong> : l'assemblage
+      refuse de continuer s'il en trouve un, ou s'il trouve un export de la
+      bibliothèque.</li>
+  <li><strong>La clé Google Books n'existe pas côté navigateur</strong> — l'appel
+      se fait sans clé, donc rien à divulguer.</li>
+  <li><strong>Une dépendance, zéro vulnérabilité connue.</strong></li>
+</ul>
+
+<div class="fiche bas">
+  <h3>Deux concessions assumées, et pourquoi</h3>
+  <p>
+    <code>rayons_reglages</code> et <code>tenants</code> sont <strong>lisibles par
+    tous</strong> en SQL. On peut donc savoir qu'un utilisateur a marqué tel rayon
+    privé, ou lister les comptes du service.
+  </p>
+  <p>
+    Ce n'est pas un oubli. Pour <code>rayons_reglages</code>, une politique
+    cloisonnée rendait la règle de visibilité <em>inopérante</em> — un rayon marqué
+    public ne publiait rien, un rayon privé « fonctionnait » par accident. Une
+    protection qui ne s'applique pas mais qu'on croit active est bien pire qu'un
+    réglage découvrable. Pour <code>tenants</code>, l'authentification lit cette
+    table <em>avant</em> qu'un locataire soit établi : elle ne peut pas dépendre de
+    l'un d'eux. Dans les deux cas, l'<strong>écriture</strong> est bornée, et aucune
+    route de l'API n'expose ces tables.
+  </p>
+</div>
+
+<!-- ==================================================================== -->
+<h2 id="avant-invite">6. Avant d'inviter quelqu'un</h2>
+<p class="sous">L'ordre dans lequel je traiterais ce document.</p>
+
+<table>
+  <tr><th>#</th><th>Quoi</th><th>Pourquoi maintenant</th></tr>
+  <tr><td>1</td><td><strong>Sauvegarde quotidienne hors machine, et restauration éprouvée</strong></td>
+      <td>Seul point irréversible. Ne dépend d'aucune décision de conception.</td></tr>
+  <tr><td>2</td><td><strong>Sortir l'API de root</strong></td>
+      <td>Multiplicateur de tout le reste. Une demi-heure, à faire posément.</td></tr>
+  <tr><td>3</td><td><strong>Trancher sur la recommandation</strong> (4.3)</td>
+      <td>Doit être fait <em>avant</em> le premier invité, pas après : c'est
+          l'arrivée d'un second locataire qui ouvre le chemin.</td></tr>
+  <tr><td>4</td><td><strong>Brancher le lien magique</strong></td>
+      <td>Sans lui, il n'y a de toute façon pas d'invitation possible.</td></tr>
+  <tr><td>5</td><td>Épingler les actions, alléger la route publique</td>
+      <td>Confort et hygiène. Peut attendre.</td></tr>
+</table>
+
+<footer>
+  <p>
+    Les sept corrections sont couvertes par <code>tests/test-durcissement.mjs</code>
+    — 24 vérifications, chacune éprouvée par mutation. Le reste du raisonnement
+    vit dans les commentaires du code, à l'endroit exact où il s'applique.
+  </p>
+  <p>
+    Une revue est une photographie. Celle-ci vaut pour le commit
+    <code>74f0902</code> et pour ce que les scripts installent — pas pour l'état
+    réel du serveur, que je n'ai pas pu observer.
+  </p>
+</footer>
+</div>
