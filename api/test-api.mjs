@@ -66,9 +66,36 @@ try {
   r = await appel("/api/livres", { sansCookie: true });
   verifier("lecture publique autorisée", r.statut === 200, "statut " + r.statut);
   const publics = r.corps ?? [];
-  verifier("seuls les ouvrages Pro sont exposés",
-    publics.length > 0 && publics.every(l => l.sphere === "Pro"),
-    [...new Set(publics.map(l => l.sphere))].join(","));
+
+  /* =======================================================================
+     ON NE TESTE PLUS LA SPHÈRE, ON TESTE LA VISIBILITÉ.
+
+     Cette vérification exigeait « toutes les fiches publiques sont de sphère
+     Pro ». C'était vrai tant que « Pro = public » était une règle écrite dans
+     le code. Le menu de réglages, livré le 16/08/2026, l'a remplacée par une
+     décision de l'utilisateur — et le contrôle a déclaré une fuite dès que
+     Xavier a publié deux ouvrages personnels, c'est-à-dire dès qu'il s'est
+     servi de la fonction qu'on venait de lui donner.
+
+     Sixième occurrence de la même famille dans la semaine : un contrôle qui
+     mesurait un état du moment plutôt qu'une propriété du système.
+
+     La propriété, elle, ne dépend d'aucun réglage : RIEN DE CE QUI EST
+     MARQUÉ PRIVÉ NE DOIT SORTIR. La sphère est un classement — Pro, Perso —
+     et n'a plus rien à voir avec ce qui se montre.
+     ======================================================================= */
+  verifier("aucun ouvrage marqué privé n'est exposé",
+    publics.length > 0 && publics.every(l => l.visibilite !== "privee"),
+    "visibilités vues : " + [...new Set(publics.map(l => l.visibilite))].join(","));
+
+  /* Le périmètre public, tel qu'il est À CET INSTANT. Il sert de référence
+     aux deux vérifications de fin : un jeton falsifié et une déconnexion
+     doivent rendre EXACTEMENT ceci, ni plus ni moins. Comparer des ensembles
+     plutôt qu'une propriété des lignes attrape aussi ce qu'aucune règle sur
+     les champs ne verrait — un ouvrage d'un autre locataire, par exemple. */
+  const perimetrePublic = publics.map(l => l.id).sort().join("|");
+  const memePerimetre = (liste) =>
+    Array.isArray(liste) && liste.map(l => l.id).sort().join("|") === perimetrePublic;
 
   r = await appel("/api/statistiques", { sansCookie: true });
   const statsPub = r.corps ?? {};
@@ -137,8 +164,27 @@ try {
   cookie = "session=" + Buffer.from(JSON.stringify({ expire: Date.now() + 1e9 }))
     .toString("base64url") + ".signaturebidon";
   r = await appel("/api/livres");
+  /* UN JETON FALSIFIÉ NE DOIT PAS ÊTRE REFUSÉ EN LECTURE — il doit être
+     IGNORÉ. La différence compte : la lecture publique reste ouverte à tous,
+     y compris à qui présente n'importe quoi. Ce qu'on exige, c'est qu'un tel
+     visiteur obtienne exactement le périmètre public, à la ligne près.
+
+     CE QUE CETTE VÉRIFICATION N'ÉPROUVE PAS, et il vaut mieux l'écrire que
+     de le laisser croire. Mesuré le 16/08/2026 : désactiver entièrement la
+     comparaison de signature dans server.js ne fait tomber AUCUN contrôle de
+     ce fichier. Le jeton fabriqué ici ne porte pas de locataire, et le
+     serveur refuse de son côté toute session sans locataire — c'est cette
+     seconde barrière qui répond, pas la signature.
+
+     Éprouver la signature demande un jeton qui désigne une bibliothèque
+     existante, donc de connaître son identifiant : impossible depuis
+     l'extérieur, ce qui est précisément le but. C'est test-http-cloisonnement
+     qui s'en charge, sur un banc où les deux locataires sont connus — et la
+     même mutation y fait bien tomber « un cookie dont on a changé le
+     locataire est rejeté ». */
   verifier("jeton falsifié : aucune élévation de droits",
-    r.statut === 200 && r.corps.every(l => l.sphere === "Pro"), "statut " + r.statut);
+    r.statut === 200 && memePerimetre(r.corps),
+    `statut ${r.statut}, ${r.corps?.length} ouvrages au lieu de ${publics.length}`);
   r = await appel("/api/livres", { methode: "PUT", corps: [] });
   verifier("jeton falsifié : écriture refusée", r.statut === 401, "statut " + r.statut);
   cookie = vrai;
@@ -234,8 +280,12 @@ try {
   cookie = "";
 
   r = await appel("/api/livres");
+  /* Le périmètre doit être REVENU à ce qu'il était avant la connexion, et
+     pas seulement « restreint ». Les ouvrages d'essai ont été supprimés
+     juste au-dessus : les deux ensembles doivent coïncider exactement. */
   verifier("retour au périmètre public après déconnexion",
-    r.statut === 200 && r.corps.every(l => l.sphere === "Pro"), "statut " + r.statut);
+    r.statut === 200 && memePerimetre(r.corps),
+    `statut ${r.statut}, ${r.corps?.length} ouvrages au lieu de ${publics.length}`);
   r = await appel("/api/livres", { methode: "PUT", corps: [] });
   verifier("écriture de nouveau refusée", r.statut === 401, "statut " + r.statut);
 
