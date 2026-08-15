@@ -57,13 +57,26 @@
    migration. Les tables concernées sont exactement celles que ce fichier
    remet sous « force » plus bas : si l'une manque ici, elle resterait
    ouverte au propriétaire après la migration.
+
+   ---------------------------------------------------------------------------
+   DEUX TABLES DE PLUS QUE CE FICHIER NE PROTÈGE LUI-MÊME
+
+   « tenants » et « appels_ia » sont mises sous « force » par
+   04-reglages.sql, pas ici. Elles doivent pourtant figurer dans cette
+   levée : lors d'un rejeu, 04 est déjà passé, et ce fichier INSÈRE dans
+   « tenants » quelques lignes plus bas.
+
+   Sans elles, la livraison suivante s'arrêterait sur un refus d'écriture
+   dans « tenants » — sans rapport visible avec ce qu'on livrait. C'est
+   exactement le défaut du 15/08/2026, sous un autre nom.
    ========================================================================= */
 
 do $$
 declare t text;
 begin
   foreach t in array array['books', 'resumes', 'rayons_ajoutes',
-                           'rayons_reglages', 'reading_quests']
+                           'rayons_reglages', 'reading_quests',
+                           'tenants', 'appels_ia']
   loop
     if to_regclass('public.' || t) is not null then
       execute format('alter table public.%I no force row level security', t);

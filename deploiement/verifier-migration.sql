@@ -198,6 +198,29 @@ begin
     raise exception '% ouvrage(s) en double dans une même bibliothèque.', orphelins;
   end if;
 
+  /* ------------------------------- 7. LE CLOISONNEMENT EST-IL EN PLACE ?
+
+     Ce contrôle ne regarde AUCUNE donnée, et c'est sa raison d'être. Une
+     migration peut laisser toutes les lignes intactes et les droits grands
+     ouverts : les six vérifications ci-dessus seraient vertes, et le compte
+     applicatif lirait la bibliothèque de tout le monde.
+
+     « force row level security » est le mot qui compte. Sans lui, les
+     politiques existent mais ne s'appliquent pas au PROPRIÉTAIRE des
+     tables — c'est-à-dire au compte que l'API utilise. */
+  select count(*) into orphelins
+    from unnest(array['books', 'resumes', 'possessions', 'ouvrages',
+                      'resumes_ouvrages', 'rayons_ajoutes', 'rayons_reglages',
+                      'reading_quests', 'tenants', 'appels_ia']) as t(nom)
+   where to_regclass('public.' || t.nom) is not null
+     and not exists (select 1 from pg_class c
+                      where c.relname = t.nom
+                        and c.relrowsecurity and c.relforcerowsecurity);
+  if orphelins > 0 then
+    raise exception '% table(s) hors « force row level security » : les '
+      'politiques ne s''appliqueraient pas au compte de l''application.', orphelins;
+  end if;
+
   raise notice '  RÉPÉTITION CONCLUANTE — % ouvrages, aucun écart.', n_books;
 end $$;
 

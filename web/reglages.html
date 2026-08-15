@@ -1,0 +1,465 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Réglages — Ma bibliothèque</title>
+<meta name="robots" content="noindex">
+<style>
+  /* ------------------------------------------------- Bandeau de recette
+     Visible, mais pas decoratif : il repond a une question de securite.
+     On efface un jour des donnees en croyant etre ailleurs. */
+  #bandeau-recette {
+    position: sticky; top: 0; z-index: 999;
+    background: #8A3B4A; color: #fff;
+    padding: .5rem 1rem; text-align: center;
+    font: 600 .85rem/1.4 system-ui, sans-serif;
+    letter-spacing: .04em;
+  }
+  #bandeau-recette[hidden] { display: none; }
+
+  :root {
+    --paper: #E9EBE6; --paper-2: #F2F3EF; --ink: #1A1F1C; --ink-soft: #5E665F;
+    --rule: #C9CEC5; --acad: #2F5D62; --roman: #8A3B4A; --focus: #2F5D62;
+    --serif: Georgia, "Iowan Old Style", "Times New Roman", serif;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font-family: var(--sans); font-size: 16px; line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 0 22px 90px; }
+  [hidden] { display: none !important; }
+  a { color: inherit; }
+  button { font-family: var(--sans); cursor: pointer; }
+
+  header { padding: 48px 0 22px; border-bottom: 2px solid var(--ink);
+           display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  h1 { font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 5vw, 38px);
+       letter-spacing: -0.02em; margin: 0; }
+  h2 { font-family: var(--serif); font-weight: 400; font-size: 21px; margin: 0 0 6px; }
+
+  section { padding: 30px 0; border-bottom: 1px solid var(--rule); }
+  .aide { color: var(--ink-soft); font-size: 14.5px; margin: 0 0 18px; max-width: 66ch; }
+  .aide strong { color: var(--ink); font-weight: 600; }
+
+  .choix { display: flex; gap: 10px; flex-wrap: wrap; }
+  .choix button {
+    background: var(--paper-2); border: 1px solid var(--rule); color: var(--ink);
+    padding: 9px 15px; font-size: 14.5px; border-radius: 2px;
+  }
+  .choix button[aria-pressed="true"] {
+    background: var(--ink); border-color: var(--ink); color: var(--paper);
+  }
+  .choix button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 14.5px; }
+  th { text-align: left; font-weight: 600; font-size: 12px; text-transform: uppercase;
+       letter-spacing: .06em; color: var(--ink-soft); padding: 0 10px 8px 0;
+       border-bottom: 1px solid var(--rule); }
+  td { padding: 9px 10px 9px 0; border-bottom: 1px solid var(--rule); vertical-align: middle; }
+  td.nom { font-family: var(--serif); font-size: 16px; }
+  .compte-livres { color: var(--ink-soft); font-family: var(--mono); font-size: 12px; white-space: nowrap; }
+  select { font: inherit; font-size: 14px; padding: 5px 7px; background: var(--paper-2);
+           border: 1px solid var(--rule); color: var(--ink); border-radius: 2px; }
+  select:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+
+  /* L'ETAT REEL, pas le reglage. Voir la note dans le script. */
+  .effet { font-size: 12.5px; font-family: var(--mono); white-space: nowrap; }
+  .effet.public { color: var(--acad); }
+  .effet.prive  { color: var(--ink-soft); }
+
+  .jauge { height: 8px; background: var(--paper-2); border: 1px solid var(--rule);
+           border-radius: 2px; overflow: hidden; max-width: 420px; margin: 4px 0 10px; }
+  .jauge div { height: 100%; background: var(--acad); }
+  .jauge.pleine div { background: var(--roman); }
+  .chiffre { font-family: var(--serif); font-size: 26px; }
+
+  .resume-public {
+    background: var(--paper-2); border-left: 3px solid var(--acad);
+    padding: 14px 16px; font-size: 14.5px; margin: 0 0 22px;
+  }
+  .resume-public.rien { border-left-color: var(--ink-soft); }
+
+  .etat { font-family: var(--mono); font-size: 12px; color: var(--ink-soft); min-height: 1.4em; }
+  .etat.erreur { color: var(--roman); }
+  .chargement { padding: 60px 0; text-align: center; color: var(--ink-soft);
+                font-family: var(--mono); font-size: 12px; }
+  .retour { font-size: 14px; text-decoration: none; border-bottom: 1px solid var(--rule); }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div id="bandeau-recette" hidden>RECETTE — ces donnees sont une copie, rien de ce qui est fait ici n'atteint la bibliotheque reelle</div>
+
+<!-- Le bandeau a SON PROPRE script, classique et autonome : il ne doit
+     dependre du chargement d'aucun module, et doit s'executer TOT. Un
+     bandeau qui apparait apres qu'on a commence a cliquer ne previent plus,
+     il constate. -->
+<script>
+(async () => {
+  try {
+    const r = await fetch("/api/session", { credentials: "same-origin" });
+    if (!r.ok) return;
+    const s = await r.json();
+    if (s.environnement === "recette") {
+      const b = document.getElementById("bandeau-recette");
+      if (b) b.hidden = false;
+    }
+  } catch { /* silence : un bandeau affiche a tort en production serait pire */ }
+})();
+</script>
+
+<div class="wrap">
+  <header>
+    <h1>Réglages</h1>
+    <a class="retour" href="/ma-bibliotheque.html">← Ma bibliothèque</a>
+  </header>
+
+  <div class="chargement" id="chargement">Lecture des réglages…</div>
+  <div id="app" hidden>
+
+    <section>
+      <h2>Ce qui est visible</h2>
+      <div class="resume-public" id="resumePublic"></div>
+      <p class="aide">
+        <strong>Rien n'est public tant que vous ne l'avez pas décidé.</strong>
+        Une bibliothèque privée ne montre rien, quels que soient les réglages
+        en dessous — c'est le verrou principal, et il l'emporte toujours.
+      </p>
+      <div class="choix" id="choixBibliotheque"></div>
+      <p class="etat" id="etatBibliotheque"></p>
+    </section>
+
+    <section>
+      <h2>Par rayon</h2>
+      <p class="aide">
+        « Hérité » veut dire : pas de décision à ce niveau, on suit la
+        bibliothèque. La colonne de droite dit ce qui sort <em>réellement</em>,
+        une fois toutes les règles appliquées.
+      </p>
+      <table>
+        <thead><tr>
+          <th>Rayon</th><th>Ouvrages</th><th>Réglage</th><th>Publiés</th>
+        </tr></thead>
+        <tbody id="corpsRayons"></tbody>
+      </table>
+      <p class="etat" id="etatRayons"></p>
+    </section>
+
+    <section>
+      <h2>Les exceptions</h2>
+      <p class="aide">
+        Les ouvrages réglés un par un, et eux seuls. Un livre décide toujours
+        contre son rayon. Les 300 autres n'ont pas leur place ici : ce sont
+        les exceptions qu'on oublie, pas la règle.
+      </p>
+      <table>
+        <thead><tr><th>Ouvrage</th><th>Rayon</th><th>Réglage</th></tr></thead>
+        <tbody id="corpsExceptions"></tbody>
+      </table>
+      <p class="etat" id="etatExceptions"></p>
+
+      <p class="aide" style="margin-top:22px">Régler un ouvrage en particulier :</p>
+      <div class="choix">
+        <input type="search" id="chercheLivre" list="listeLivres" style="font:inherit;font-size:14px;padding:6px 8px;background:var(--paper-2);border:1px solid var(--rule);color:var(--ink);border-radius:2px;min-width:min(340px,100%)" placeholder="Titre ou auteur…" aria-label="Chercher un ouvrage">
+        <datalist id="listeLivres"></datalist>
+        <span id="reglageLivreChoisi"></span>
+      </div>
+    </section>
+
+    <section>
+      <h2>Langue des résumés</h2>
+      <p class="aide">
+        Les résumés existent par langue. Changer de langue n'efface rien : un
+        résumé français déjà écrit reste écrit, et le suivant sera produit
+        dans la langue choisie.
+      </p>
+      <div class="choix" id="choixLangue"></div>
+      <p class="etat" id="etatLangue"></p>
+    </section>
+
+    <section style="border-bottom:none">
+      <h2>Appels au modèle ce mois-ci</h2>
+      <p class="chiffre" id="quotaChiffre"></p>
+      <div class="jauge" id="quotaJauge"><div></div></div>
+      <p class="aide" id="quotaTexte"></p>
+    </section>
+
+  </div>
+</div>
+
+<script type="module">
+/* =========================================================================
+   L'ÉCRAN NE CALCULE AUCUNE RÈGLE DE VISIBILITÉ.
+
+   Il pourrait : « bibliothèque privée, donc tout est privé » tient en une
+   ligne. Ce serait une deuxième version de la règle, à côté de celle qui
+   vit dans PostgreSQL — et deux versions d'une règle de visibilité
+   divergent toujours. C'est alors la version AFFICHÉE qui rassure pendant
+   que l'autre publie.
+
+   Chaque route de réglage renvoie donc l'état complet APRÈS écriture, et la
+   page se contente de le peindre. « Publiés : 12 » n'est pas un calcul de
+   cette page : c'est un compte de ce que la base laisse effectivement
+   sortir, obtenu en appliquant la vraie règle.
+   ========================================================================= */
+
+const $ = (id) => document.getElementById(id);
+
+const api = async (chemin, methode = "GET", corps) => {
+  const r = await fetch("/api" + chemin, {
+    method: methode,
+    credentials: "same-origin",
+    headers: corps ? { "content-type": "application/json" } : {},
+    body: corps ? JSON.stringify(corps) : undefined,
+  });
+  const d = await r.json().catch(() => null);
+  if (!r.ok) throw new Error(d?.error ?? `Erreur ${r.status}`);
+  return d;
+};
+
+/* Un message d'état par section, pas un seul en haut de page. Un
+   « enregistré » commun laisse ignorer LEQUEL des trois réglages a pris. */
+const dire = (ou, texte, erreur = false) => {
+  const e = $(ou);
+  e.textContent = texte;
+  e.classList.toggle("erreur", erreur);
+  if (!erreur && texte) setTimeout(() => { if (e.textContent === texte) e.textContent = ""; }, 4000);
+};
+
+/* Toute écriture passe par ici : elle envoie, reçoit l'état complet, et
+   REPEINT TOUT. Repeindre seulement la ligne modifiée serait plus efficace
+   et raterait l'essentiel — publier un rayon change le compte global, et
+   fermer la bibliothèque change toutes les lignes à la fois. */
+const ecrire = async (chemin, corps, ou, message) => {
+  try {
+    peindre(await api(chemin, "PUT", corps));
+    dire(ou, message);
+  } catch (e) {
+    dire(ou, e.message, true);
+    // Relire : l'écran doit montrer la base, pas ce qu'on avait demandé.
+    try { peindre(await api("/reglages")); } catch { /* déjà signalé */ }
+  }
+};
+
+/* ------------------------------------------------------------ Peinture */
+
+const boutons = (conteneur, valeurs, actuelle, action) => {
+  conteneur.innerHTML = "";
+  for (const [valeur, libelle] of valeurs) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = libelle;
+    b.setAttribute("aria-pressed", String(valeur === actuelle));
+    b.onclick = () => { if (valeur !== actuelle) action(valeur); };
+    conteneur.append(b);
+  }
+};
+
+const menu = (valeurs, actuelle, action) => {
+  const s = document.createElement("select");
+  for (const [valeur, libelle] of valeurs) {
+    const o = document.createElement("option");
+    o.value = valeur; o.textContent = libelle;
+    o.selected = valeur === actuelle;
+    s.append(o);
+  }
+  s.onchange = () => action(s.value);
+  return s;
+};
+
+const VISIBILITES = [
+  ["heritee", "Hérité"], ["publique", "Public"], ["privee", "Privé"],
+];
+
+function peindre(r) {
+  /* --- Ce qui est visible, en une phrase --- */
+  const res = $("resumePublic");
+  const ferme = r.visibilite !== "publique";
+  res.classList.toggle("rien", ferme || r.publies === 0);
+  res.textContent = ferme
+    ? `Votre bibliothèque est fermée. Personne d'autre que vous ne voit aucun de vos ${r.livres} ouvrages.`
+    : r.publies === 0
+      ? `Votre bibliothèque est ouverte, mais aucun ouvrage n'est publié : réglez un rayon ci-dessous. (${r.livres} ouvrages au total.)`
+      : `${r.publies} ouvrages sur ${r.livres} sont visibles publiquement.`;
+
+  boutons($("choixBibliotheque"),
+    [["privee", "Fermée"], ["publique", "Ouverte"]], r.visibilite,
+    (v) => ecrire("/reglages", { visibilite: v }, "etatBibliotheque",
+                  v === "publique" ? "Bibliothèque ouverte." : "Bibliothèque fermée."));
+
+  /* --- Rayons --- */
+  const corps = $("corpsRayons");
+  corps.innerHTML = "";
+  for (const ray of r.rayons) {
+    const tr = document.createElement("tr");
+
+    const nom = document.createElement("td");
+    nom.className = "nom";
+    nom.textContent = ray.sous_categorie;
+    const petit = document.createElement("div");
+    petit.className = "compte-livres";
+    petit.textContent = ray.categorie;
+    nom.append(petit);
+
+    const nb = document.createElement("td");
+    nb.className = "compte-livres";
+    nb.textContent = ray.livres;
+
+    const reglage = document.createElement("td");
+    reglage.append(menu(VISIBILITES, ray.reglage, (v) =>
+      ecrire("/reglages/rayon",
+             { categorie: ray.categorie, sousCategorie: ray.sous_categorie, visibilite: v },
+             "etatRayons", `« ${ray.sous_categorie} » enregistré.`)));
+
+    /* LA COLONNE QUI COMPTE. Le réglage dit l'intention, celle-ci dit le
+       résultat. Un rayon réglé « public » dans une bibliothèque fermée
+       affiche « 0 publiés » — et c'est exactement ce qu'il fallait voir. */
+    const effet = document.createElement("td");
+    effet.className = "effet " + (ray.publies > 0 ? "public" : "prive");
+    effet.textContent = ray.publies > 0 ? `${ray.publies} publiés` : "aucun";
+
+    tr.append(nom, nb, reglage, effet);
+    corps.append(tr);
+  }
+
+  /* --- Exceptions --- */
+  const exc = $("corpsExceptions");
+  exc.innerHTML = "";
+  if (!r.exceptions.length) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 3; td.className = "compte-livres";
+    td.textContent = "Aucune. Tous vos ouvrages suivent leur rayon.";
+    tr.append(td); exc.append(tr);
+  }
+  for (const l of r.exceptions) {
+    const tr = document.createElement("tr");
+
+    const nom = document.createElement("td");
+    nom.className = "nom";
+    nom.textContent = l.titre;
+    const petit = document.createElement("div");
+    petit.className = "compte-livres";
+    petit.textContent = l.auteur;
+    nom.append(petit);
+
+    const rayon = document.createElement("td");
+    rayon.className = "compte-livres";
+    rayon.textContent = l.sous_categorie;
+
+    const reglage = document.createElement("td");
+    reglage.append(menu(VISIBILITES, l.visibilite, (v) =>
+      ecrire("/reglages/livre", { id: l.id, visibilite: v }, "etatExceptions",
+             v === "heritee" ? `« ${l.titre} » suit de nouveau son rayon.`
+                             : `« ${l.titre} » enregistré.`)));
+
+    tr.append(nom, rayon, reglage);
+    exc.append(tr);
+  }
+
+  /* --- Langue --- */
+  boutons($("choixLangue"), [["fr", "Français"], ["en", "English"]], r.langue,
+    (v) => ecrire("/reglages", { langue: v }, "etatLangue",
+                  v === "fr" ? "Résumés en français." : "Summaries in English."));
+
+  /* --- Quota ---
+
+     UNE JAUGE À 0 % EN PERMANENCE N'INFORME DE RIEN.
+
+     Le compte du propriétaire porte un plafond de 100 000, c'est-à-dire pas
+     de plafond. Afficher « 3 sur 100 000 » et une barre invisible donnerait
+     l'apparence d'une mesure là où il n'y en a pas, et on cesserait de la
+     regarder — y compris le jour où elle voudrait dire quelque chose.
+
+     Au-delà de mille, on montre donc le compte seul, et on dit franchement
+     qu'aucun plafond ne s'applique en pratique. Le décompte, lui, tourne
+     exactement pareil : c'est ce qui permettra de choisir un vrai plafond
+     pour les invités à partir de ce qui aura été observé. */
+  const { consomme, plafond } = r.quota;
+  const sansPlafond = plafond >= 1000;
+  const part = plafond > 0 ? Math.min(100, Math.round(consomme / plafond * 100)) : 0;
+  $("quotaChiffre").textContent = sansPlafond
+    ? `${consomme} ${consomme > 1 ? "appels" : "appel"}`
+    : `${consomme} sur ${plafond}`;
+  $("quotaJauge").hidden = sansPlafond;
+  $("quotaJauge").classList.toggle("pleine", consomme >= plafond);
+  $("quotaJauge").firstElementChild.style.width = part + "%";
+  $("quotaTexte").textContent = sansPlafond
+    ? `Aucun plafond ne s'applique en pratique à cette bibliothèque (${plafond.toLocaleString("fr-FR")}). Le compte est tenu quand même : c'est lui qui permettra de fixer un plafond juste pour les invités.`
+    : consomme >= plafond
+      ? "Plafond atteint. Les résumés et recommandations reprendront le 1er du mois prochain. Les résumés déjà écrits restent lisibles et ne consomment rien."
+      : "Un résumé, une recommandation ou une recherche de fiche compte pour un appel. Relire un résumé déjà écrit ne compte pas. Remise à zéro le 1er du mois.";
+}
+
+/* ------------------------------------- Régler un ouvrage en particulier
+
+   POURQUOI UNE RECHERCHE ET NON LA LISTE DES 324.
+
+   Une liste déroulante de trois cents titres ne se parcourt pas, elle se
+   subit — et l'ouvrage qu'on cherche est presque toujours celui dont on se
+   rappelle le titre. Le champ de recherche du navigateur (datalist) fait ce
+   travail sans une ligne de code, et reste utilisable au clavier.
+
+   La liste n'est chargée QU'ICI, et pas dans /api/reglages : renvoyer trois
+   cents titres à chaque enregistrement d'un rayon serait payer cher un
+   affichage qu'on ne regarde pas. */
+const parEtiquette = new Map();
+
+const chargerLivres = async () => {
+  const livres = await api("/livres");
+  const liste = $("listeLivres");
+  liste.innerHTML = "";
+  parEtiquette.clear();
+  for (const l of livres) {
+    const etiquette = `${l.titre} — ${l.auteur}`;
+    // Deux ouvrages homonymes : le premier gagne, et l'autre reste
+    // atteignable par les rayons. Mieux vaut un choix partiel qu'un
+    // enregistrement sur le mauvais livre.
+    if (parEtiquette.has(etiquette)) continue;
+    parEtiquette.set(etiquette, l);
+    const o = document.createElement("option");
+    o.value = etiquette;
+    liste.append(o);
+  }
+};
+
+$("chercheLivre").addEventListener("change", () => {
+  const zone = $("reglageLivreChoisi");
+  zone.innerHTML = "";
+  const l = parEtiquette.get($("chercheLivre").value);
+  if (!l) {
+    if ($("chercheLivre").value) dire("etatExceptions", "Ouvrage introuvable.", true);
+    return;
+  }
+  zone.append(menu(VISIBILITES, l.visibilite, async (v) => {
+    await ecrire("/reglages/livre", { id: l.id, visibilite: v }, "etatExceptions",
+                 `« ${l.titre} » enregistré.`);
+    l.visibilite = v;
+    zone.innerHTML = "";
+    $("chercheLivre").value = "";
+  }));
+});
+
+/* ------------------------------------------------------------ Démarrage */
+
+try {
+  peindre(await api("/reglages"));
+  // Sans « await » : la page est utilisable sans cette liste, et l'attendre
+  // retarderait l'affichage de ce qu'on est venu voir.
+  chargerLivres().catch(() => dire("etatExceptions", "Liste des ouvrages indisponible.", true));
+  $("chargement").hidden = true;
+  $("app").hidden = false;
+} catch (e) {
+  /* 401 : on n'est pas connecté. Le dire et renvoyer là où on se connecte,
+     plutôt qu'afficher un écran vide dont on ne sait pas s'il est cassé. */
+  $("chargement").innerHTML = "";
+  $("chargement").textContent = /401|authentifi/i.test(e.message)
+    ? "Connectez-vous pour accéder à vos réglages."
+    : "Réglages illisibles : " + e.message;
+  const a = document.createElement("a");
+  a.href = "/ma-bibliotheque.html";
+  a.textContent = " Aller à ma bibliothèque";
+  $("chargement").append(a);
+}
+</script>

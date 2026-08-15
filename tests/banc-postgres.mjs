@@ -34,7 +34,17 @@ import fs from "node:fs";
 import path from "node:path";
 import pg from "pg";
 
-const FICHIERS = ["01-schema.sql", "02-multi-locataire.sql", "03-catalogue.sql"];
+/* LA LISTE N'EST PLUS ÉCRITE À LA MAIN.
+ *
+ * Elle l'était, et il a suffi d'ajouter 04-reglages.sql pour que le banc
+ * d'essai éprouve une base DIFFÉRENTE de celle qu'on livre — sans la moindre
+ * erreur, simplement en ignorant un fichier. Les contrôles auraient été verts
+ * sur un schéma qui n'existe nulle part.
+ *
+ * On lit donc le dossier, comme le fait le déployeur. Le seul contrat est
+ * l'ordre alphabétique, qui est déjà celui des numéros. */
+const fichiersMigration = (dossier) =>
+  fs.readdirSync(dossier).filter(f => f.endsWith(".sql")).sort();
 
 export async function ouvrirBanc({ port = 55501 } = {}) {
   const DB = ["db", path.join("..", "db")]
@@ -74,7 +84,7 @@ export async function ouvrirBanc({ port = 55501 } = {}) {
      propriétaire des tables, comme sur le serveur. Appliqué par un
      superutilisateur, les tables appartiendraient à quelqu'un d'autre et
      « force row level security » ne porterait pas sur le même rôle. */
-  for (const f of FICHIERS) {
+  for (const f of fichiersMigration(DB)) {
     await appli.query(fs.readFileSync(path.join(DB, f), "utf8"));
   }
 
@@ -133,12 +143,21 @@ export async function ouvrirBanc({ port = 55501 } = {}) {
     [ouvrageId, langue, resume,
      points ?? [`point ${langue}`], themes ?? [`theme-${langue}`]]);
 
-  const locataire = async (identifiant, visibilite = "privee", langue = "fr") => {
+  /* Semé par l'OBSERVATEUR, qui est superutilisateur — donc au-dessus de la
+     politique « tenants_reglages » posée par 04. C'est voulu : créer un
+     locataire est un geste d'administration, et le banc doit pouvoir en
+     fabriquer deux pour éprouver qu'ils ne se voient pas.
+
+     « quota » est bas par défaut. Un plafond à 100 000, comme celui de la
+     production, rendrait tout contrôle de quota irréalisable en pratique. */
+  const locataire = async (identifiant, visibilite = "privee", langue = "fr",
+                           quota = 3) => {
     const [t] = await q(
-      `insert into tenants (identifiant, nom, visibilite, langue)
-       values ($1,$1,$2,$3)
-       on conflict (identifiant) do update set visibilite = excluded.visibilite
-       returning id`, [identifiant, visibilite, langue]);
+      `insert into tenants (identifiant, nom, visibilite, langue, quota_ia_mois)
+       values ($1,$1,$2,$3,$4)
+       on conflict (identifiant) do update
+          set visibilite = excluded.visibilite, quota_ia_mois = excluded.quota_ia_mois
+       returning id`, [identifiant, visibilite, langue, quota]);
     return t.id;
   };
 

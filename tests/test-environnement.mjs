@@ -36,6 +36,18 @@ import { ouvrirBanc } from "./banc-postgres.mjs";
 
 const API = ["api", path.join("..", "api")].find(c => fs.existsSync(path.join(c, "server.js")));
 const WEB = ["web", path.join("..", "web")].find(c => fs.existsSync(path.join(c, "index.html")));
+
+/* LA LISTE DES PAGES N'EST PLUS ÉCRITE À LA MAIN.
+ *
+ * Elle l'était — « index.html » et « ma-bibliotheque.html » — et il a suffi
+ * d'ajouter reglages.html le 16/08/2026 pour qu'une page échappe au
+ * contrôle. Elle aurait pu servir la recette SANS bandeau, sans qu'aucune
+ * vérification ne tombe : la seule chose que le contrôle savait faire,
+ * c'était vérifier les pages qu'on avait pensé à lui nommer.
+ *
+ * On lit donc le dossier. Une page nouvelle est éprouvée d'office. */
+const PAGES = fs.readdirSync(WEB).filter(f => f.endsWith(".html")).sort();
+if (!PAGES.length) { console.error("  ECHEC aucune page dans web/"); process.exit(1); }
 if (!API || !WEB) { console.error("  ECHEC api/ ou web/ introuvable"); process.exit(1); }
 
 const ok = [], ko = [];
@@ -86,7 +98,7 @@ for (const [nom, env, port, attendu] of CAS) {
     session.environnement === (attendu ? "recette" : "production"),
     JSON.stringify(session));
 
-  for (const page of ["index.html", "ma-bibliotheque.html"]) {
+  for (const page of PAGES) {
     const html = fs.readFileSync(path.join(WEB, page), "utf8");
     const dom = new JSDOM(html, {
       runScripts: "dangerously",
@@ -115,7 +127,7 @@ for (const [nom, env, port, attendu] of CAS) {
    pas emporterait l'avertissement avec lui. On vérifie la forme, parce que
    le comportement, lui, ne distingue pas les deux cas dans un navigateur
    qui fonctionne. */
-for (const page of ["index.html", "ma-bibliotheque.html"]) {
+for (const page of PAGES) {
   const html = fs.readFileSync(path.join(WEB, page), "utf8");
   const apres = html.slice(html.indexOf('id="bandeau-recette"'));
   const bloc = apres.slice(0, apres.indexOf("</script>") + 9);

@@ -124,7 +124,7 @@ const etat = async () => ({
     `select count(*)::int n from pg_class
       where relname in ('books','resumes','possessions','ouvrages',
                         'resumes_ouvrages','rayons_ajoutes','rayons_reglages',
-                        'reading_quests')
+                        'reading_quests','tenants','appels_ia')
         and relrowsecurity and relforcerowsecurity`))[0].n,
 });
 
@@ -167,8 +167,8 @@ if (passages.length === 3) {
      Une migration qui lève les politiques pour travailler et oublie de les
      remettre laisse l'application libre de tout lire. Les comptes ci-dessus
      seraient identiques, et rien ne le signalerait. */
-  verifier("les huit tables sont sous « force row level security »",
-    p3.forcees === 8, `${p3.forcees} tables sur 8`);
+  verifier("les dix tables sont sous « force row level security »",
+    p3.forcees === 10, `${p3.forcees} tables sur 10`);
 
   /* ------------------------------------------------ UN CONTRÔLE DE FORME,
      et je préfère dire pourquoi plutôt que laisser croire à mieux.
@@ -192,6 +192,8 @@ if (passages.length === 3) {
      "lève les politiques avant d'écrire"],
     ["03-catalogue.sql", /alter table public\.possessions\s+no force/,
      "lève les politiques avant son garde-fou"],
+    ["04-reglages.sql", /no force row level security/,
+     "lève les politiques avant d'installer les siennes"],
   ]) {
     const texte = fs.readFileSync(path.join(DB, fichier), "utf8");
     verifier(`${fichier} ${quoi}`, motif.test(texte),
@@ -202,7 +204,7 @@ if (passages.length === 3) {
     `select relname from pg_class
       where relname in ('books','resumes','possessions','ouvrages',
                         'resumes_ouvrages','rayons_ajoutes','rayons_reglages',
-                        'reading_quests')
+                        'reading_quests','tenants','appels_ia')
         and not (relrowsecurity and relforcerowsecurity)
       order by relname`);
   verifier("aucune table n'est restée ouverte au propriétaire",

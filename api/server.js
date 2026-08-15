@@ -52,6 +52,30 @@ const DERRIERE_PROXY = process.env.DERRIERE_PROXY === "1";
 const ENVIRONNEMENT = process.env.ENVIRONNEMENT === "recette" ? "recette" : "production";
 const COOKIE_SECURE = DERRIERE_PROXY ? " Secure;" : "";
 
+/* OÙ PART L'APPEL AU MODÈLE — et pourquoi c'est presque toujours figé.
+ *
+ * Les contrôles ont besoin d'un modèle qui répond sans dépenser d'argent ni
+ * sortir de la machine. Sans cette possibilité, éprouver le quota exige soit
+ * un vrai appel facturé, soit de ne pas l'éprouver du tout.
+ *
+ * MAIS UNE ADRESSE DE DESTINATION CONFIGURABLE EST UNE FUITE DE CLEF EN
+ * PUISSANCE : c'est vers elle que part « x-api-key ». Une variable
+ * d'environnement mal posée, et la clef s'en va chez quelqu'un d'autre.
+ *
+ * On n'accepte donc QUE la machine locale. Un banc d'essai tourne toujours
+ * sur 127.0.0.1 ; une exfiltration, jamais. Toute autre valeur est ignorée
+ * avec un avertissement plutôt que refusée en silence. */
+const ANTHROPIC_URL = (() => {
+  const voulue = process.env.ANTHROPIC_URL ?? "";
+  const officielle = "https://api.anthropic.com/v1/messages";
+  if (!voulue) return officielle;
+  if (/^http:\/\/(127\.0\.0\.1|localhost):\d+\//.test(voulue)) return voulue;
+  console.warn(
+    `ANTHROPIC_URL ignorée : « ${voulue} » n'est pas sur la machine locale. ` +
+    "Les appels partent vers l'adresse officielle.");
+  return officielle;
+})();
+
 /** Adresse réelle du client, telle que la voit le proxy de confiance. */
 function adresseClient(req) {
   if (!DERRIERE_PROXY) return req.socket.remoteAddress ?? "?";
@@ -463,22 +487,25 @@ async function enregistrerLivres(client, livres) {
       sous_categorie: l.sous_categorie ?? l.sousCategorie,
       sphere,
 
-      /* VISIBILITÉ D'UN OUVRAGE NOUVEAU.
+      /* VISIBILITÉ : NULL SIGNIFIE « JE NE ME PRONONCE PAS ».
        *
-       * La colonne vaut « heritee » par défaut, et un ouvrage hérité qui ne
-       * trouve aucun réglage de rayon reste PRIVÉ (voir possession_publique
-       * dans 03-catalogue.sql). Sans cette ligne, tout ouvrage ajouté après
-       * la bascule disparaîtrait de la page publique, y compris les
-       * professionnels — l'inverse du comportement actuel.
+       * Le piège que j'avais signalé le 15/08 en écrivant ce fichier, et qui
+       * est réparé ici le 16/08.
        *
-       * On reproduit donc la règle d'avant : Pro est public, Perso ne l'est
-       * pas. C'est un point de départ, pas une fatalité.
+       * L'ancienne version calculait toujours une valeur — Pro public, Perso
+       * privé — et la mise à jour l'écrasait sans condition. Conséquence :
+       * ouvrir un livre réglé « privé », changer sa note, enregistrer, et le
+       * livre redevenait public. Silencieusement. Le menu de réglages aurait
+       * donc défait ses propres réglages à la première modification.
        *
-       * ATTENTION POUR LE MENU DE RÉGLAGES À VENIR : la mise à jour écrase
-       * ce champ. Le client DEVRA renvoyer la visibilité qu'il détient,
-       * sans quoi chaque enregistrement effacerait le choix de
-       * l'utilisateur. */
-      visibilite: l.visibilite ?? (sphere === "Pro" ? "publique" : "privee"),
+       * Désormais l'absence d'information n'est plus une information. La
+       * valeur retenue, côté base, est la première qui existe :
+       *   ce que le client demande explicitement,
+       *   sinon ce qui était déjà réglé,
+       *   sinon le point de départ historique (Pro public, Perso privé).
+       *
+       * Régler la visibilité reste un GESTE, par /api/reglages/livre. */
+      visibilite: l.visibilite ?? null,
     };
   });
 
@@ -539,7 +566,14 @@ async function enregistrerLivres(client, livres) {
             case when e.isbn is not null then o.id
                  else coalesce(p.ouvrage_id, o.id) end,
             coalesce(e.statut, 'A lire'), e.note,
-            e.categorie, e.sous_categorie, e.sphere, e.visibilite, now()
+            e.categorie, e.sous_categorie, e.sphere,
+            /* L'ordre de ce coalesce EST la règle : une demande explicite,
+               sinon le réglage existant, sinon le point de départ. La
+               jointure « p » plus bas est ce qui rend le deuxième terme
+               possible — sans elle, tout enregistrement écraserait. */
+            coalesce(e.visibilite, p.visibilite,
+                     case when e.sphere = 'Pro' then 'publique' else 'privee' end),
+            now()
        from ${SOURCE}
        left join possessions p on p.tenant_id = ${MOI} and p.id = e.id
        left join ouvrages o on o.cle = ${CLE}
@@ -599,6 +633,148 @@ async function amorcerSiVide(client) {
   console.log(`Amorçage : ${contenu.length} ouvrages importés.`);
 }
 
+/* ===========================================================================
+   LES RÉGLAGES
+
+   Trois niveaux de visibilité, et l'ordre entre eux est fixé par
+   possession_publique() dans 03-catalogue.sql — PAS ici.
+
+   Ces fonctions ne décident rien : elles écrivent un réglage, et relisent ce
+   que la base en fait. C'est délibéré. Une règle de visibilité recopiée dans
+   l'API finirait par diverger de celle de la base, et c'est toujours la
+   copie affichée qui rassure pendant que l'autre publie.
+
+   D'où « publies » dans la liste des rayons : ce n'est pas un calcul de
+   l'API, c'est un COMPTE de ce que PostgreSQL laisse effectivement sortir.
+   =========================================================================== */
+
+const VISIBILITES_BIBLIOTHEQUE = ["privee", "publique"];
+const VISIBILITES_HERITABLES = ["heritee", "privee", "publique"];
+
+const refuser = (message, statut = 400) => {
+  const e = new Error(message); e.statut = statut; throw e;
+};
+
+async function lireReglages(client) {
+  const [tenant, rayons, exceptions] = await Promise.all([
+    client.query(
+      `select identifiant, nom, langue, visibilite, quota_ia_mois
+         from tenants
+        where id = nullif(current_setting('app.tenant_id', true), '')::uuid`),
+    client.query(
+      `select categorie, sous_categorie, reglage, livres, publies
+         from rayons_visibilite order by categorie, sous_categorie`),
+    /* Les livres réglés À LA MAIN, et eux seuls. Lister les 324 servirait
+       surtout à noyer les trois qui comptent — ce sont les exceptions qu'on
+       oublie, pas la règle. */
+    client.query(
+      `select id, titre, auteur, visibilite, categorie, sous_categorie
+         from livres
+        where visibilite <> 'heritee'
+        order by auteur, titre`),
+  ]);
+
+  const t = tenant.rows[0];
+  if (!t) refuser("Bibliothèque introuvable.", 404);
+
+  /* Le compte des appels vient de la base, jamais d'un calcul local : c'est
+     le MÊME décompte que celui qui refuse, sans quoi la jauge afficherait
+     « 4 sur 10 » pendant que le service répond « quota atteint ». */
+  const { rows: [q] } = await client.query("select appels_ia_du_mois() as consomme");
+
+  return {
+    identifiant: t.identifiant, nom: t.nom,
+    langue: t.langue, visibilite: t.visibilite,
+    quota: {
+      plafond: t.quota_ia_mois,
+      consomme: q.consomme,
+      mois: new Date().toISOString().slice(0, 7),
+    },
+    rayons: rayons.rows,
+    exceptions: exceptions.rows,
+    // Ce que la page publique montrerait à cet instant, tous niveaux confondus.
+    publies: rayons.rows.reduce((n, r) => n + r.publies, 0),
+    livres: rayons.rows.reduce((n, r) => n + r.livres, 0),
+  };
+}
+
+/* ATTENTION AU « 0 LIGNE MODIFIÉE ».
+ *
+ * Sous RLS, écrire chez quelqu'un d'autre ne lève PAS d'erreur : la clause
+ * USING de la politique retire simplement la ligne du périmètre, et
+ * PostgreSQL rapporte zéro ligne touchée. Une route qui ne regarde pas ce
+ * compte répondrait « enregistré » à une écriture qui n'a rien écrit.
+ *
+ * Mesuré le 15/08/2026 sur PostgreSQL 18 : une tentative de modifier un
+ * autre locataire rend rowCount = 0, sans exception. */
+const exigerUneLigne = (r, quoi) => {
+  if (r.rowCount !== 1) refuser(`Aucun ${quoi} à modifier ici.`, 404);
+  return r.rowCount;
+};
+
+async function reglerBibliotheque(client, { langue, visibilite }) {
+  const champs = [], valeurs = [];
+  if (langue !== undefined) {
+    if (!LANGUES.includes(langue)) refuser("Langue inconnue.");
+    valeurs.push(langue); champs.push(`langue = $${valeurs.length}`);
+  }
+  if (visibilite !== undefined) {
+    if (!VISIBILITES_BIBLIOTHEQUE.includes(visibilite)) {
+      /* Pas de « heritee » ici, et ce n'est pas un oubli : la bibliothèque
+         est le niveau du haut. Elle n'a rien dont hériter. */
+      refuser("Une bibliothèque est privée ou publique.");
+    }
+    valeurs.push(visibilite); champs.push(`visibilite = $${valeurs.length}`);
+  }
+  if (!champs.length) refuser("Rien à modifier.");
+
+  /* Pas de « where id = ... ». La politique tenants_reglages borne déjà
+     l'écriture à sa propre ligne, et c'est ELLE qui doit faire foi : un
+     filtre écrit ici en doublon donnerait l'illusion que la sécurité tient
+     au code de l'API. Elle tient à PostgreSQL. */
+  exigerUneLigne(await client.query(`update tenants set ${champs.join(", ")}`, valeurs),
+                 "réglage");
+  return lireReglages(client);
+}
+
+async function reglerRayon(client, { categorie, sousCategorie, visibilite }) {
+  if (!SOUS_CATEGORIES[categorie]) refuser("Catégorie inconnue.");
+  const rayon = String(sousCategorie ?? "").trim();
+  if (!rayon) refuser("Rayon manquant.");
+  if (!VISIBILITES_HERITABLES.includes(visibilite)) refuser("Visibilité inconnue.");
+
+  const MOI = `nullif(current_setting('app.tenant_id', true), '')::uuid`;
+
+  /* « heritee » n'est pas une valeur à stocker, c'est l'ABSENCE de décision.
+     La garder en base créerait deux façons de dire la même chose, et la
+     table finirait pleine de lignes qui ne règlent rien. */
+  if (visibilite === "heritee") {
+    await client.query(
+      `delete from rayons_reglages
+        where tenant_id = ${MOI} and categorie = $1 and sous_categorie = $2`,
+      [categorie, rayon]);
+  } else {
+    await client.query(
+      `insert into rayons_reglages (tenant_id, categorie, sous_categorie, visibilite)
+       values (${MOI}, $1, $2, $3)
+       on conflict (tenant_id, categorie, sous_categorie)
+         do update set visibilite = excluded.visibilite`,
+      [categorie, rayon, visibilite]);
+  }
+  return lireReglages(client);
+}
+
+async function reglerLivre(client, { id, visibilite }) {
+  if (!id) refuser("Ouvrage manquant.");
+  if (!VISIBILITES_HERITABLES.includes(visibilite)) refuser("Visibilité inconnue.");
+  exigerUneLigne(
+    await client.query(
+      "update possessions set visibilite = $2, maj_le = now() where id = $1",
+      [String(id), visibilite]),
+    "ouvrage");
+  return lireReglages(client);
+}
+
 /* -------------------------------------------------------------- Anthropic */
 
 const OUTIL_RESUME = {
@@ -616,13 +792,59 @@ const OUTIL_RESUME = {
   },
 };
 
-async function appelerAnthropic(corps) {
+/* ===========================================================================
+   LE SEUL ENDROIT DE L'APPLICATION QUI DÉPENSE DE L'ARGENT
+
+   Et c'est pourquoi le quota se décompte ICI, et nulle part ailleurs.
+
+   Le mettre dans le routeur aurait été plus simple, mais faux : un résumé
+   déjà en cache ne coûte rien, et le facturer ferait mentir la jauge. Le
+   mettre dans chacune des trois fonctions appelantes marcherait aujourd'hui
+   et serait oublié à la quatrième.
+
+   Ici, l'oubli est impossible par construction : on ne peut plus appeler le
+   modèle sans fournir « dans » — donc sans identité de payeur. Une nouvelle
+   route qui négligerait le quota ne dépenserait pas trop : elle ne
+   compilerait pas la première fois qu'on l'essaie.
+
+   @param dans   Ouvre un contexte de locataire. C'est LUI qui identifie qui paie.
+   @param route  Ce qui est inscrit au journal. Sert à répondre « d'où viennent
+                 mes 40 appels ? », question qu'un simple compteur ne sait pas traiter.
+   =========================================================================== */
+async function appelerAnthropic(dans, route, corps) {
   if (!CLE_ANTHROPIC) {
     const e = new Error("ANTHROPIC_API_KEY absente du fichier .env");
     e.statut = 503;
     throw e;
   }
-  const r = await fetch("https://api.anthropic.com/v1/messages", {
+
+  /* AVANT l'appel, pas après. Ce qui coûte, c'est la tentative — le modèle
+     facture une requête refusée en aval comme une autre. Décompter après
+     laisserait une panne de réseau au mauvais moment effacer la trace d'un
+     appel déjà payé.
+
+     La fonction lève si aucun locataire n'est posé : un appel anonyme ne peut
+     pas être décompté, donc il n'a pas lieu. C'est la propriété qui rend le
+     plafond réel plutôt que décoratif. */
+  try {
+    await dans((c) => c.query("select * from consommer_appel_ia($1)", [route]));
+  } catch (e) {
+    // 53400 : configuration_limit_exceeded. « Revenez le mois prochain »
+    // n'est pas une panne, et ne doit pas s'afficher comme telle.
+    if (e.code === "53400") {
+      const q = new Error("Quota mensuel d'appels atteint. Il se remet à zéro le 1er du mois.");
+      q.statut = 429;
+      throw q;
+    }
+    if (e.code === "42501") {
+      const q = new Error("Connectez-vous : un appel au modèle doit être rattaché à une bibliothèque.");
+      q.statut = 401;
+      throw q;
+    }
+    throw e;
+  }
+
+  const r = await fetch(ANTHROPIC_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -687,7 +909,7 @@ et mets "fiabilite" à "faible" plutôt que d'inventer.
 
 Termine en appelant l'outil enregistrer_resume. N'écris rien d'autre.`;
 
-  const d = await appelerAnthropic({
+  const d = await appelerAnthropic(dans, "/api/resume", {
     model: MODELE,
     max_tokens: 2000,
     messages: [{ role: "user", content: consigne }],
@@ -774,7 +996,7 @@ Réponds UNIQUEMENT par un objet JSON, sans texte autour ni balises Markdown :
   "suggestions_externes": [ { "titre": "", "auteur": "Nom Prénom", "editeur": "", "annee": 2020, "isbn": "", "pourquoi": "" } ]
 }`;
 
-  const d = await appelerAnthropic({
+  const d = await appelerAnthropic(dans, "/api/recommandation", {
     model: MODELE,
     max_tokens: 4000,
     messages: [{ role: "user", content: consigne }],
@@ -840,7 +1062,7 @@ rayon « Art & histoire de l'art ».
 
 Si en revanche un rayon convient, laisse "rayonSuggere" et "motif" vides.`;
 
-  const d = await appelerAnthropic({
+  const d = await appelerAnthropic(dans, "/api/recherche-livre", {
     model: MODELE,
     max_tokens: 1200,
     messages: [{ role: "user", content: consigne }],
@@ -1021,6 +1243,27 @@ const serveur = createServer(async (req, rep) => {
     if (chemin === "/api/rayons" && req.method === "POST") {
       const corpsRayon = await lireCorps(req);
       return json(rep, await dans((c) => ajouterRayon(c, corpsRayon)));
+    }
+
+    /* --- Réglages ---
+       Chacune de ces routes REND l'état complet après écriture, plutôt qu'un
+       « ok ». L'écran affiche donc toujours ce que la base applique, et non
+       ce qu'il a demandé — la différence entre les deux est précisément ce
+       qu'on veut voir quand un réglage ne prend pas. */
+    if (chemin === "/api/reglages" && req.method === "GET") {
+      return json(rep, await dans((c) => lireReglages(c)));
+    }
+    if (chemin === "/api/reglages" && req.method === "PUT") {
+      const corpsR = await lireCorps(req);
+      return json(rep, await dans((c) => reglerBibliotheque(c, corpsR)));
+    }
+    if (chemin === "/api/reglages/rayon" && req.method === "PUT") {
+      const corpsR = await lireCorps(req);
+      return json(rep, await dans((c) => reglerRayon(c, corpsR)));
+    }
+    if (chemin === "/api/reglages/livre" && req.method === "PUT") {
+      const corpsR = await lireCorps(req);
+      return json(rep, await dans((c) => reglerLivre(c, corpsR)));
     }
 
     if (chemin === "/api/recherche-livre" && req.method === "POST") {

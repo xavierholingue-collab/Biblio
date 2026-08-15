@@ -52,7 +52,7 @@
     letter-spacing: -0.02em; margin: 0;
   }
   .compte { font-family: var(--mono); font-size: 12px; color: var(--ink-soft); letter-spacing: 0.06em; }
-  .compte button {
+  .compte button, .compte a {
     font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em;
     background: none; border: none; color: var(--ink-soft);
     text-decoration: underline; padding: 0 0 0 10px;
@@ -712,8 +712,11 @@ async function entrerDansApp() {
 // Affiche ou masque tout ce qui dépend de la session.
 function appliquerDroits() {
   const compte = document.getElementById("compte");
+  /* Le lien vers les réglages n'apparaît QUE connecté : la page renverrait
+     un 401 sinon, et proposer une porte fermée est plus déroutant que ne
+     rien proposer. */
   compte.innerHTML = connecte
-    ? '<span id="compteTexte"></span><button id="btnDeconnexion" type="button">Se déconnecter</button>'
+    ? '<span id="compteTexte"></span><a id="lienReglages" href="/reglages.html">Réglages</a><button id="btnDeconnexion" type="button">Se déconnecter</button>'
     : '<span id="compteTexte"></span><button id="btnConnecter" type="button">Espace personnel</button>';
 
   if (connecte) {
