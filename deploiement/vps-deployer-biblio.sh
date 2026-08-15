@@ -280,6 +280,45 @@ if [ -n "${URL}" ]; then
       echo "  ATTENTION compte de reference illisible : l'avant/apres ne sera pas fait"
     fi
 
+    # LE PERIMETRE PUBLIC, RELEVE SUR LA PRODUCTION.
+    #
+    # Pas un compte : la LISTE. Deux ouvrages qui entrent et deux qui sortent
+    # laisseraient un compte identique, et c'est justement le cas qu'on ne
+    # veut pas manquer — une fuite compensee par une disparition.
+    #
+    # Pourquoi ne pas se contenter de comparer a « books », comme avant : cette
+    # table est gelee depuis le 15/08. Publier un livre depuis l'ecran de
+    # reglages ressemblait donc a une FUITE introduite par la migration. C'est
+    # ce qui a arrete la livraison #32, sur le geste le plus normal du monde.
+    #
+    # Ici, ce qu'on compare, c'est la production D'AVANT a la repetition
+    # D'APRES. Tout ce que vous avez publie volontairement est deja dans la
+    # reference : invisible pour le controle. Ce qui apparait en plus ne peut
+    # venir que de la migration.
+    # DANS /tmp, PAS DANS LE DOSSIER DE TRAVAIL. Celui-ci est en 700 et
+    # appartient a root ; « \copy » est lu par le CLIENT psql, donc par
+    # postgres, qui n'y entre pas. Exactement le piege du 15/08 avec
+    # verifier-migration.sql, qui avait fait passer une erreur de droit pour
+    # une migration defectueuse. Le fichier ne contient que des identifiants.
+    LISTE_PUB="/tmp/biblio-public-avant-${BASE}.txt"
+    if sudo -u postgres psql -tAd "${BASE}" \
+         -c "select p.tenant_id::text || '|' || p.id from possessions p
+              where public.possession_publique(p)" > "${LISTE_PUB}" 2>/dev/null \
+       && [ -s "${LISTE_PUB}" ]; then
+      chmod 644 "${LISTE_PUB}"
+      if sudo -u postgres psql -q -d "${REPET}" \
+           -c "create table if not exists public.controle_public (cle text)" \
+           -c "delete from public.controle_public" \
+           -c "\\copy public.controle_public from '${LISTE_PUB}'" >/dev/null 2>&1; then
+        echo "  perimetre public de reference : $(wc -l < "${LISTE_PUB}") ouvrages"
+      else
+        echo "  ATTENTION perimetre de reference non pose : le controle de fuite sera moins fort"
+      fi
+    else
+      echo "  ATTENTION perimetre public illisible : le controle de fuite sera moins fort"
+    fi
+    rm -f "${LISTE_PUB}"
+
     # LE PROPRIETAIRE DOIT AVOIR SURVECU A LA COPIE, et ce n'est pas acquis.
     #
     # pg_dump emet des « ALTER TABLE ... OWNER TO biblio », mais un dump
@@ -489,3 +528,44 @@ else
 fi
 
 echo "== Deploiement ${ENVIRONNEMENT} termine =="
+
+# =========================================================================
+# LE DEPLOYEUR SE MET A JOUR LUI-MEME — et il a fallu du temps pour le voir.
+#
+# Ce script vit dans /usr/local/bin/deployer-biblio, pose UNE FOIS a la main
+# par vps-poser-cle-biblio.sh. Il ne partait donc jamais avec les livraisons.
+#
+# Le 16/08/2026, trois corrections ecrites dans la journee — classement des
+# echecs, reference avant/apres, verification des migrations sans les nommer —
+# n'avaient tout simplement jamais tourne. On lisait dans les journaux le
+# comportement d'un script vieux de deux jours en croyant lire le nouveau, et
+# on cherchait pourquoi une correction ne prenait pas.
+#
+# Le contraste est instructif : verifier-migration.sql, lui, VOYAGE dans le
+# paquet et etait a jour depuis le matin. Deux fichiers du meme dossier, deux
+# destins — sans que rien ne le signale.
+#
+# TROIS PRECAUTIONS, parce qu'un deployeur casse ne se repare qu'a la main :
+#   1. seulement APRES un deploiement reussi ;
+#   2. on refuse d'installer un script que bash juge invalide ;
+#   3. « mv » et non « cp » : le remplacement est atomique, et le script en
+#      cours d'execution garde son propre fichier jusqu'a la fin.
+# =========================================================================
+NOUVEAU="${TRAVAIL}/contenu/deploiement/vps-deployer-biblio.sh"
+MOI=/usr/local/bin/deployer-biblio
+
+if [ -f "${NOUVEAU}" ] && [ -f "${MOI}" ]; then
+  if ! cmp -s "${NOUVEAU}" "${MOI}"; then
+    if bash -n "${NOUVEAU}" 2>/tmp/deployeur-syntaxe.log; then
+      cp -a "${MOI}" "${MOI}.precedent"
+      install -m 700 -o root -g root "${NOUVEAU}" "${MOI}.neuf" \
+        && mv -f "${MOI}.neuf" "${MOI}" \
+        && echo "  deployeur mis a jour (precedent conserve en ${MOI}.precedent)"
+    else
+      # On ne remplace PAS, et on le dit fort : le deploiement, lui, a
+      # reussi, et son compte rendu ne doit pas laisser croire l'inverse.
+      echo "  ATTENTION le nouveau deployeur ne passe pas « bash -n » : NON installe"
+      sed 's/^/           /' /tmp/deployeur-syntaxe.log
+    fi
+  fi
+fi

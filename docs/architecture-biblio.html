@@ -620,6 +620,35 @@ commit;   -- PostgreSQL défait le réglage lui-même</code></pre>
   </p>
 </div>
 
+<div class="note alerte">
+  <span class="titre">Le déployeur vit sur le serveur, et c'est un piège</span>
+  <p>
+    Le script est installé dans <code>/usr/local/bin/deployer-biblio</code>. Il
+    ne partait pas avec les livraisons : le corriger dans le dépôt ne changeait
+    rien à ce qui tournait. Le 16/08, trois corrections écrites dans la journée
+    n'avaient jamais été exécutées — on lisait le comportement d'un script
+    vieux de deux jours en croyant lire le nouveau.
+  </p>
+  <p>
+    Le contraste était instructif : <code>verifier-migration.sql</code>, lui,
+    voyage dans le paquet et était à jour. Deux fichiers du même dossier, deux
+    destins, sans que rien ne le signale.
+  </p>
+  <p>
+    Depuis, <strong>le déployeur s'installe lui-même</strong> à la fin d'un
+    déploiement réussi — après un <code>bash -n</code>, en gardant la version
+    précédente, par un <code>mv</code> atomique. Il reste une chose à savoir :
+    la toute première mise à jour doit être faite à la main, puisque c'est
+    l'ancien script qui tourne encore.
+  </p>
+  <pre><code>scp deploiement/vps-deployer-biblio.sh \
+    root@195.110.35.206:/root/deployer-biblio.source
+ssh root@195.110.35.206 \
+  "bash -n /root/deployer-biblio.source \
+   &amp;&amp; install -m 700 /root/deployer-biblio.source /usr/local/bin/deployer-biblio \
+   &amp;&amp; echo deployeur a jour"</code></pre>
+</div>
+
 <h3>L'accès SSH est contraint</h3>
 <p>
   La clé déposée sur le serveur ne peut lancer qu'<strong>une seule commande</strong> :

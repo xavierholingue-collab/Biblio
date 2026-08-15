@@ -247,32 +247,78 @@ begin
     from public.books b
     join public.possessions p on p.tenant_id = b.tenant_id and p.id = b.id;
 
-  raise notice '  périmètre public : % avant, % après (sur les % ouvrages communs)',
-    perimetre_av, perimetre_ap,
+  raise notice '  (rappel, contre le filet gelé : % publics le 15/08, % aujourd''hui '
+    'sur les % ouvrages communs)', perimetre_av, perimetre_ap,
     (select count(*) from public.books b
        join public.possessions p on p.tenant_id = b.tenant_id and p.id = b.id);
 
-  /* Ce qui est devenu public sans l'être : une FUITE. On la nomme
-     séparément du reste, car c'est la seule divergence qui expose des
-     données plutôt que d'en cacher. */
-  select count(*), string_agg(b.id, ', ' order by b.id)
-    into fuites, exemples
-    from public.books b
-    join public.possessions p on p.tenant_id = b.tenant_id and p.id = b.id
-   where public.possession_publique(p) and not public.livre_public(b);
+  /* ------------------------------------------------------------------------
+     LA FUITE SE MESURE CONTRE LA PRODUCTION D'AVANT, PLUS CONTRE « books ».
 
-  if fuites > 0 then
-    raise exception 'FUITE : % ouvrage(s) deviennent publics : %',
-      fuites, left(exemples, 300);
-  end if;
+     L'ancienne version comparait la visibilité d'aujourd'hui à celle gelée le
+     15/08. Elle a arrêté la livraison #32 sur le geste le plus normal qui
+     soit : deux livres publiés depuis l'écran de réglages, livré le matin
+     même. Le contrôle a crié « FUITE » sur une publication délibérée.
 
-  if perimetre_ap <> perimetre_av then
-    select string_agg(b.id, ', ' order by b.id) into exemples
+     C'est le cinquième piège de la même famille, et le plus embarrassant :
+     celui-là accusait l'utilisateur d'une fuite alors qu'il exerçait
+     exactement la fonction qu'on venait de lui donner.
+
+     La référence est désormais LA LISTE des ouvrages publics relevée sur la
+     PRODUCTION juste avant la copie. Tout ce que vous avez publié
+     volontairement s'y trouve déjà : le contrôle ne le voit pas. Ce qui
+     apparaît en plus ne peut venir que de la migration.
+
+     ON COMPARE DES ENSEMBLES, PAS DES COMPTES. Un ouvrage qui fuit et un
+     autre qui disparaît laisseraient le compte inchangé — et c'est
+     précisément la double erreur compensée qu'un compte ne voit jamais. */
+
+  if to_regclass('public.controle_public') is null then
+    raise notice '  (contrôle de FUITE affaibli : périmètre de référence non fourni)';
+
+    /* Repli sur l'ancienne méthode, en NOTICE seulement. Sans référence, on
+       ne peut pas distinguer une fuite d'une publication voulue — et une
+       livraison ne doit pas s'arrêter sur une question qu'on ne sait pas
+       trancher. */
+    select count(*), string_agg(b.id, ', ' order by b.id)
+      into fuites, exemples
       from public.books b
       join public.possessions p on p.tenant_id = b.tenant_id and p.id = b.id
-     where public.livre_public(b) and not public.possession_publique(p);
-    raise exception 'Périmètre public réduit : % -> %. Disparus : %',
-      perimetre_av, perimetre_ap, left(coalesce(exemples, '?'), 300);
+     where public.possession_publique(p) and not public.livre_public(b);
+    if fuites > 0 then
+      raise notice '  % ouvrage(s) publics aujourd''hui et non le 15/08 — publiés '
+        'depuis, ou fuite. Sans référence, ce contrôle ne sait pas trancher : %',
+        fuites, left(exemples, 200);
+    end if;
+
+  else
+    select count(*), string_agg(p.id, ', ' order by p.id)
+      into fuites, exemples
+      from public.possessions p
+     where public.possession_publique(p)
+       and (p.tenant_id::text || '|' || p.id)
+           not in (select cle from public.controle_public);
+
+    if fuites > 0 then
+      raise exception 'FUITE : % ouvrage(s) deviennent publics que la migration '
+        'aurait dû laisser privés : %', fuites, left(exemples, 300);
+    end if;
+
+    select count(*), string_agg(split_part(c.cle, '|', 2), ', ' order by c.cle)
+      into divergents, exemples
+      from public.controle_public c
+     where not exists (
+       select 1 from public.possessions p
+        where (p.tenant_id::text || '|' || p.id) = c.cle
+          and public.possession_publique(p));
+
+    if divergents > 0 then
+      raise exception 'Périmètre public RÉDUIT : % ouvrage(s) cessent d''être '
+        'visibles : %', divergents, left(exemples, 300);
+    end if;
+
+    raise notice '  périmètre public : % ouvrages avant, tous retrouvés après',
+      (select count(*) from public.controle_public);
   end if;
 
   /* ------------------------------------------------------- 5. Les résumés
