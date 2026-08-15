@@ -86,12 +86,29 @@ mkdir -p "${TRAVAIL}/contenu"
 tar -xzf "${TRAVAIL}/paquet.tar.gz" -C "${TRAVAIL}/contenu" || { echo "  ECHEC extraction"; exit 1; }
 
 for attendu in api/server.js api/package.json api/locataire.mjs web/index.html \
-               db/01-schema.sql db/02-multi-locataire.sql db/03-catalogue.sql \
+               db/01-schema.sql \
                deploiement/calculer-csp.mjs deploiement/verifier-migration.sql; do
   [ -f "${TRAVAIL}/contenu/${attendu}" ] \
     || { echo "  ECHEC fichier attendu absent : ${attendu}"; exit 1; }
 done
-echo "  contenu conforme"
+
+# LES MIGRATIONS NE SONT PLUS NOMMEES UNE PAR UNE, ET C'EST UNE CORRECTION.
+#
+# Cette liste portait « 02-multi-locataire.sql » et « 03-catalogue.sql ».
+# Le 16/08/2026, 04-reglages.sql est arrive sans y etre ajoute : le paquet
+# aurait pu partir SANS LUI, et rien ici ne l'aurait dit. L'application
+# aurait demarre sur une base depourvue du journal des appels et, plus grave,
+# avec « tenants » hors cloisonnement.
+#
+# Une liste ecrite a la main ne protege que des fichiers qu'on a pense a y
+# ecrire — c'est-a-dire de ceux qu'on n'oublie pas. On verifie donc la
+# PROPRIETE : il y a des migrations, et 01-schema.sql sert d'ancre. Ce qui
+# prouve reellement le resultat, c'est la repetition sur une copie des
+# donnees, quelques lignes plus bas, et elle ne peut pas etre oubliee.
+nb_migrations=$(ls -1 "${TRAVAIL}/contenu/db/"*.sql 2>/dev/null | wc -l)
+[ "${nb_migrations}" -ge 1 ] \
+  || { echo "  ECHEC aucune migration dans le paquet"; exit 1; }
+echo "  contenu conforme (${nb_migrations} migrations)"
 
 # --- Sauvegarde de la version en place --------------------------------------
 rm -rf "${RACINE_API}.precedent" "${RACINE_WEB}.precedent"
