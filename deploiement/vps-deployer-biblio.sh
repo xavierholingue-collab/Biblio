@@ -253,6 +253,33 @@ if [ -n "${URL}" ]; then
       tail -5 /tmp/repet-${BASE}.log | sed 's/^/         /'; exit 1
     fi
 
+    # LE COMPTE DE REFERENCE, MESURE SUR LA PRODUCTION.
+    #
+    # C'est la seule garantie qui ne perimera pas : la meme table, avant et
+    # apres le passage des migrations. Les autres controles comparent
+    # « books » — gelee depuis le 15/08 — a une bibliotheque qui, elle,
+    # continue de vivre. Ils se sont perimes en un jour.
+    #
+    # Mesure par « postgres » et non par « biblio » : le compte applicatif
+    # est soumis au cloisonnement, il ne verrait que les ouvrages publics et
+    # la reference vaudrait un tiers de la verite.
+    #
+    # On le DEPOSE dans la base de repetition plutot que de le passer en
+    # variable psql : le fichier de controle reste utilisable a la main,
+    # sans arguments a se rappeler, et il sait dire quand la reference
+    # manque au lieu de se taire.
+    ref=$(sudo -u postgres psql -tAd "${BASE}" -c \
+            "select count(*) from possessions" 2>/dev/null)
+    if [ -n "${ref}" ]; then
+      sudo -u postgres psql -q -d "${REPET}" \
+        -c "create table if not exists public.controle_avant (possessions int)" \
+        -c "delete from public.controle_avant" \
+        -c "insert into public.controle_avant values (${ref})" >/dev/null 2>&1 \
+        && echo "  reference posee : ${ref} possessions avant migration"
+    else
+      echo "  ATTENTION compte de reference illisible : l'avant/apres ne sera pas fait"
+    fi
+
     # LE PROPRIETAIRE DOIT AVOIR SURVECU A LA COPIE, et ce n'est pas acquis.
     #
     # pg_dump emet des « ALTER TABLE ... OWNER TO biblio », mais un dump
@@ -316,8 +343,26 @@ if [ -n "${URL}" ]; then
       # cherche. Quinze lignes de trop coutent moins qu'un aller-retour.
       # « n'a pas pu tourner » et « a refuse » ne veulent pas dire la meme
       # chose, et l'operateur n'a pas a le deviner.
-      if grep -qiE 'permission|denied|non accordee|could not connect|does not exist' \
-           /tmp/verif-${BASE}.log; then
+      # UN REFUS SE RECONNAIT A « ERREUR: », ET ON LE REGARDE EN PREMIER.
+      #
+      # Defaut du 16/08/2026, et c'est celui du 15/08 retourne comme un gant.
+      # Le controle avait REFUSE — « 2 ouvrage(s) que personne ne possede » —
+      # et le deployeur a annonce « le controle N'A PAS PU S'EXECUTER ».
+      #
+      # La cause : chaque appel a « sudo -u postgres » emet
+      #   could not change directory to "/root": Permission non accordee
+      # Le mot « Permission » suffisait a faire basculer le classement. Le
+      # motif cherchait un empechement et trouvait du bruit.
+      #
+      # On ecarte donc ce bruit connu AVANT de classer, et surtout on donne
+      # la priorite a la preuve positive : si PostgreSQL a dit « ERREUR: »,
+      # il a tourne, et il a refuse. Il n'y a plus a deviner.
+      utile=$(grep -v 'could not change directory to' /tmp/verif-${BASE}.log)
+
+      if echo "${utile}" | grep -qE '(ERREUR|ERROR):'; then
+        echo "  ECHEC la repetition NE CONCORDE PAS — la migration abimerait vos donnees."
+      elif echo "${utile}" \
+           | grep -qiE 'permission|denied|non accordee|could not connect|does not exist'; then
         echo "  ECHEC le controle N'A PAS PU S'EXECUTER — ce n'est pas un refus."
         echo "        la migration n'a donc PAS ete eprouvee, et rien n'a ete migre."
       else

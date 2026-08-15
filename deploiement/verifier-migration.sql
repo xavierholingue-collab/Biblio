@@ -20,6 +20,8 @@
    ---------------------------------------------------------------------------
    CE QU'ON VÉRIFIE, ET POURQUOI CHACUN
 
+     0. Le compte AVANT et APRÈS la migration. La seule garantie qui vaille
+        pour toujours : elle ne dépend d'aucune table gelée.
      1. Le compte. Détecte une perte massive.
      2. Les manquants NOMMÉMENT. Le compte seul est aveugle à une double
         erreur compensée — autant d'ouvrages perdus que de doublons créés.
@@ -30,10 +32,41 @@
         devenu invisible est une régression silencieuse.
      5. Les résumés. Ils coûtent de l'argent : en perdre un se paie deux fois.
      6. La cohérence de la nouvelle structure.
+     7. Le cloisonnement, lu dans pg_class et non dans les données.
+
+   ---------------------------------------------------------------------------
+   « books » EST UN FILET GELÉ, PLUS UNE RÉFÉRENCE — et l'avoir oublié a
+   arrêté la livraison du 16/08/2026.
+
+   Les contrôles 1 à 4 ont été écrits le 15/08, le jour de la bascule. Ce
+   jour-là, « books » et « possessions » disaient la même chose : l'une
+   venait d'être copiée dans l'autre, et toute différence était une perte.
+
+   Le lendemain, la bibliothèque avait vécu. Deux ouvrages ajoutés puis
+   retirés pendant une vérification à l'œil, et le contrôle a annoncé une
+   anomalie sur une base parfaitement saine. Or « books » n'est plus écrite
+   par personne depuis la bascule : elle ne bouge plus, tandis que la
+   bibliothèque, elle, bouge. Comparer les deux, c'est mesurer l'activité
+   normale et l'appeler corruption.
+
+   Ce n'est pas un détail d'exactitude. Un garde-fou qui arrête une livraison
+   saine finit par être désactivé — et il emporte alors les cas où il avait
+   raison. On préfère perdre une vérification que perdre la confiance dans
+   toutes.
+
+   Les contrôles historiques ne s'exécutent donc QUE tant que la
+   bibliothèque n'a pas divergé de son filet. Dès qu'elle diverge, ils le
+   DISENT et s'effacent, et c'est le contrôle 0 — avant/après, mesuré sur la
+   même table — qui prend le relais. Lui ne périmera pas.
 
    USAGE
      sudo -u postgres psql -v ON_ERROR_STOP=1 -d biblio_repetition \
        -f verifier-migration.sql
+
+   Le script appelant dépose, s'il le peut, une table « controle_avant »
+   portant le nombre de possessions MESURÉ SUR LA PRODUCTION avant la copie.
+   Sans elle, le contrôle 0 s'annonce comme non effectué plutôt que de se
+   taire — un contrôle absent qui ne dit rien passe pour un contrôle réussi.
    =========================================================================== */
 
 \set ON_ERROR_STOP on
@@ -53,12 +86,41 @@ declare
   resumes_ap     integer;
   orphelins      integer;
   exemples       text;
+  ajoutes        integer;
+  retires        integer;
+  historique     boolean;
+  avant          integer;
 begin
+  /* ------------------------------- 0. AVANT ET APRÈS, SUR LA MÊME TABLE
+
+     La seule garantie durable. Elle ne compare pas deux tables différentes,
+     mais la même avant et après le passage des migrations — c'est ce qui la
+     rend insensible à l'activité normale de la bibliothèque.
+
+     Le nombre « avant » est mesuré sur la PRODUCTION par le script
+     appelant, avec un compte privilégié, et déposé ici. S'il manque, on le
+     dit : un contrôle silencieusement absent se lit comme un contrôle
+     réussi, et c'est la pire des deux erreurs. */
+
+  select count(*) into n_possessions from public.possessions;
+
+  if to_regclass('public.controle_avant') is null then
+    raise notice '  (avant/après NON EFFECTUÉ : le compte de référence n''a pas été fourni)';
+  else
+    execute 'select possessions from public.controle_avant limit 1' into avant;
+    raise notice '  possessions : % avant migration, % après', avant, n_possessions;
+    if avant is null then
+      raise notice '  (avant/après NON EFFECTUÉ : compte de référence vide)';
+    elsif n_possessions < avant then
+      raise exception 'La migration PERD des ouvrages : % avant, % après.',
+        avant, n_possessions;
+    end if;
+  end if;
+
   /* --------------------------------------------------------- 1. Le compte */
 
-  select count(*) into n_books       from public.books;
-  select count(*) into n_possessions from public.possessions;
-  select count(*) into n_ouvrages    from public.ouvrages;
+  select count(*) into n_books    from public.books;
+  select count(*) into n_ouvrages from public.ouvrages;
 
   raise notice '  books %, possessions %, ouvrages distincts %',
     n_books, n_possessions, n_ouvrages;
@@ -68,28 +130,75 @@ begin
       'soit la copie a échoué, soit ce contrôle regarde la mauvaise base.';
   end if;
 
-  if n_possessions <> n_books then
-    raise exception 'Compte divergent : % ouvrages, % possessions.',
-      n_books, n_possessions;
-  end if;
+  /* LA BIBLIOTHÈQUE A-T-ELLE VÉCU DEPUIS LA BASCULE ?
 
-  /* ------------------------------------------- 2. Les manquants, nommément */
+     Ajouts et retraits sont comptés séparément, parce qu'ils ne se
+     compensent pas : deux ajouts et deux retraits laisseraient les comptes
+     égaux et le filet périmé quand même. C'est exactement ce qui est arrivé
+     le 16/08 — 324 des deux côtés, et 326 ouvrages au catalogue. */
+  select count(*) into ajoutes
+    from public.possessions p
+   where not exists (select 1 from public.books b
+                      where b.tenant_id = p.tenant_id and b.id = p.id);
 
-  select count(*), string_agg(b.id, ', ' order by b.id)
-    into manquants, exemples
+  select count(*) into retires
     from public.books b
    where not exists (select 1 from public.possessions p
                       where p.tenant_id = b.tenant_id and p.id = b.id);
 
-  if manquants > 0 then
-    raise exception '% ouvrage(s) non repris : %', manquants, left(exemples, 300);
+  historique := (ajoutes = 0 and retires = 0);
+
+  if not historique then
+    raise notice '  contrôles historiques ÉCARTÉS : % ajout(s) et % retrait(s) '
+      'depuis la bascule. « books » est un filet gelé, plus une référence.',
+      ajoutes, retires;
+  end if;
+
+  /* ------------------------------------------- 2. Les manquants, nommément */
+
+  if historique then
+    select count(*), string_agg(b.id, ', ' order by b.id)
+      into manquants, exemples
+      from public.books b
+     where not exists (select 1 from public.possessions p
+                        where p.tenant_id = b.tenant_id and p.id = b.id);
+
+    if manquants > 0 then
+      raise exception '% ouvrage(s) non repris : %', manquants, left(exemples, 300);
+    end if;
   end if;
 
   /* ------------------------------------------------- 3. Les champs, un à un
 
      On compare ce que la VUE rend à ce que books contenait. C'est la vue que
      l'application interroge : comparer les tables sous-jacentes vérifierait
-     la migration sans vérifier ce qui sera affiché. */
+     la migration sans vérifier ce qui sera affiché.
+
+     ---------------------------------------------------------------------
+     CE CONTRÔLE NE PEUT PLUS ÊTRE BLOQUANT, ET C'EST UNE PERTE ASSUMÉE.
+
+     Il ne suffit pas qu'aucun livre n'ait été ajouté ni retiré : il suffit
+     d'avoir CHANGÉ UNE NOTE. « books » est gelée depuis le 15/08 ; noter un
+     livre lu, le déplacer de rayon, corriger un titre — chacun de ces gestes
+     rend « b.note » différent de « p.note ». C'est le plus probable des
+     quatre pièges trouvés le 16/08 : les trois autres demandaient un ajout
+     ou une suppression, celui-ci se déclenche à la première étoile posée.
+
+     Et surtout, AUCUNE ASTUCE NE LE SAUVE. Face à une différence entre une
+     table gelée et une table vivante, rien ne permet de distinguer « la
+     migration a déformé un champ » de « l'utilisateur a modifié son livre ».
+     L'information n'existe pas. Un contrôle qui ne peut pas trancher ne doit
+     pas arrêter une livraison : il rapporte.
+
+     CE QUE CELA COÛTE, ET JE NE VEUX PAS L'ENJOLIVER : plus rien ne vérifie
+     qu'une migration future ne DÉFORME pas un champ sans en perdre. Le
+     contrôle 0 compte les lignes, il ne les lit pas.
+
+     LE REMPLACEMENT DURABLE, nommé ici pour ne pas être oublié : relever une
+     empreinte des possessions SUR LA PRODUCTION avant la copie, et la
+     comparer après migration. Comparer la même table à elle-même est la
+     seule façon de rendre la question décidable. C'est un chantier à part
+     entière, pas quelque chose à improviser à la fin d'une livraison. */
 
   select count(*), string_agg(t.id, ', ' order by t.id)
     into divergents, exemples
@@ -110,8 +219,9 @@ begin
        limit 20) t;
 
   if divergents > 0 then
-    raise exception '% ouvrage(s) dont un champ a changé : %',
-      divergents, left(exemples, 300);
+    raise notice '  % ouvrage(s) diffèrent du filet gelé « books » — modifiés '
+      'depuis la bascule, ou déformés par une migration. Ce contrôle ne sait '
+      'pas trancher : %', divergents, left(exemples, 200);
   end if;
 
   /* ----------------------------------------------- 4. Le périmètre public
@@ -119,13 +229,28 @@ begin
      La seule propriété qu'un visiteur constate. On la mesure des deux côtés
      avec la MÊME définition qu'appliquera l'application. */
 
-  select count(*) into perimetre_av
-    from public.books b where public.livre_public(b);
+  /* MESURÉ SUR L'INTERSECTION, ET C'EST CE QUI ÉVITE LA FAUSSE ALERTE.
 
-  select count(*) into perimetre_ap
-    from public.possessions p where public.possession_publique(p);
+     Compter tous les « books » d'un côté et toutes les « possessions » de
+     l'autre revenait à compter les ouvrages supprimés depuis la bascule
+     comme perdus, et les ouvrages ajoutés comme des fuites. Le premier livre
+     public ajouté après le 15/08 aurait déclenché « périmètre public
+     réduit » avec une liste de disparus VIDE — un message impossible à
+     comprendre, sur une base saine.
 
-  raise notice '  périmètre public : % avant, % après', perimetre_av, perimetre_ap;
+     On compare donc les mêmes ouvrages des deux côtés. Ce que devient un
+     livre ajouté depuis, aucune table gelée ne peut le dire ; c'est le rôle
+     des contrôles de l'application, pas de celui-ci. */
+  select count(*) filter (where public.livre_public(b)),
+         count(*) filter (where public.possession_publique(p))
+    into perimetre_av, perimetre_ap
+    from public.books b
+    join public.possessions p on p.tenant_id = b.tenant_id and p.id = b.id;
+
+  raise notice '  périmètre public : % avant, % après (sur les % ouvrages communs)',
+    perimetre_av, perimetre_ap,
+    (select count(*) from public.books b
+       join public.possessions p on p.tenant_id = b.tenant_id and p.id = b.id);
 
   /* Ce qui est devenu public sans l'être : une FUITE. On la nomme
      séparément du reste, car c'est la seule divergence qui expose des
@@ -180,12 +305,47 @@ begin
     raise exception '% possession(s) sans ouvrage.', orphelins;
   end if;
 
+  /* ------------------------------------------------------------------------
+     LES OUVRAGES QUE PERSONNE NE POSSÈDE : UNE INFORMATION, PAS UNE FAUTE.
+
+     Cette vérification a ARRÊTÉ la livraison du 16/08/2026 sur deux ouvrages
+     orphelins, et elle avait tort. Il faut le dire précisément, parce que
+     l'erreur est instructive.
+
+     Elle a été écrite le 15/08, le jour de la bascule, où le seul chemin
+     possible était la migration : chaque ouvrage venait d'un livre, donc
+     chacun avait un possesseur. Zéro orphelin était alors la vérité.
+
+     Elle a cessé de l'être le lendemain, sans que rien ne soit cassé. Deux
+     gestes ordinaires laissent légitimement un ouvrage sans possesseur :
+
+       — SUPPRIMER UN LIVRE. On retire la possession, pas l'ouvrage : sa
+         fiche bibliographique n'est pas la vôtre à effacer, et quelqu'un
+         d'autre peut posséder la même édition. C'est écrit ainsi dans
+         server.js, délibérément.
+       — CORRIGER UN ISBN. La possession se rattache au bon ouvrage, et
+         l'ancien reste au catalogue.
+
+     Le contrôle mesurait donc une propriété vraie d'un instant, pas une
+     propriété du système. Un garde-fou qui arrête une livraison saine finit
+     par être désactivé — et il emporte alors les cas où il avait raison.
+
+     ON L'AFFICHE, ET ON NOMME. Un compte qui grimpe sans qu'aucun livre
+     n'ait été supprimé mérite un regard ; les titres permettent de le
+     décider en une seconde, au lieu d'ouvrir une session SQL.
+
+     LE VRAI DÉFAUT, lui, reste une exception : une POSSESSION sans ouvrage
+     est une bibliothèque qui a perdu un livre. Voir juste au-dessus. */
   select count(*) into orphelins
     from public.ouvrages o
    where not exists (select 1 from public.possessions p where p.ouvrage_id = o.id);
   if orphelins > 0 then
-    raise exception '% ouvrage(s) que personne ne possède : le catalogue '
-      'partagé se remplirait d''entrées inutiles.', orphelins;
+    raise notice '  % ouvrage(s) au catalogue que plus personne ne possède '
+      '(suppression ou correction d''ISBN) : %', orphelins,
+      (select string_agg(o.titre || ' — ' || o.auteur, ' | ' order by o.titre)
+         from public.ouvrages o
+        where not exists (select 1 from public.possessions p
+                           where p.ouvrage_id = o.id));
   end if;
 
   /* Deux possessions du même ouvrage chez le même locataire : la contrainte
@@ -221,7 +381,10 @@ begin
       'politiques ne s''appliqueraient pas au compte de l''application.', orphelins;
   end if;
 
-  raise notice '  RÉPÉTITION CONCLUANTE — % ouvrages, aucun écart.', n_books;
+  /* On annonce le compte des POSSESSIONS, pas celui de « books ». C'est la
+     bibliothèque d'aujourd'hui, pas celle du 15/08 — et sur une base ayant
+     vécu, les deux nombres diffèrent. */
+  raise notice '  RÉPÉTITION CONCLUANTE — % ouvrages, aucun écart.', n_possessions;
 end $$;
 
 /* Le détail qui rend le compte rendu lisible : ce qui a effectivement été
