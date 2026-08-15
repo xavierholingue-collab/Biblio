@@ -1,0 +1,835 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Biblio — infrastructure et architecture</title>
+<style>
+  :root {
+    --paper: #E9EBE6; --paper-2: #F2F3EF; --ink: #1A1F1C; --ink-soft: #5E665F;
+    --rule: #C9CEC5; --acad: #2F5D62; --bd: #A9722A; --roman: #8A3B4A;
+    --serif: Georgia, "Iowan Old Style", "Times New Roman", serif;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font-family: var(--sans); font-size: 16px; line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 0 24px 120px; }
+
+  header.tete { padding: 64px 0 30px; border-bottom: 2px solid var(--ink); }
+  h1 { font-family: var(--serif); font-weight: 400; font-size: clamp(30px, 6vw, 44px);
+       letter-spacing: -0.02em; margin: 0 0 12px; line-height: 1.1; }
+  .chapeau { font-family: var(--serif); font-size: 19px; max-width: 64ch; margin: 0; }
+  .daté { font-family: var(--mono); font-size: 12px; color: var(--ink-soft);
+          letter-spacing: .05em; margin-top: 18px; }
+
+  h2 { font-family: var(--serif); font-weight: 400; font-size: 27px; margin: 56px 0 4px;
+       padding-top: 22px; border-top: 1px solid var(--rule); }
+  h3 { font-family: var(--serif); font-weight: 400; font-size: 20px; margin: 34px 0 6px; }
+  p { max-width: 68ch; }
+  .sous { color: var(--ink-soft); font-size: 14.5px; margin-top: 0; max-width: 68ch; }
+  code, kbd { font-family: var(--mono); font-size: .88em; background: var(--paper-2);
+              border: 1px solid var(--rule); padding: 1px 5px; border-radius: 2px; }
+  pre { background: var(--paper-2); border: 1px solid var(--rule); border-left: 3px solid var(--acad);
+        padding: 14px 16px; overflow-x: auto; font-family: var(--mono); font-size: 13px;
+        line-height: 1.55; }
+  pre code { background: none; border: none; padding: 0; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 14.5px; margin: 18px 0; }
+  th { text-align: left; font-size: 11.5px; text-transform: uppercase; letter-spacing: .07em;
+       color: var(--ink-soft); padding: 0 12px 8px 0; border-bottom: 1px solid var(--rule); }
+  td { padding: 9px 12px 9px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  td code { white-space: nowrap; }
+
+  figure { margin: 26px 0; }
+  figure svg { width: 100%; height: auto; display: block; }
+  figcaption { font-size: 13px; color: var(--ink-soft); margin-top: 8px; max-width: 68ch; }
+
+  .note { border-left: 3px solid var(--acad); background: var(--paper-2);
+          padding: 14px 18px; margin: 24px 0; font-size: 15px; }
+  .note.alerte { border-left-color: var(--roman); }
+  .note.manque { border-left-color: var(--bd); }
+  .note p { margin: 0 0 8px; } .note p:last-child { margin: 0; }
+  .note .titre { font-weight: 600; display: block; margin-bottom: 6px; }
+
+  nav.sommaire { background: var(--paper-2); border: 1px solid var(--rule);
+                 padding: 20px 24px; margin: 34px 0 0; }
+  nav.sommaire ol { margin: 0; padding-left: 20px; columns: 2; column-gap: 34px; font-size: 14.5px; }
+  nav.sommaire li { margin-bottom: 5px; break-inside: avoid; }
+  nav.sommaire a { color: inherit; text-decoration: none; border-bottom: 1px solid var(--rule); }
+  nav.sommaire a:hover { border-bottom-color: var(--ink); }
+
+  ul.serre li { margin-bottom: 7px; max-width: 68ch; }
+  .etiq { font-family: var(--mono); font-size: 11px; letter-spacing: .05em;
+          padding: 2px 7px; border-radius: 2px; border: 1px solid var(--rule);
+          background: var(--paper-2); white-space: nowrap; }
+  .etiq.prod { border-color: var(--acad); color: var(--acad); }
+  .etiq.rec  { border-color: var(--roman); color: var(--roman); }
+  footer { margin-top: 70px; padding-top: 22px; border-top: 2px solid var(--ink);
+           font-size: 14px; color: var(--ink-soft); }
+  @media (max-width: 620px) { nav.sommaire ol { columns: 1; } }
+  @media print { body { background: #fff; } nav.sommaire { break-inside: avoid; } }
+</style>
+
+<div class="wrap">
+<header class="tete">
+  <h1>Biblio — infrastructure et architecture</h1>
+  <p class="chapeau">
+    Où vivent les choses, pourquoi elles sont faites ainsi, et quels gestes
+    faire quand il faut intervenir. Écrit pour reprendre la main seul, sans
+    avoir à relire le code.
+  </p>
+  <p class="daté">État au 16 août 2026 — version en production : commit <code>9a6958b</code></p>
+</header>
+
+<nav class="sommaire">
+  <ol>
+    <li><a href="#quoi">Ce qu'est Biblio</a></li>
+    <li><a href="#machine">La machine et les adresses</a></li>
+    <li><a href="#environnements">Les trois environnements</a></li>
+    <li><a href="#poste-prod">Du poste à la production</a></li>
+    <li><a href="#donnees">Le modèle de données</a></li>
+    <li><a href="#cloisonnement">Le cloisonnement</a></li>
+    <li><a href="#visibilite">La visibilité à trois niveaux</a></li>
+    <li><a href="#argent">L'argent : le quota</a></li>
+    <li><a href="#livraison">La chaîne de livraison</a></li>
+    <li><a href="#gestes">Les gestes d'exploitation</a></li>
+    <li><a href="#manque">Ce qui n'existe pas encore</a></li>
+    <li><a href="#lecons">Les défauts qui reviennent</a></li>
+  </ol>
+</nav>
+
+<!-- ==================================================================== -->
+<h2 id="quoi">1. Ce qu'est Biblio</h2>
+<p class="sous">Une bibliothèque personnelle en ligne, en train de devenir un service partageable.</p>
+
+<p>
+  Biblio recense des ouvrages — 324 à ce jour — avec leur fiche, leur rangement,
+  leur statut de lecture et un résumé produit par le modèle. Une partie est
+  publique : 244 ouvrages sont visibles de tous. Le reste est privé.
+</p>
+<p>
+  Depuis le 15 août 2026, l'application est <strong>multi-locataire</strong> :
+  plusieurs personnes peuvent y tenir leur bibliothèque sans jamais voir celle
+  des autres. Elle n'en héberge encore qu'une, mais toute la mécanique
+  d'isolation est en place et éprouvée.
+</p>
+
+<p>La pile, volontairement courte :</p>
+<table>
+  <tr><td style="width:180px"><strong>Serveur web</strong></td>
+      <td>Caddy — certificats TLS automatiques, en-têtes de sécurité, relais vers l'API</td></tr>
+  <tr><td><strong>API</strong></td>
+      <td>Node.js 22, serveur HTTP <em>sans framework</em>. Une seule dépendance : <code>pg</code></td></tr>
+  <tr><td><strong>Base</strong></td>
+      <td>PostgreSQL 17, avec cloisonnement par <em>row level security</em></td></tr>
+  <tr><td><strong>Pages</strong></td>
+      <td>HTML et JavaScript natifs, servis en fichiers statiques. Aucun cadriciel, aucune compilation</td></tr>
+  <tr><td><strong>Modèle</strong></td>
+      <td>API Anthropic — résumés, recommandations, recherche de fiches</td></tr>
+</table>
+
+<div class="note">
+  <span class="titre">Pourquoi si peu de dépendances</span>
+  <p>
+    Chaque bibliothèque ajoutée est une chose de plus à mettre à jour, à
+    surveiller pour ses failles, et à comprendre le jour où elle casse. Ici
+    tout ce qui tourne tient dans quelques fichiers lisibles d'un bout à
+    l'autre — c'est ce qui rend possible de reprendre le projet après six mois
+    sans y avoir touché.
+  </p>
+</div>
+
+<!-- ==================================================================== -->
+<h2 id="machine">2. La machine et les adresses</h2>
+<p class="sous">Un seul VPS, partagé avec d'autres projets. Tout ce qui suit y est.</p>
+
+<table>
+  <tr><td style="width:200px"><strong>Serveur</strong></td>
+      <td><code>195.110.35.206</code> — Debian 12, chez LWS</td></tr>
+  <tr><td><strong>Aussi hébergés</strong></td>
+      <td><code>supperf.io</code>, <code>y-factor.fr</code> et ses sous-domaines.
+          <em>Le Caddyfile est commun</em> : une erreur dedans arrête tous les sites</td></tr>
+  <tr><td><strong>Production</strong></td>
+      <td><code>biblio.xavier-holingue.eu</code></td></tr>
+  <tr><td><strong>Recette</strong></td>
+      <td><code>biblio-recette.xavier-holingue.eu</code> — mot de passe HTTP, <code>noindex</code></td></tr>
+  <tr><td><strong>Dépôt</strong></td>
+      <td><code>github.com/xavierholingue-collab/Biblio</code> (privé)</td></tr>
+  <tr><td><strong>DNS</strong></td>
+      <td>Chez LWS. Enregistrements A vers l'IP ci-dessus</td></tr>
+</table>
+
+<h3>Où sont les fichiers, sur le serveur</h3>
+<table>
+  <tr><th>Chemin</th><th>Contenu</th></tr>
+  <tr><td><code>/opt/biblio-api/</code></td><td>Le code de l'API en service</td></tr>
+  <tr><td><code>/opt/biblio-api.precedent/</code></td><td>La version d'avant — le retour arrière</td></tr>
+  <tr><td><code>/var/www/biblio/</code></td><td>Les pages HTML servies</td></tr>
+  <tr><td><code>/etc/biblio/env</code></td><td><strong>Tous les secrets</strong> (chmod 600)</td></tr>
+  <tr><td><code>/etc/biblio-recette/env</code></td><td>Idem pour la recette — secrets <em>distincts</em></td></tr>
+  <tr><td><code>/etc/caddy/Caddyfile</code></td><td>Configuration web, tous sites confondus</td></tr>
+  <tr><td><code>/etc/caddy/csp-biblio.conf</code></td><td>Politique de contenu, recalculée à chaque livraison</td></tr>
+  <tr><td><code>/var/backups/biblio-avant-migration-*.sql.gz</code></td><td>Sauvegardes d'avant chaque migration</td></tr>
+  <tr><td><code>/var/log/biblio-deploiement.log</code></td><td>Journal des déploiements</td></tr>
+</table>
+
+<h3>Services et ports</h3>
+<table>
+  <tr><th>Environnement</th><th>Service systemd</th><th>Port</th><th>Base</th></tr>
+  <tr><td><span class="etiq prod">production</span></td><td><code>biblio-api</code></td><td>3006</td><td><code>biblio</code></td></tr>
+  <tr><td><span class="etiq rec">recette</span></td><td><code>biblio-recette-api</code></td><td>3007</td><td><code>biblio_recette</code></td></tr>
+  <tr><td>répétition</td><td>—</td><td>—</td><td><code>biblio_repetition</code> (éphémère)</td></tr>
+</table>
+<p class="sous">
+  Les ports 3006 et 3007 n'écoutent que sur <code>127.0.0.1</code>. On n'atteint
+  l'API que par Caddy, jamais directement depuis l'extérieur.
+</p>
+
+<h3>Les comptes PostgreSQL, et pourquoi il y en a deux</h3>
+<table>
+  <tr><td style="width:120px"><code>biblio</code></td>
+      <td>Le compte de l'API. <strong>Propriétaire</strong> des tables, mais
+          <strong>ni superutilisateur ni BYPASSRLS</strong>. C'est
+          <code>force row level security</code> qui le soumet aux politiques —
+          sans ce mot, un propriétaire les traverserait toutes.</td></tr>
+  <tr><td><code>postgres</code></td>
+      <td>L'administration. Sauvegardes, répétitions, vérifications. Il voit
+          tout, et c'est nécessaire : un contrôle qui partage l'aveuglement de
+          ce qu'il contrôle ne contrôle rien.</td></tr>
+</table>
+
+<!-- ==================================================================== -->
+<h2 id="environnements">3. Les trois environnements</h2>
+<p class="sous">Rien de partagé entre eux. C'est la condition pour qu'une bêtise en recette ne puisse pas atteindre la production.</p>
+
+<table>
+  <tr><th></th><th>Local</th><th>Recette</th><th>Production</th></tr>
+  <tr><td><strong>Où</strong></td><td>Votre poste, Docker</td><td>VPS</td><td>VPS</td></tr>
+  <tr><td><strong>Données</strong></td><td>Jeu d'essai inventé</td><td>Copie réelle de la production</td><td>Les vraies</td></tr>
+  <tr><td><strong>Clé Anthropic</strong></td><td>La vôtre, si posée</td><td><strong>vide</strong></td><td>posée</td></tr>
+  <tr><td><strong>Accès</strong></td><td>localhost</td><td>mot de passe HTTP + celui de l'app</td><td>mot de passe de l'app</td></tr>
+  <tr><td><strong>Bandeau</strong></td><td>non</td><td><strong>rouge, en haut</strong></td><td>non</td></tr>
+  <tr><td><strong>Indexation</strong></td><td>—</td><td><code>X-Robots-Tag: noindex</code></td><td>autorisée</td></tr>
+</table>
+
+<div class="note">
+  <span class="titre">Quatre propriétés de la recette, et ce qu'il en coûte de les oublier</span>
+  <p>
+    <strong>Elle ne dépense pas d'argent.</strong> La clé du modèle y est vide.
+    Un environnement d'essai qui appelle un service payant finit toujours par
+    être lancé en boucle, et la facture arrive sans qu'on sache pourquoi. Pour
+    éprouver les résumés, on pose la clé à la main, le temps voulu, puis on la retire.
+  </p>
+  <p>
+    <strong>Elle n'est pas publique.</strong> Une version à moitié finie
+    indexée par un moteur raconte à tout le monde ce qui n'est pas sorti.
+  </p>
+  <p>
+    <strong>Ses secrets lui sont propres.</strong> Les partager reviendrait à
+    dire qu'une fuite en recette est une fuite en production.
+  </p>
+  <p>
+    <strong>Elle se voit.</strong> L'API annonce son environnement, les pages
+    affichent un bandeau. On efface un jour des données en croyant être
+    ailleurs ; autant que « ailleurs » soit écrit en haut de l'écran.
+  </p>
+</div>
+
+<div class="note alerte">
+  <span class="titre">Ce que la recette implique, et qu'il faut assumer</span>
+  <p>
+    Elle contient une <strong>copie complète de votre bibliothèque</strong>,
+    sphère personnelle comprise. Cela fait un second endroit où ces données
+    existent. C'est un choix délibéré : le prix à payer pour éprouver les
+    migrations sur du réel plutôt que sur de l'inventé. Un banc d'essai sur
+    données inventées ne rencontre que les problèmes qu'on avait déjà imaginés.
+  </p>
+</div>
+
+<!-- ==================================================================== -->
+<h2 id="poste-prod">4. Du poste à la production</h2>
+<p class="sous">Le chemin qu'emprunte une modification, et pourquoi il passe par WSL.</p>
+
+<figure>
+<svg viewBox="0 0 880 300" xmlns="http://www.w3.org/2000/svg" font-family="system-ui, sans-serif">
+  <defs>
+    <marker id="fl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="#5E665F"/>
+    </marker>
+  </defs>
+  <g font-size="13">
+    <rect x="8" y="40" width="150" height="72" fill="#F2F3EF" stroke="#2F5D62" stroke-width="1.5" rx="2"/>
+    <text x="83" y="66" text-anchor="middle" font-weight="600" fill="#1A1F1C">OneDrive</text>
+    <text x="83" y="84" text-anchor="middle" font-size="11.5" fill="#5E665F">la SOURCE</text>
+    <text x="83" y="99" text-anchor="middle" font-size="11" fill="#5E665F">on n'édite qu'ici</text>
+
+    <rect x="200" y="40" width="150" height="72" fill="#F2F3EF" stroke="#C9CEC5" rx="2"/>
+    <text x="275" y="66" text-anchor="middle" font-weight="600" fill="#1A1F1C">~/dev/biblio</text>
+    <text x="275" y="84" text-anchor="middle" font-size="11.5" fill="#5E665F">dépôt git, dans WSL</text>
+    <text x="275" y="99" text-anchor="middle" font-size="11" fill="#5E665F">jamais édité à la main</text>
+
+    <rect x="392" y="40" width="140" height="72" fill="#F2F3EF" stroke="#C9CEC5" rx="2"/>
+    <text x="462" y="66" text-anchor="middle" font-weight="600" fill="#1A1F1C">GitHub</text>
+    <text x="462" y="84" text-anchor="middle" font-size="11.5" fill="#5E665F">Actions</text>
+    <text x="462" y="99" text-anchor="middle" font-size="11" fill="#5E665F">241 vérifications</text>
+
+    <rect x="574" y="12" width="140" height="58" fill="#F2F3EF" stroke="#8A3B4A" stroke-width="1.5" rx="2"/>
+    <text x="644" y="36" text-anchor="middle" font-weight="600" fill="#8A3B4A">Recette</text>
+    <text x="644" y="53" text-anchor="middle" font-size="11.5" fill="#5E665F">vos vraies données</text>
+
+    <rect x="574" y="86" width="140" height="58" fill="#F2F3EF" stroke="#2F5D62" stroke-width="1.5" rx="2"/>
+    <text x="644" y="110" text-anchor="middle" font-weight="600" fill="#2F5D62">Production</text>
+    <text x="644" y="127" text-anchor="middle" font-size="11.5" fill="#5E665F">biblio.xavier-holingue.eu</text>
+
+    <rect x="756" y="86" width="112" height="58" fill="#F2F3EF" stroke="#C9CEC5" rx="2"/>
+    <text x="812" y="110" text-anchor="middle" font-weight="600" fill="#1A1F1C">Playwright</text>
+    <text x="812" y="127" text-anchor="middle" font-size="11.5" fill="#5E665F">21 parcours</text>
+
+    <line x1="158" y1="76" x2="196" y2="76" stroke="#5E665F" marker-end="url(#fl)"/>
+    <line x1="350" y1="76" x2="388" y2="76" stroke="#5E665F" marker-end="url(#fl)"/>
+    <path d="M532 70 Q556 70 570 44" fill="none" stroke="#5E665F" marker-end="url(#fl)"/>
+    <path d="M644 70 L644 82" stroke="#5E665F" marker-end="url(#fl)"/>
+    <line x1="714" y1="115" x2="752" y2="115" stroke="#5E665F" marker-end="url(#fl)"/>
+
+    <text x="177" y="68" text-anchor="middle" font-size="10.5" fill="#5E665F">rsync</text>
+    <text x="369" y="68" text-anchor="middle" font-size="10.5" fill="#5E665F">push</text>
+    <text x="700" y="82" font-size="10.5" fill="#8A3B4A">si la recette passe</text>
+
+    <line x1="8" y1="175" x2="868" y2="175" stroke="#C9CEC5"/>
+    <text x="8" y="200" font-size="12.5" font-weight="600" fill="#1A1F1C">Le sens est unique, et c'est vérifié</text>
+    <text x="8" y="222" font-size="12" fill="#5E665F">OneDrive synchronise en continu tout ce qu'il voit, y compris .git. Une synchronisation qui survient pendant</text>
+    <text x="8" y="240" font-size="12" fill="#5E665F">une écriture d'objet corrompt le dépôt — et la corruption ne se manifeste souvent qu'au commit suivant.</text>
+    <text x="8" y="264" font-size="12" fill="#5E665F">D'où le dépôt dans WSL, alimenté par recopie. On n'édite JAMAIS dans ~/dev/biblio : la prochaine recopie</text>
+    <text x="8" y="282" font-size="12" fill="#5E665F">écraserait le travail sans prévenir.</text>
+  </g>
+</svg>
+<figcaption>
+  <code>assembler-depot.sh</code> fait la recopie, et refuse de continuer s'il
+  trouve un secret ou un fichier de données personnelles dans ce qui partirait
+  vers GitHub.
+</figcaption>
+</figure>
+
+<!-- ==================================================================== -->
+<h2 id="donnees">5. Le modèle de données</h2>
+<p class="sous">Un livre d'ISBN donné est le même livre pour tout le monde. Ce qui vous appartient, c'est ce que vous en faites.</p>
+
+<figure>
+<svg viewBox="0 0 880 380" xmlns="http://www.w3.org/2000/svg" font-family="system-ui, sans-serif">
+  <g font-size="12.5">
+    <text x="8" y="20" font-size="11" letter-spacing="1.2" fill="#5E665F">PARTAGÉ ENTRE TOUS</text>
+    <line x1="8" y1="28" x2="424" y2="28" stroke="#2F5D62"/>
+
+    <rect x="8" y="42" width="196" height="112" fill="#F2F3EF" stroke="#2F5D62" stroke-width="1.5" rx="2"/>
+    <text x="20" y="64" font-weight="600" fill="#2F5D62">ouvrages</text>
+    <text x="20" y="84" font-size="11.5" fill="#1A1F1C">cle  ← isbn:978… ou local:…</text>
+    <text x="20" y="101" font-size="11.5" fill="#5E665F">titre, auteur, éditeur</text>
+    <text x="20" y="118" font-size="11.5" fill="#5E665F">année, pages, couverture</text>
+    <text x="20" y="141" font-size="11" fill="#5E665F" font-style="italic">ce que le livre EST</text>
+
+    <rect x="228" y="42" width="196" height="112" fill="#F2F3EF" stroke="#2F5D62" stroke-width="1.5" rx="2"/>
+    <text x="240" y="64" font-weight="600" fill="#2F5D62">resumes_ouvrages</text>
+    <text x="240" y="84" font-size="11.5" fill="#1A1F1C">(ouvrage_id, langue)</text>
+    <text x="240" y="101" font-size="11.5" fill="#5E665F">resume, points, themes</text>
+    <text x="240" y="118" font-size="11.5" fill="#5E665F">modele, fiabilite</text>
+    <text x="240" y="141" font-size="11" fill="#8A3B4A" font-style="italic">payé au modèle — un seul par édition</text>
+
+    <text x="8" y="196" font-size="11" letter-spacing="1.2" fill="#5E665F">PROPRE À CHAQUE LOCATAIRE</text>
+    <line x1="8" y1="204" x2="872" y2="204" stroke="#8A3B4A"/>
+
+    <rect x="8" y="218" width="196" height="130" fill="#F2F3EF" stroke="#8A3B4A" stroke-width="1.5" rx="2"/>
+    <text x="20" y="240" font-weight="600" fill="#8A3B4A">possessions</text>
+    <text x="20" y="260" font-size="11.5" fill="#1A1F1C">(tenant_id, id)</text>
+    <text x="20" y="277" font-size="11.5" fill="#5E665F">→ ouvrage_id</text>
+    <text x="20" y="294" font-size="11.5" fill="#5E665F">statut, note</text>
+    <text x="20" y="311" font-size="11.5" fill="#5E665F">categorie, sous_categorie</text>
+    <text x="20" y="328" font-size="11.5" fill="#5E665F">sphere, <tspan font-weight="600">visibilite</tspan></text>
+
+    <rect x="228" y="218" width="180" height="130" fill="#F2F3EF" stroke="#8A3B4A" stroke-width="1.5" rx="2"/>
+    <text x="240" y="240" font-weight="600" fill="#8A3B4A">tenants</text>
+    <text x="240" y="260" font-size="11.5" fill="#1A1F1C">identifiant  ← /u/xavier</text>
+    <text x="240" y="277" font-size="11.5" fill="#5E665F">nom</text>
+    <text x="240" y="294" font-size="11.5" fill="#5E665F">visibilite (verrou maître)</text>
+    <text x="240" y="311" font-size="11.5" fill="#5E665F">langue</text>
+    <text x="240" y="328" font-size="11.5" fill="#5E665F">quota_ia_mois</text>
+
+    <rect x="432" y="218" width="180" height="130" fill="#F2F3EF" stroke="#8A3B4A" stroke-width="1.5" rx="2"/>
+    <text x="444" y="240" font-weight="600" fill="#8A3B4A">comptes</text>
+    <text x="444" y="260" font-size="11.5" fill="#5E665F">courriel, vu_le</text>
+    <text x="444" y="284" font-weight="600" fill="#8A3B4A">liens_connexion</text>
+    <text x="444" y="304" font-size="11.5" fill="#5E665F">empreinte du jeton</text>
+    <text x="444" y="321" font-size="11.5" fill="#5E665F">expire_le, utilise_le</text>
+
+    <rect x="636" y="218" width="180" height="130" fill="#F2F3EF" stroke="#8A3B4A" stroke-width="1.5" rx="2"/>
+    <text x="648" y="240" font-weight="600" fill="#8A3B4A">appels_ia</text>
+    <text x="648" y="260" font-size="11.5" fill="#5E665F">tenant_id, route, cree_le</text>
+    <text x="648" y="284" font-size="11" fill="#5E665F" font-style="italic">une ligne par appel payant</text>
+    <text x="648" y="304" font-size="11" fill="#5E665F" font-style="italic">jamais le contenu :</text>
+    <text x="648" y="321" font-size="11" fill="#5E665F" font-style="italic">ni titre, ni question, ni réponse</text>
+
+    <path d="M106 218 L106 156" fill="none" stroke="#5E665F" stroke-dasharray="3 3"/>
+    <path d="M204 260 Q300 260 300 156" fill="none" stroke="#5E665F" stroke-dasharray="3 3"/>
+    <text x="112" y="184" font-size="11" fill="#5E665F">possède</text>
+
+    <rect x="448" y="42" width="424" height="112" fill="none" stroke="#C9CEC5" stroke-dasharray="4 4" rx="2"/>
+    <text x="464" y="64" font-weight="600" fill="#5E665F">books · resumes</text>
+    <text x="464" y="86" font-size="11.5" fill="#5E665F">Les tables d'avant la bascule. Gelées depuis le 15/08 :</text>
+    <text x="464" y="104" font-size="11.5" fill="#5E665F">plus personne ne les lit ni ne les écrit.</text>
+    <text x="464" y="128" font-size="11.5" fill="#8A3B4A">Conservées comme filet. À supprimer un jour, délibérément.</text>
+  </g>
+</svg>
+<figcaption>
+  La vue <code>livres</code> assemble <code>possessions</code> et
+  <code>ouvrages</code> ; c'est elle que l'API interroge. Les écritures passent
+  par les tables.
+</figcaption>
+</figure>
+
+<h3>Pourquoi cette découpe</h3>
+<p>
+  Avant le 15 août, tout tenait dans une seule table dupliquée par utilisateur.
+  Trois amis possédant le même ouvrage, c'était trois lignes, trois recherches
+  de couverture et <strong>trois appels au modèle</strong> pour produire trois
+  fois le même texte — c'est-à-dire trois fois la seule dépense du service.
+</p>
+<p>
+  Le classement, lui, reste personnel, et ce n'est pas un détail : ranger
+  <em>Sapiens</em> en Histoire ou en Économie est un jugement, pas une propriété
+  du livre. Statut, note, rayon, sphère et visibilité restent donc chez vous.
+</p>
+
+<div class="note manque">
+  <span class="titre">Ce que cette découpe ne résout pas</span>
+  <p>
+    L'ISBN identifie une <strong>édition</strong>, pas une <strong>œuvre</strong>.
+    Deux éditions du même livre sont deux ouvrages, donc deux résumés. Le partage
+    sera moins large qu'espéré. Le niveau « œuvre » — un identifiant OpenLibrary —
+    est la vraie réponse ; c'est un chantier distinct, pas un oubli.
+  </p>
+  <p>
+    Et trois ouvrages sur 324 portent un <strong>ASIN Amazon préfixé 978</strong>,
+    qui ressemble à un ISBN sans en être. Ils reçoivent une identité <em>locale</em>,
+    non partagée : mieux vaut ne rien mutualiser que mutualiser sur une clé fausse.
+  </p>
+</div>
+
+<!-- ==================================================================== -->
+<h2 id="cloisonnement">6. Le cloisonnement</h2>
+<p class="sous">Ce n'est pas l'application qui décide qui voit quoi. C'est PostgreSQL.</p>
+
+<p>
+  Toute requête passe par une transaction qui pose l'identité du locataire :
+</p>
+<pre><code>begin;
+select set_config('app.tenant_id', $1, <strong>true</strong>);   -- « true » = LOCAL à la transaction
+  … le travail …
+commit;   -- PostgreSQL défait le réglage lui-même</code></pre>
+
+<p>
+  Les politiques de sécurité comparent ensuite chaque ligne à cette valeur.
+  Une requête qui oublierait de poser le contexte ne rend pas <em>trop</em> de
+  lignes : elle n'en rend <strong>aucune</strong>. L'oubli est visible
+  immédiatement, au lieu de fuir en silence.
+</p>
+
+<div class="note">
+  <span class="titre">Trois détails dont tout dépend</span>
+  <p>
+    <strong><code>set_config(…, true)</code> et non <code>SET</code>.</strong>
+    Le <code>true</code> rend le réglage local à la transaction. Sans lui, une
+    connexion rendue au pool garderait le locataire précédent, et un utilisateur
+    verrait la bibliothèque d'un autre — jamais en développement, et sous charge
+    en production. Par ailleurs <code>SET</code> n'accepte pas de paramètre :
+    on serait tenté d'y interpoler l'identifiant, c'est-à-dire d'ouvrir une
+    injection SQL au cœur du mécanisme censé isoler.
+  </p>
+  <p>
+    <strong><code>force row level security</code>.</strong> Sans ce mot, les
+    politiques existent mais ne s'appliquent pas au <em>propriétaire</em> des
+    tables — c'est-à-dire au compte que l'API utilise. Elles seraient
+    décoratives. Dix tables sont sous <code>force</code>, et une vérification
+    le lit dans <code>pg_class</code> à chaque livraison, pas dans les données.
+  </p>
+  <p>
+    <strong><code>SECURITY DEFINER</code> ne contourne pas <code>force</code>.</strong>
+    Une erreur commise le 15/08 : on croyait qu'une fonction ainsi déclarée
+    traverserait les politiques. Elle ne les traverse pas. Un rayon marqué
+    public ne publiait rien, et un rayon privé « fonctionnait »… par accident.
+  </p>
+</div>
+
+<h3>Deux contextes, jamais trois</h3>
+<p>
+  Soit un locataire agit chez lui, soit un visiteur consulte le public. Servir
+  une page publique se fait <strong>sans locataire</strong> —
+  <code>avecVisiteur()</code> — et c'est un geste explicite, lisible dans le code.
+</p>
+
+<div class="note alerte">
+  <span class="titre">La règle qui a coûté trois arrêts de livraison</span>
+  <p>
+    <strong>Une migration, un garde-fou ou une sauvegarde ne doit jamais
+    s'exécuter <em>sous</em> le cloisonnement qu'elle installe.</strong>
+  </p>
+  <p>
+    Elle a trois visages dans ce projet, et les trois ont mordu : une migration
+    qui échouait au deuxième passage ; un garde-fou qui voyait quatre ouvrages
+    avant et quatre après alors que la sphère personnelle entière avait disparu ;
+    un <code>pg_dump</code> qui, s'il n'avait pas été refusé par PostgreSQL,
+    aurait sauvegardé un tiers de la bibliothèque en se croyant complet.
+  </p>
+  <p>
+    D'où : chaque fichier de migration <em>lève</em> les politiques au début et
+    les <em>remet</em> à la fin, et tout ce qui relève de l'administration passe
+    par <code>sudo -u postgres</code>.
+  </p>
+</div>
+
+<!-- ==================================================================== -->
+<h2 id="visibilite">7. La visibilité à trois niveaux</h2>
+<p class="sous">Le plus précis l'emporte — sauf le verrou du haut, qui l'emporte toujours.</p>
+
+<figure>
+<svg viewBox="0 0 880 250" xmlns="http://www.w3.org/2000/svg" font-family="system-ui, sans-serif">
+  <g font-size="13">
+    <rect x="8" y="14" width="864" height="52" fill="#F2F3EF" stroke="#8A3B4A" stroke-width="2" rx="2"/>
+    <text x="24" y="36" font-weight="600" fill="#8A3B4A">1 · La bibliothèque — VERROU MAÎTRE</text>
+    <text x="24" y="56" font-size="12" fill="#5E665F">Privée : rien ne sort, quels que soient les réglages en dessous. Publique : on regarde le niveau suivant.</text>
+
+    <rect x="48" y="80" width="824" height="52" fill="#F2F3EF" stroke="#2F5D62" stroke-width="1.5" rx="2"/>
+    <text x="64" y="102" font-weight="600" fill="#2F5D62">2 · Le rayon</text>
+    <text x="64" y="122" font-size="12" fill="#5E665F">Public, privé, ou hérité. « Hérité » n'est pas stocké : c'est l'absence de décision.</text>
+
+    <rect x="88" y="146" width="784" height="52" fill="#F2F3EF" stroke="#2F5D62" stroke-width="1.5" rx="2"/>
+    <text x="104" y="168" font-weight="600" fill="#2F5D62">3 · Le livre</text>
+    <text x="104" y="188" font-size="12" fill="#5E665F">Décide contre son rayon. C'est le niveau des exceptions — celles qu'on oublie, pas la règle.</text>
+
+    <text x="8" y="226" font-size="12.5" font-weight="600" fill="#1A1F1C">Sans décision à aucun niveau : PRIVÉ.</text>
+    <text x="230" y="226" font-size="12.5" fill="#5E665F">Une erreur d'inattention ne peut que cacher un livre, jamais en révéler un.</text>
+  </g>
+</svg>
+<figcaption>
+  La règle vit dans la fonction <code>possession_publique()</code>, et c'est
+  <em>elle</em> qui fait foi. Ni l'API ni l'écran de réglages ne la
+  réimplémentent : deux copies d'une règle de visibilité divergent toujours,
+  et c'est la copie affichée qui rassure pendant que l'autre publie.
+</figcaption>
+</figure>
+
+<p>
+  L'écran <code>/reglages.html</code> affiche pour chaque rayon un nombre de
+  « publiés ». Ce n'est pas un calcul de la page : c'est un <strong>compte de ce
+  que PostgreSQL laisse effectivement sortir</strong>. Un rayon réglé « public »
+  dans une bibliothèque fermée affiche donc « aucun » — et c'est exactement ce
+  qu'il fallait voir.
+</p>
+
+<!-- ==================================================================== -->
+<h2 id="argent">8. L'argent : le quota</h2>
+<p class="sous">La seule dépense du service, et le seul mécanisme qui la borne.</p>
+
+<p>
+  Chaque résumé, recommandation ou recherche de fiche est un appel facturé. Un
+  invité qui lance « résumer toute ma bibliothèque » sur 400 titres dépense sur
+  votre compte.
+</p>
+
+<pre><code>consommer_appel_ia(route)
+  ├─ pas de locataire posé ?  → LÈVE une erreur          (jamais « 0 appels »)
+  ├─ verrou sur la ligne du locataire  (for update)      (sinon 8 appels simultanés passent)
+  ├─ compte du mois ≥ plafond ?  → refuse, code 53400    (l'API répond 429, pas 500)
+  └─ inscrit l'appel, PUIS le modèle est appelé</code></pre>
+
+<ul class="serre">
+  <li><strong>Le décompte est dans la base, pas dans l'API.</strong> Une
+      vérification écrite dans une route ne protège que cette route ; celle
+      qu'on ajoutera dans six mois l'oubliera.</li>
+  <li><strong>Un seul point de passage.</strong> On ne peut plus appeler le
+      modèle sans fournir le contexte du payeur. L'oubli n'est pas rattrapé,
+      il est impossible.</li>
+  <li><strong>Il échoue fermé.</strong> Sans locataire, un simple
+      <code>count(*)</code> rendrait zéro — c'est-à-dire un quota infini, et
+      un défaut parfaitement silencieux : pas d'erreur, pas de refus, juste une
+      facture. La fonction lève à la place.</li>
+  <li><strong>Un résumé en cache ne coûte rien, donc ne décompte rien.</strong>
+      Le décompte est placé là où l'argent part, pas à l'entrée de la route.</li>
+  <li><strong>Avant l'appel, pas après.</strong> Ce qui coûte, c'est la
+      tentative. L'ordre inverse laisserait une panne effacer la trace d'un
+      appel déjà payé.</li>
+</ul>
+
+<p class="sous">
+  Votre plafond est à 100 000, c'est-à-dire aucun. Le compte est tenu quand même :
+  c'est lui qui permettra de fixer un plafond juste pour les invités, à partir
+  de ce qui aura été observé plutôt que deviné. Le défaut pour un nouveau
+  locataire est de 10 appels par mois.
+</p>
+
+<!-- ==================================================================== -->
+<h2 id="livraison">9. La chaîne de livraison</h2>
+<p class="sous">Trois étages. La production n'est atteinte que si les deux premiers passent.</p>
+
+<table>
+  <tr><th>Étage</th><th>Ce qui s'y passe</th><th>Si ça casse</th></tr>
+  <tr>
+    <td><strong>Contrôles</strong></td>
+    <td>Syntaxe, schéma appliqué sur un PostgreSQL 17 neuf, API démarrée,
+        241 vérifications, tests de front. Aucun appel payant.</td>
+    <td>Rien n'est déployé</td>
+  </tr>
+  <tr>
+    <td><strong>Recette</strong></td>
+    <td>Déploiement sur <code>biblio-recette</code>, qui porte une copie de vos
+        vraies données. Vérification que l'environnement s'annonce bien comme
+        tel.</td>
+    <td>La production n'est pas touchée</td>
+  </tr>
+  <tr>
+    <td><strong>Production</strong></td>
+    <td>Sauvegarde, <strong>répétition sur une copie</strong>, vérification,
+        puis migration réelle. Enfin 21 parcours dans un vrai navigateur.</td>
+    <td>Retour arrière automatique</td>
+  </tr>
+</table>
+
+<h3>Ce que fait le déployeur, dans l'ordre</h3>
+<pre><code>1.  reçoit l'archive, vérifie qu'elle contient bien des migrations
+2.  copie /opt/biblio-api → .precedent          ← le retour arrière
+3.  pose SECRET_SESSION s'il manque             ← jamais régénéré : cela déconnecterait tout le monde
+4.  sauvegarde la base    (sudo -u postgres pg_dump | gzip)
+5.  VÉRIFIE que la sauvegarde contient le bon nombre de lignes
+6.  crée biblio_repetition, y restaure la sauvegarde
+7.  y applique les migrations, y lance verifier-migration.sql
+        ↳ si le contrôle refuse : ARRÊT, la production n'a pas bougé
+8.  applique les migrations à la vraie base
+9.  pose les pages, recalcule la politique de contenu, recharge Caddy
+10. pose l'API, npm install, redémarre le service
+11. interroge /api/session
+        ↳ muet ? → restaure .precedent et redémarre</code></pre>
+
+<div class="note">
+  <span class="titre">Pourquoi une répétition sur une copie</span>
+  <p>
+    Elle a payé son coût dès le premier jour. Trois défauts réels n'étaient
+    atteignables que sur une base <em>ayant déjà subi</em> une migration — ni
+    l'intégration continue, qui part d'une base neuve, ni les bancs d'essai ne
+    pouvaient les voir.
+  </p>
+</div>
+
+<h3>L'accès SSH est contraint</h3>
+<p>
+  La clé déposée sur le serveur ne peut lancer qu'<strong>une seule commande</strong> :
+  le déployeur. Pas de terminal, pas de redirection de port, pas d'agent.
+  Une clé volée dans GitHub ne donne pas un accès au serveur ; elle donne le
+  droit de redéployer.
+</p>
+
+<!-- ==================================================================== -->
+<h2 id="gestes">10. Les gestes d'exploitation</h2>
+<p class="sous">Ce qu'il faut taper, et dans quel ordre.</p>
+
+<h3>Livrer</h3>
+<pre><code>bash /mnt/c/Users/xavie/OneDrive/Doc/Claude/Projects/Bibliographie/deploiement/assembler-depot.sh
+cd ~/dev/biblio &amp;&amp; git add -A &amp;&amp; git commit -m "…" &amp;&amp; git push</code></pre>
+<p class="sous">Depuis WSL. Le reste se fait tout seul. Suivre dans l'onglet Actions de GitHub.</p>
+
+<h3>Voir ce qui se passe sur le serveur</h3>
+<pre><code>ssh root@195.110.35.206
+
+systemctl status biblio-api                 # le service
+journalctl -u biblio-api -n 50 --no-pager   # ses derniers messages
+journalctl -u biblio-api -f                 # en direct
+tail -30 /var/log/biblio-deploiement.log    # historique des livraisons
+systemctl status caddy</code></pre>
+
+<h3>Rafraîchir la recette avec les données du jour</h3>
+<p class="sous">
+  Les scripts d'administration ne sont pas déployés automatiquement : on les
+  envoie depuis le poste au moment de s'en servir.
+</p>
+<pre><code>cd /mnt/c/Users/xavie/OneDrive/Doc/Claude/Projects/Bibliographie/deploiement
+scp vps-rafraichir-recette.sh root@195.110.35.206:/tmp/
+ssh root@195.110.35.206 "bash /tmp/vps-rafraichir-recette.sh"</code></pre>
+<p class="sous">
+  Sens unique, vérifié trois fois : production → recette, jamais l'inverse. Les
+  liens de connexion en cours sont effacés au passage — un lien émis pour la
+  production ne doit pas ouvrir la recette.
+</p>
+
+<h3>Retrouver le mot de passe de la recette</h3>
+<pre><code>ssh root@195.110.35.206 "sed -n 's/^MOT_DE_PASSE=//p' /etc/biblio-recette/env"</code></pre>
+<p class="sous">
+  Le mot de passe <em>HTTP</em>, lui, est irrécupérable : Caddy n'en garde qu'un
+  condensat bcrypt. Pour en poser un nouveau :
+  <code>bash vps-installer-recette-biblio.sh --refaire-le-mot-de-passe-http</code>
+</p>
+
+<h3>Restaurer une sauvegarde</h3>
+<pre><code>ssh root@195.110.35.206
+ls -lt /var/backups/biblio-avant-migration-*.sql.gz | head
+
+# TOUJOURS regarder ce qu'on s'apprête à restaurer, d'abord
+gunzip -c /var/backups/biblio-avant-migration-AAAAMMJJ-HHMMSS.sql.gz \
+  | grep -c '^COPY public.possessions'
+
+systemctl stop biblio-api
+sudo -u postgres dropdb biblio
+sudo -u postgres createdb -O biblio biblio
+gunzip -c /var/backups/biblio-avant-migration-AAAAMMJJ-HHMMSS.sql.gz \
+  | sudo -u postgres psql -v ON_ERROR_STOP=1 -d biblio
+systemctl start biblio-api</code></pre>
+<div class="note alerte">
+  <p>
+    Ce geste <strong>efface la base en service</strong>. Le faire d'abord sur
+    <code>biblio_recette</code> pour vérifier que la sauvegarde est bonne coûte
+    deux minutes et évite le cas où l'on découvre le problème après.
+  </p>
+</div>
+
+<h3>Regarder ou corriger la base à la main</h3>
+<pre><code>sudo -u postgres psql -d biblio
+
+-- Compter, en voyant TOUT (le compte applicatif ne verrait que le public)
+select count(*) from possessions;
+select identifiant, visibilite, langue, quota_ia_mois from tenants;
+select route, count(*) from appels_ia
+ where cree_le >= date_trunc('month', now()) group by route;</code></pre>
+<p class="sous">
+  Pour <em>écrire</em> comme le fait l'application, il faut poser un locataire —
+  sans quoi les politiques ne laisseront rien passer :
+</p>
+<pre><code>begin;
+select set_config('app.tenant_id',
+  (select id::text from tenants where identifiant = 'xavier'), true);
+select count(*) from possessions;      -- vu par l'application
+commit;</code></pre>
+
+<h3>Quand un déploiement échoue</h3>
+<p>Lire le message avant d'agir — il distingue deux cas que tout oppose :</p>
+<table>
+  <tr><td style="width:44%"><code>la repetition NE CONCORDE PAS</code></td>
+      <td>Le contrôle a tourné et a <strong>refusé</strong>. La migration abîmerait les
+          données. La copie <code>biblio_repetition</code> reste en place pour examen.</td></tr>
+  <tr><td><code>le controle N'A PAS PU S'EXECUTER</code></td>
+      <td>Il n'a pas pu tourner : droit, chemin, fichier absent. Rien n'a été
+          éprouvé, et rien n'a été migré. <strong>Ce n'est pas un refus</strong> — ne cherchez
+          pas un défaut dans vos données.</td></tr>
+</table>
+<pre><code># rejouer le contrôle à la main sur la copie laissée en place
+sudo -u postgres psql -d biblio_repetition -f verifier-migration.sql</code></pre>
+
+<!-- ==================================================================== -->
+<h2 id="manque">11. Ce qui n'existe pas encore</h2>
+<p class="sous">Un document d'architecture qui ne dit que ce qui marche est un document de vente.</p>
+
+<div class="note alerte">
+  <span class="titre">Aucune sauvegarde périodique</span>
+  <p>
+    La base n'est sauvegardée <strong>qu'avant chaque migration</strong>, c'est-à-dire
+    à chaque livraison. Entre deux livraisons, rien. Si le VPS disparaissait un
+    jour sans déploiement, tout ce qui a été ajouté depuis la dernière livraison
+    serait perdu — et les sauvegardes elles-mêmes sont sur la <em>même machine</em>.
+    C'est le manque le plus sérieux de cette liste.
+  </p>
+</div>
+
+<div class="note manque">
+  <span class="titre">L'authentification par lien magique n'est pas branchée</span>
+  <p>
+    Le module existe, il est éprouvé par 26 vérifications — empreinte du jeton
+    plutôt que le jeton, usage unique garanti par la base, quinze minutes de
+    validité, aucune énumération possible. Mais <code>server.js</code> ne
+    l'importe pas. On entre encore par un <strong>mot de passe unique partagé</strong>,
+    qui ouvre la bibliothèque désignée par <code>TENANT_DEFAUT</code>.
+  </p>
+  <p>
+    C'est le vrai préalable à l'invitation d'un ami : il n'y a aujourd'hui aucun
+    moyen pour une deuxième personne de se connecter à sa propre bibliothèque.
+    Et rien n'envoie de courriel — l'expédition du lien reste à écrire.
+  </p>
+</div>
+
+<ul class="serre">
+  <li><strong>Pas de surveillance externe.</strong> Si le service tombe, personne
+      n'est prévenu. On l'apprend en ouvrant la page.</li>
+  <li><strong>Pas de pages publiques <code>/u/xavier</code>.</strong> La colonne
+      <code>identifiant</code> existe et attend.</li>
+  <li><strong>Pas de pages légales</strong> — mentions, données personnelles.
+      Nécessaires avant d'accueillir quelqu'un d'autre.</li>
+  <li><strong>DMARC reste en <code>p=none</code>.</strong> À passer en
+      <code>quarantine</code>.</li>
+  <li><strong><code>APILWSKEY.txt</code> traîne dans OneDrive.</strong> À mettre
+      dans un gestionnaire de mots de passe et à supprimer de là.</li>
+  <li><strong>La vérification de migration a perdu une garantie le 16/08.</strong>
+      La comparaison champ par champ ne peut plus bloquer : face à une différence
+      entre une table gelée et une bibliothèque vivante, rien ne distingue « la
+      migration a déformé » de « l'utilisateur a modifié ». Le remplacement —
+      une empreinte relevée sur la production avant la copie, comparée après —
+      reste à faire.</li>
+  <li><strong><code>books</code> et <code>resumes</code> sont toujours là.</strong>
+      Gelées, inutilisées, gardées comme filet. À supprimer quand la nouvelle
+      structure aura vécu.</li>
+</ul>
+
+<!-- ==================================================================== -->
+<h2 id="lecons">12. Les défauts qui reviennent</h2>
+<p class="sous">Trois familles. Elles expliquent presque tous les arrêts de livraison depuis le 12 août.</p>
+
+<h3>Un contrôle qui partage l'aveuglement de ce qu'il contrôle</h3>
+<p>
+  Un garde-fou qui compte les ouvrages depuis l'intérieur du cloisonnement voit
+  quatre avant et quatre après, alors que la sphère personnelle entière a
+  disparu. Un banc d'essai où l'observateur et l'observé partagent une session
+  mesure sa propre cécité. Un compte applicatif qui produit une sauvegarde ne
+  sauvegarde que ce qu'il a le droit de lire.
+</p>
+<p><strong>La parade :</strong> tout contrôle est cassé volontairement pour vérifier qu'il tombe. Un contrôle qui ne peut pas échouer ne contrôle rien.</p>
+
+<h3>Une liste écrite à la main</h3>
+<p>
+  Elle ne protège que des fichiers qu'on a pensé à y écrire — c'est-à-dire de
+  ceux qu'on n'oublie pas. Trois fois le même défaut : le banc d'essai nommait
+  ses migrations, le contrôle d'environnement nommait ses pages, le déployeur
+  nommait les fichiers attendus. Chaque ajout échappait au contrôle sans le
+  moindre message.
+</p>
+<p><strong>La parade :</strong> lire le dossier, jamais l'inventaire.</p>
+
+<h3>Un contrôle qui mesure un instant plutôt qu'une propriété</h3>
+<p>
+  Le plus récent, et le plus subtil. Quatre vérifications comparaient une table
+  gelée le 15 août à une bibliothèque qui, elle, continuait de vivre. Elles
+  étaient vraies ce jour-là. Le lendemain, elles appelaient corruption
+  l'activité normale — et la plus fragile se serait déclenchée à la première
+  étoile posée sur un livre.
+</p>
+<p><strong>La parade :</strong> comparer la même chose à elle-même, avant et après. Et se demander de tout contrôle : <em>« restera-t-il vrai dans un mois ? »</em></p>
+
+<div class="note">
+  <p>
+    Le fil commun : <strong>un garde-fou qui arrête une livraison saine finit
+    par être désactivé — et il emporte alors les cas où il avait raison.</strong>
+    Mieux vaut perdre une vérification, en le disant, que perdre la confiance
+    dans toutes.
+  </p>
+</div>
+
+<footer>
+  <p>
+    Les commentaires du code disent le <em>pourquoi</em> de chaque décision, avec
+    la date et le défaut qui l'a motivée. Ce document en est la carte ; le code
+    reste la source.
+  </p>
+  <p>
+    Fichiers de référence : <code>db/0*.sql</code> (structure et cloisonnement),
+    <code>api/server.js</code> (routes), <code>api/locataire.mjs</code> (contexte),
+    <code>deploiement/vps-deployer-biblio.sh</code> (déploiement),
+    <code>deploiement/verifier-migration.sql</code> (répétition),
+    <code>tests/</code> (241 vérifications).
+  </p>
+</footer>
+</div>

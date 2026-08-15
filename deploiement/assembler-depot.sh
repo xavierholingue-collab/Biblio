@@ -87,7 +87,17 @@ ok "deploiement"
 
 cp -f "${SOURCE}/docker/README-docker.md" "${DEPOT}/docs/" 2>/dev/null
 cp -f "${SOURCE}/files/README-bibliotheque.md" "${DEPOT}/docs/" 2>/dev/null
-ok "docs : $(ls -1 "${DEPOT}/docs"/*.md 2>/dev/null | wc -l) documents"
+
+# La documentation d'architecture voyage AVEC le code, et c'est le point.
+#
+# Un document qui vit ailleurs devient faux sans que personne ne le voie : il
+# n'apparait dans aucune revue, aucune livraison ne le touche, et on continue
+# de s'y fier. Ici il est dans le meme commit que la modification qu'il decrit.
+#
+# Il n'entre PAS dans le paquet deploye (api web db deploiement) : c'est de la
+# documentation, elle n'a rien a faire sur le serveur.
+[ -d "${SOURCE}/docs" ] && rsync -a "${SOURCE}/docs/" "${DEPOT}/docs/" 2>/dev/null
+ok "docs : $(ls -1 "${DEPOT}/docs"/* 2>/dev/null | wc -l) documents"
 
 if [ -d "${SOURCE}/.github/workflows" ]; then
   rsync -a --delete "${SOURCE}/.github/workflows/" "${DEPOT}/.github/workflows/"
