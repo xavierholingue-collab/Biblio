@@ -76,9 +76,8 @@
   <h1>Biblio — revue de sécurité</h1>
   <p class="chapeau">
     Revue du code et de la configuration, à la recherche de ce qui pourrait
-    être exploité. Douze défauts trouvés, douze traités : sept corrigés
-    directement, cinq après arbitrage. Deux attendent encore d'être passés
-    sur le serveur.
+    être exploité. Douze défauts trouvés, douze traités et vérifiés en place
+    le jour même : sept corrigés directement, cinq après arbitrage.
   </p>
   <p class="daté">16 août 2026 — revue au commit <code>74f0902</code>,
      corrections closes le jour même</p>
@@ -153,9 +152,9 @@
   <tr><td>Un lot d'écriture sans borne immobilisait le pool</td>
       <td><span class="g bas">Faible</span></td><td><span class="g ok">Corrigé</span></td></tr>
   <tr><td><strong>L'API tourne sous le compte root</strong></td>
-      <td><span class="g haut">Élevé</span></td><td><span class="g ok">Traité</span> — à passer sur le serveur</td></tr>
+      <td><span class="g haut">Élevé</span></td><td><span class="g ok">Corrigé</span></td></tr>
   <tr><td><strong>Aucune sauvegarde hors de la machine</strong></td>
-      <td><span class="g haut">Élevé</span></td><td><span class="g ok">Traité</span> — à passer sur le serveur</td></tr>
+      <td><span class="g haut">Élevé</span></td><td><span class="g ok">Corrigé</span></td></tr>
   <tr><td><strong>Détournement de consigne du modèle par le catalogue partagé</strong></td>
       <td><span class="g haut">Élevé*</span></td><td><span class="g ok">Corrigé</span></td></tr>
   <tr><td>Actions GitHub épinglées sur une étiquette, pas une empreinte</td>
@@ -378,6 +377,11 @@
 <div class="fiche corrige">
   <h3>Ce qui a été décidé, le 16 août au soir</h3>
   <table style="margin:10px 0 0">
+    <tr><td colspan="2" style="padding-bottom:14px"><strong>Passé en place le 16/08 au soir.</strong>
+        L'API tourne sous <code>biblio-api</code> et <code>biblio-recette-api</code>
+        — identité confirmée par <code>ps</code>, pas lue dans la configuration.
+        La sauvegarde quotidienne tourne, et la tâche du poste a été éprouvée
+        en exécution non interactive.</td></tr>
     <tr><td style="width:26%"><strong>4.1 — root</strong></td>
         <td><code>vps-sortir-de-root.sh</code> : compte système sans interpréteur,
             fichier d'extension systemd qui survit aux réinstallations, retour
