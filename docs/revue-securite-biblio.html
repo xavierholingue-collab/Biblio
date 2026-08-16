@@ -87,10 +87,10 @@
   <ol>
     <li><a href="#methode">Comment cette revue a été faite, et ce qu'elle ne couvre pas</a></li>
     <li><a href="#synthese">Synthèse</a></li>
-    <li><a href="#corriges">Les sept défauts corrigés</a></li>
+    <li><a href="#corriges">Les sept corrigés sans arbitrage</a></li>
     <li><a href="#ouverts">Les cinq qui demandaient un arbitrage</a></li>
     <li><a href="#sain">Ce qui a été éprouvé et qui tient</a></li>
-    <li><a href="#avant-invite">Avant d'inviter quelqu'un</a></li>
+    <li><a href="#avant-invite">Où en est-on, et ce qui reste</a></li>
   </ol>
 </nav>
 
@@ -103,7 +103,9 @@
   configuration Caddy et systemd, de la chaîne de livraison. Chaque hypothèse
   de faille a été <strong>éprouvée sur un banc d'essai</strong> — un vrai
   PostgreSQL, deux locataires, la vraie API lancée en HTTP — plutôt que
-  déduite par la lecture. Aucune requête n'a été envoyée à votre serveur.
+  déduite par la lecture. Aucune requête n'a été envoyée à votre serveur
+  <em>pendant la revue</em> ; les corrections, elles, y ont été appliquées
+  ensuite, recette d'abord.
 </p>
 <p>
   Les corrections apportées sont couvertes par <strong>34 nouvelles
@@ -168,7 +170,7 @@
 </p>
 
 <!-- ==================================================================== -->
-<h2 id="corriges">3. Les sept défauts corrigés</h2>
+<h2 id="corriges">3. Les sept corrigés sans arbitrage</h2>
 
 <div class="fiche corrige">
   <div class="entete"><h3>3.1 — Écrire chez vous depuis un sous-domaine voisin</h3>
@@ -426,17 +428,30 @@
       <code>y-factor.fr</code>. Ce n'est pas une faille en soi ; c'est le
       multiplicateur de toutes les autres.
     </dd>
-    <dt>La correction proposée</dt>
+    <dt>Ce qui a été fait</dt>
     <dd>
-      Un compte dédié sans interpréteur de commandes, propriétaire du seul
-      dossier de l'API. La difficulté n'est pas technique, elle est
-      opérationnelle : il faut changer le propriétaire des fichiers, et une
-      erreur laisse le service à l'arrêt. À faire avec les deux mains sur le
-      clavier, pas au détour d'une livraison.
-      <pre><code>useradd --system --no-create-home --shell /usr/sbin/nologin biblio-api
-chown -R biblio-api: /opt/biblio-api
-chown root:biblio-api /etc/biblio/env &amp;&amp; chmod 640 /etc/biblio/env
-# puis dans l'unité : User=biblio-api</code></pre>
+      Deux comptes système sans interpréteur — <code>biblio-api</code> et
+      <code>biblio-recette-api</code> — propriétaires du seul dossier de
+      l'API. Le fichier de secrets leur est <em>lisible</em> et non
+      modifiable : un code compromis ne réécrit pas ses propres secrets.
+      <br><br>
+      Le réglage vit dans un <strong>fichier d'extension systemd</strong>, et
+      c'est le point qui a demandé le plus de réflexion : l'installeur
+      réécrit l'unité à chaque exécution, avec <code>User=root</code> dedans.
+      Modifier l'unité aurait vu le changement effacé sans un mot à la
+      prochaine installation. Une extension survit.
+      <br><br>
+      Passé en recette d'abord, puis en production, avec retour arrière
+      automatique si le service ne répond plus.
+    </dd>
+    <dt>Ce qui a été mesuré, et non supposé</dt>
+    <dd>
+      Le script ne se contente pas de lire la configuration : il demande à
+      <code>ps</code> sous quelle identité tourne réellement le processus.
+      <pre><code>identite reelle du processus 1235562 : biblio-recette-api
+identite reelle du processus 1235926 : biblio-api</code></pre>
+      Une configuration peut dire une chose et le système en faire une
+      autre — c'est la leçon que la semaine a répétée assez souvent.
     </dd>
   </dl>
 </div>
@@ -458,12 +473,49 @@ chown root:biblio-api /etc/biblio/env &amp;&amp; chmod 640 /etc/biblio/env
       reste rien. C'est le seul point de ce document dont la défaillance est
       <strong>irréversible</strong>.
     </dd>
-    <dt>La correction proposée</dt>
+    <dt>Ce qui a été fait</dt>
     <dd>
-      Une tâche quotidienne, un chiffrement au repos, un envoi vers un stockage
-      objet chez un autre fournisseur, une rétention de trente jours — et surtout
-      <strong>une restauration éprouvée</strong>. Une sauvegarde qu'on n'a jamais
-      restaurée n'est pas une sauvegarde, c'est une intention.
+      Un cliché quotidien à 3h30, conservé quatorze jours sur le serveur, et
+      rapatrié sur le poste par une tâche planifiée qui prend
+      <strong>tout ce qui lui manque</strong> — pas seulement le dernier.
+      C'est cette dernière propriété qui rend l'option tenable : un poste
+      éteint trois jours rattrape ses trois jours au réveil.
+      <br><br>
+      La clé SSH du poste est <strong>distincte de celle de déploiement</strong>,
+      et ne connaît que deux commandes : <code>lister</code> et
+      <code>lire &lt;nom&gt;</code>. Ni terminal, ni tunnel, ni possibilité de
+      déclencher un dump. Le raisonnement : celui qui détient la clé de
+      déploiement peut déjà tout lire — il lui suffit de déployer du code qui
+      lit la base. L'inverse serait faux, d'où deux clés aux pouvoirs disjoints.
+    </dd>
+    <dt>Ce qui est vérifié à chaque étape</dt>
+    <dd>
+      Un fichier gzip valide et non vide ne prouve rien : un dump interrompu
+      en est un aussi. On compare donc le nombre de possessions écrites à
+      celui de la base, <em>et</em> on exige la marque de fin de
+      <code>pg_dump</code>. Ce second contrôle est né d'un jeu d'essai que
+      j'avais mal construit : il a révélé qu'une coupure survenue
+      <em>après</em> la section des possessions — au milieu des résumés, qui
+      se paient au modèle — passait pour complète.
+      <br><br>
+      Côté poste, chaque transfert est relu par <code>gzip -t</code> avant de
+      recevoir son nom définitif, et le compte doit tomber juste : rapatriées
+      + déjà présentes + échecs doit égaler ce que le serveur a annoncé. Cette
+      dernière ligne est venue après coup, quand une boucle amputée a rendu un
+      compte rendu parfaitement rassurant en ayant laissé un fichier derrière.
+    </dd>
+    <dt>Ce que cela ne protège pas</dt>
+    <dd>
+      Les clichés partent <strong>en clair</strong> vers OneDrive : qui accède
+      au poste lit la bibliothèque entière. Et une absence de plus de quatorze
+      jours laisse un trou définitif. C'est le prix de l'option retenue — une
+      copie chez soi plutôt que chez un tiers.
+      <br><br>
+      Enfin, <strong>aucune restauration complète n'a encore été éprouvée</strong>.
+      Les contrôles portent sur l'intégrité du fichier, pas sur le fait qu'il
+      remonte une base utilisable. Une sauvegarde jamais restaurée reste une
+      intention ; la marche à suivre est dans le document d'architecture, et
+      l'essai devrait se faire sur la recette.
     </dd>
   </dl>
 </div>
@@ -492,23 +544,48 @@ chown root:biblio-api /etc/biblio/env &amp;&amp; chmod 640 /etc/biblio/env
       L'assainissement de la <em>réponse</em> (défaut 3.4) empêche le retour
       d'exécuter quoi que ce soit chez vous. Il n'empêche pas la <em>sortie</em>.
     </dd>
-    <dt>Les deux façons de fermer, et leur prix</dt>
+    <dt>Ce qui a été fait : séparer les deux capacités</dt>
     <dd>
-      <strong>Séparer les deux capacités.</strong> Ne jamais donner au modèle, dans
-      le même appel, vos données privées <em>et</em> un accès au web. Concrètement :
-      un premier appel sans outil choisit dans votre bibliothèque, un second avec
-      recherche web propose des lectures extérieures à partir des seuls thèmes.
-      C'est la seule barrière structurelle — un modèle ne peut pas divulguer ce
-      qu'il n'a pas. <em>Prix : deux appels au lieu d'un, donc deux fois le quota
-      sur cette route.</em>
+      La recommandation se fait désormais en <strong>deux appels</strong>.
       <br><br>
-      <strong>Ou renoncer aux suggestions extérieures</strong> quand la
-      bibliothèque contient des ouvrages privés. Gratuit, et cela retire une
-      fonction que vous utilisez.
+      Le <strong>premier voit tout et n'a aucun outil</strong> : il choisit
+      dans votre bibliothèque. Un modèle sans outil ne peut divulguer que dans
+      sa réponse, laquelle vous revient à vous seul et est assainie.
       <br><br>
-      Aucune consigne de prudence ajoutée au texte ne remplace ces deux options :
-      une instruction qui demande au modèle d'ignorer les instructions reste une
-      instruction.
+      Le <strong>second a la recherche web et ne reçoit rien de privé</strong> :
+      votre intention — que vous avez écrite vous-même — et les noms des rayons,
+      tirés d'une liste fixée dans le code. Il propose des lectures extérieures
+      sans savoir ce que vous possédez.
+      <br><br>
+      Aucune consigne de prudence n'aurait remplacé cette séparation : une
+      instruction qui demande au modèle d'ignorer les instructions reste une
+      instruction, et c'est au modèle de trancher entre les deux.
+    </dd>
+    <dt>Le détail qu'il aurait été tentant de négliger</dt>
+    <dd>
+      La « lacune » produite par le premier appel — ce qui manque à votre
+      bibliothèque — serait <em>exactement</em> ce dont le second a besoin. Elle
+      ne lui est pas transmise : elle a été rédigée <strong>après</strong>
+      lecture de vos données, donc par un modèle qui aurait pu être détourné.
+      La passer rouvrirait le canal avec l'air d'être prudent.
+      <br><br>
+      Conséquence assumée : les suggestions ignorent ce que vous possédez et
+      peuvent proposer un livre de vos étagères. On les compare à votre
+      bibliothèque <em>après</em> coup, localement, sans rien envoyer.
+    </dd>
+    <dt>Ce que le contrôle vérifie, et pourquoi ce n'est pas la réponse</dt>
+    <dd>
+      Il inspecte <strong>ce que chaque appel a reçu</strong>, pas seulement ce
+      qui en revient — et en particulier que le premier ne porte
+      <em>aucun outil</em>. Sans cela, rendre la recherche web au premier appel
+      n'aurait fait tomber aucune vérification : la barrière aurait pu
+      disparaître en silence, « pour améliorer la qualité ».
+    </dd>
+    <dt>Le prix</dt>
+    <dd>
+      Deux appels au lieu d'un sur cette route, donc deux unités de quota.
+      Sans effet pour vous — votre plafond est à 100 000 — mais à retenir au
+      moment de fixer celui d'un invité, dont le défaut est de dix par mois.
     </dd>
   </dl>
 </div>
@@ -530,10 +607,18 @@ chown root:biblio-api /etc/biblio/env &amp;&amp; chmod 640 /etc/biblio/env
       ce sont des actions publiées par GitHub — mais il n'est pas nul, et il ne
       coûte rien à supprimer.
     </dd>
-    <dt>La correction proposée</dt>
+    <dt>Ce qui a été fait</dt>
     <dd>
-      Épingler sur l'empreinte du commit
-      (<code>actions/checkout@8f4b7f8...</code>). La clé SSH, elle, est déjà
+      Les quatre actions sont épinglées sur l'empreinte de leur commit, avec le
+      numéro de version en commentaire — une empreinte seule ne se lit pas.
+      <br><br>
+      Les empreintes sont <strong>lues chez GitHub</strong> par
+      <code>git ls-remote</code>, jamais recopiées de mémoire : une empreinte
+      inventée arrête la chaîne au mieux, la fait pointer ailleurs au pire. Le
+      script <code>epingler-actions.sh</code> est rejouable, ce qui permet de
+      suivre les correctifs de sécurité des actions elles-mêmes.
+      <br><br>
+      La clé SSH, elle, est déjà
       contrainte : elle ne peut lancer qu'une seule commande, sans terminal ni
       redirection de port. C'est ce qui limite déjà beaucoup les dégâts.
     </dd>
@@ -556,9 +641,22 @@ chown root:biblio-api /etc/biblio/env &amp;&amp; chmod 640 /etc/biblio/env
       VPS, et l'ennui ne s'arrête pas à Biblio : le serveur héberge deux autres
       sites derrière le même Caddy.
     </dd>
-    <dt>La correction proposée</dt>
+    <dt>Ce qui a été fait</dt>
     <dd>
-      Le plus efficace n'est pas une limitation mais une <strong>séparation</strong> :
+      Soixante requêtes par minute et par adresse sur les deux routes ouvertes
+      coûteuses. Un visiteur en fait trois ou quatre en ouvrant la page ; une
+      boucle, non. Les personnes connectées ne sont pas limitées : elles sont
+      identifiées, bornées par leur quota sur ce qui se paie, et c'est leur
+      propre bibliothèque qu'elles ralentiraient.
+      <br><br>
+      Le limiteur applique la même discipline que celui des tentatives de
+      connexion — balayage et plafond dur — car une table qui grossit sans fin
+      protège d'un abus en en créant un autre.
+    </dd>
+    <dt>Ce qui reste mieux, et qu'on n'a pas fait</dt>
+    <dd>
+      Le plus efficace ne serait pas une limitation mais une
+      <strong>séparation</strong> :
       la page publique n'a pas besoin des résumés entiers pour dessiner sa
       mosaïque. Une route allégée réglerait le sujet et rendrait la page plus
       rapide. À défaut, Caddy sait limiter le débit par adresse.
@@ -625,23 +723,45 @@ chown root:biblio-api /etc/biblio/env &amp;&amp; chmod 640 /etc/biblio/env
 </div>
 
 <!-- ==================================================================== -->
-<h2 id="avant-invite">6. Avant d'inviter quelqu'un</h2>
-<p class="sous">L'ordre dans lequel je traiterais ce document.</p>
+<h2 id="avant-invite">6. Où en est-on, et ce qui reste</h2>
+<p class="sous">Ce qui a été fait le 16 août, et ce qui reste.</p>
 
-<table>
-  <tr><th>#</th><th>Quoi</th><th>Pourquoi maintenant</th></tr>
-  <tr><td>1</td><td><strong>Sauvegarde quotidienne hors machine, et restauration éprouvée</strong></td>
-      <td>Seul point irréversible. Ne dépend d'aucune décision de conception.</td></tr>
-  <tr><td>2</td><td><strong>Sortir l'API de root</strong></td>
-      <td>Multiplicateur de tout le reste. Une demi-heure, à faire posément.</td></tr>
-  <tr><td>3</td><td><strong>Trancher sur la recommandation</strong> (4.3)</td>
-      <td>Doit être fait <em>avant</em> le premier invité, pas après : c'est
-          l'arrivée d'un second locataire qui ouvre le chemin.</td></tr>
-  <tr><td>4</td><td><strong>Brancher le lien magique</strong></td>
-      <td>Sans lui, il n'y a de toute façon pas d'invitation possible.</td></tr>
-  <tr><td>5</td><td>Épingler les actions, alléger la route publique</td>
-      <td>Confort et hygiène. Peut attendre.</td></tr>
-</table>
+<div class="fiche corrige">
+  <h3>Fait, et vérifié en place</h3>
+  <table style="margin:10px 0 0">
+    <tr><td style="width:52%">Sauvegarde quotidienne, rapatriée sur le poste</td>
+        <td>Éprouvée jusqu'à l'exécution non interactive de la tâche planifiée</td></tr>
+    <tr><td>L'API hors du compte root, en recette et en production</td>
+        <td>Identité confirmée par <code>ps</code></td></tr>
+    <tr><td>La recommandation coupée en deux appels</td>
+        <td>Le contrôle inspecte ce que chaque appel reçoit</td></tr>
+    <tr><td>Actions GitHub épinglées, lectures publiques bornées</td>
+        <td>Empreintes lues chez GitHub, 60 requêtes/minute/adresse</td></tr>
+  </table>
+</div>
+
+<div class="fiche moyen">
+  <h3>Ce qui reste, et ce que ça bloque</h3>
+  <table style="margin:10px 0 0">
+    <tr><td style="width:30%"><strong>Brancher le lien magique</strong></td>
+        <td><span class="g moyen">Bloquant</span> Le module existe et est éprouvé
+            par 26 vérifications, mais <code>server.js</code> ne l'importe pas.
+            On entre encore par un mot de passe unique partagé, et rien n'envoie
+            de courriel. <strong>Une deuxième personne n'a aujourd'hui aucun
+            moyen d'accéder à sa propre bibliothèque.</strong></td></tr>
+    <tr><td><strong>Éprouver une restauration</strong></td>
+        <td>Les sauvegardes sont vérifiées intègres, jamais remontées. À faire
+            sur la recette, une fois, pour de bon.</td></tr>
+    <tr><td><strong>Fixer le quota d'un invité</strong></td>
+        <td>Dix appels par mois par défaut, et une recommandation en coûte deux
+            désormais. Le journal des appels dira ce qu'un usage réel consomme.</td></tr>
+    <tr><td>Pages publiques <code>/u/xavier</code>, pages légales</td>
+        <td>Nécessaires pour accueillir quelqu'un, pas pour le protéger.</td></tr>
+    <tr><td>Surveillance externe</td>
+        <td>Si le service tombe, personne n'est prévenu. On l'apprend en ouvrant
+            la page.</td></tr>
+  </table>
+</div>
 
 <footer>
   <p>
@@ -651,8 +771,14 @@ chown root:biblio-api /etc/biblio/env &amp;&amp; chmod 640 /etc/biblio/env
   </p>
   <p>
     Une revue est une photographie. Celle-ci vaut pour le commit
-    <code>74f0902</code> et pour ce que les scripts installent — pas pour l'état
-    réel du serveur, que je n'ai pas pu observer.
+    <code>74f0902</code> et pour ce que les scripts installent.
+  </p>
+  <p>
+    L'état du serveur, lui, n'a été observé que par ce que les scripts de
+    correction en ont rapporté — identité des processus, comptes créés,
+    sauvegardes produites. Tout le reste — noyau, correctifs, pare-feu,
+    <code>fail2ban</code>, ports réellement à l'écoute — n'a pas été regardé,
+    et c'est la première chose à examiner lors d'une prochaine revue.
   </p>
 </footer>
 </div>
