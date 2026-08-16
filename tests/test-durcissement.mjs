@@ -75,23 +75,38 @@ await semer({ tenant: xavier.id, id: "d-prive", isbn: "9780000000302",
 
 /* ------------------------------------------------- Un modèle qui répond
 
-   Il rend une recommandation dont l'ANNÉE est du HTML. C'est exactement ce
-   qu'un titre malveillant du catalogue partagé chercherait à obtenir. */
-const faussaire = createServer((req, rep) => {
+   Il joue les DEUX appels de la recommandation, et on garde ce qu'il a reçu :
+   c'est le seul moyen de vérifier que le second n'a pas vu la bibliothèque.
+
+   Sa suggestion porte une ANNÉE en HTML — exactement ce qu'un titre
+   malveillant du catalogue partagé chercherait à obtenir. */
+const consignesRecues = [];
+const faussaire = createServer(async (req, rep) => {
+  let corps = "";
+  for await (const m of req) corps += m;
+  let recu = { texte: "", outils: [] };
+  try {
+    const j = JSON.parse(corps);
+    recu = { texte: j.messages[0].content,
+             outils: (j.tools ?? []).map(t => t.name ?? t.type) };
+  } catch { /* corps illisible : on garde la trace vide */ }
+  const texte = recu.texte;
+  consignesRecues.push(recu);
+
+  // Le second appel est celui qui demande des ouvrages extérieurs.
+  const externe = texte.includes("Propose 2 à 3 ouvrages");
+  const charge = externe
+    ? { suggestions: [{
+        titre: "Ouvrage suggéré", auteur: "Auteur Suggéré", editeur: "Éditeur",
+        annee: "<img src=x onerror=alert(1)>", isbn: "978-2-07-031901-5",
+        pourquoi: "un motif" }] }
+    : { lecture_de_la_demande: "Une demande de contrôle.",
+        parcours: [{ id: "d-public", ordre: 1, pourquoi: "parce que",
+                     a_chercher: "le chapitre 3" }],
+        lacune: "il manque un ouvrage sur ce point précis" };
+
   rep.writeHead(200, { "content-type": "application/json" });
-  rep.end(JSON.stringify({ content: [{ type: "text", text: JSON.stringify({
-    lecture_de_la_demande: "Une demande de contrôle.",
-    parcours: [{ id: "d-public", ordre: 1, pourquoi: "parce que", a_chercher: "le chapitre 3" }],
-    lacune: "",
-    suggestions_externes: [{
-      titre: "Ouvrage suggéré",
-      auteur: "Auteur Suggéré",
-      editeur: "Éditeur",
-      annee: "<img src=x onerror=alert(1)>",
-      isbn: "978-2-07-031901-5",
-      pourquoi: "un motif",
-    }],
-  }) }] }));
+  rep.end(JSON.stringify({ content: [{ type: "text", text: JSON.stringify(charge) }] }));
 });
 await new Promise(r => faussaire.listen(MODELE_PORT, "127.0.0.1", r));
 
@@ -266,6 +281,52 @@ const reco = await appel("/api/recommandation", {
 });
 const suggestion = reco.corps?.suggestions_externes?.[0];
 verifier("la recommandation aboutit", reco.statut === 200, "statut " + reco.statut);
+
+/* =====================================================================
+   LA SÉPARATION DES DEUX APPELS
+
+   C'est la seule barrière contre l'exfiltration par détournement de
+   consigne : le modèle qui VOIT la bibliothèque n'a aucun outil, celui qui
+   a la recherche web ne voit pas la bibliothèque.
+
+   On ne se contente donc pas de vérifier la réponse : on inspecte ce que
+   chaque appel a REÇU. Une régression future — remettre les deux dans le
+   même appel « pour la qualité » — ne se verrait dans aucune sortie.
+   ===================================================================== */
+const [premier, second] = consignesRecues.slice(-2);
+
+/* LE CONTRÔLE QUI COMPTE LE PLUS, et qui manquait à la première version de
+   ce fichier : on vérifiait ce que le second appel RECEVAIT, jamais que le
+   premier était DÉSARMÉ. Rendre la recherche web au premier appel n'aurait
+   fait tomber aucune vérification — c'est-à-dire que la barrière aurait pu
+   disparaître en silence. */
+verifier("le premier appel n'a AUCUN outil : rien ne peut sortir",
+  premier !== undefined && premier.outils.length === 0,
+  JSON.stringify(premier?.outils));
+
+verifier("le second appel a bien la recherche web",
+  second?.outils.includes("web_search"), JSON.stringify(second?.outils));
+
+verifier("la recommandation fait bien DEUX appels distincts",
+  consignesRecues.length >= 2, `${consignesRecues.length} appel(s)`);
+
+verifier("le premier appel voit la bibliothèque",
+  premier?.texte.includes("SA BIBLIOTHÈQUE") && premier?.texte.includes("d-prive"),
+  (premier?.texte ?? "").slice(0, 120));
+
+verifier("le second appel ne voit AUCUN titre de la bibliothèque",
+  second !== undefined && !second.texte.includes("d-prive") && !second.texte.includes("d-public")
+    && !second.texte.includes("SA BIBLIOTHÈQUE"),
+  (second?.texte ?? "").slice(0, 200));
+
+/* La lacune est produite APRÈS lecture des données privées : la transmettre
+   au modèle qui a le web rouvrirait le canal avec l'air d'être prudent. */
+verifier("… ni la « lacune » écrite par le premier",
+  second !== undefined && !second.texte.includes("il manque un ouvrage sur ce point"),
+  (second?.texte ?? "").slice(0, 200));
+
+verifier("… mais il reçoit bien l'intention, écrite par l'utilisateur",
+  second?.texte.includes("quelque chose à comprendre"), (second?.texte ?? "").slice(0, 120));
 verifier("une année qui n'est pas un nombre est écartée",
   suggestion && suggestion.annee === null, JSON.stringify(suggestion?.annee));
 verifier("aucun champ de la suggestion ne contient de balise",
@@ -275,7 +336,33 @@ verifier("l'ISBN de la suggestion est normalisé",
   suggestion?.isbn === "9782070319015", suggestion?.isbn);
 
 /* =====================================================================
-   7. LE LIMITEUR DE TENTATIVES TIENT TOUJOURS
+   7. LES LECTURES PUBLIQUES SONT BORNÉES
+
+   Le contrôle vient AVANT celui du limiteur de connexion : celui-ci bloque
+   l'adresse pour un quart d'heure, et tout ce qui suivrait mesurerait ce
+   blocage plutôt que la limitation des lectures.
+   ===================================================================== */
+
+let statutLecture = 200, faites = 0;
+while (statutLecture === 200 && faites < 200) {
+  statutLecture = (await appel("/api/livres")).statut;
+  faites += 1;
+}
+verifier("une boucle de lecture publique finit par être refusée",
+  statutLecture === 429, `statut ${statutLecture} après ${faites} requêtes`);
+verifier("… et elle passe largement le nombre qu'un visiteur ferait",
+  faites > 30, `bloqué dès la ${faites}e requête`);
+
+/* CE QUI DOIT CONTINUER DE PASSER. Un limiteur qui bloque aussi les
+   personnes connectées ferait de la protection un incident. */
+const connecte = await appel("/api/livres", {
+  entetes: { cookie: `__Host-session=${jetonValide}` } });
+verifier("une personne connectée n'est pas limitée",
+  connecte.statut === 200 && Array.isArray(connecte.corps),
+  "statut " + connecte.statut);
+
+/* =====================================================================
+   8. LE LIMITEUR DE TENTATIVES TIENT TOUJOURS
    ===================================================================== */
 
 let dernier = 0;

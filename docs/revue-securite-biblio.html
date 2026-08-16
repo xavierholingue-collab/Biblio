@@ -76,10 +76,12 @@
   <h1>Biblio — revue de sécurité</h1>
   <p class="chapeau">
     Revue du code et de la configuration, à la recherche de ce qui pourrait
-    être exploité. Sept défauts corrigés dans la foulée, cinq laissés ouverts
-    parce qu'ils demandent une décision.
+    être exploité. Douze défauts trouvés, douze traités : sept corrigés
+    directement, cinq après arbitrage. Deux attendent encore d'être passés
+    sur le serveur.
   </p>
-  <p class="daté">16 août 2026 — code au commit <code>74f0902</code></p>
+  <p class="daté">16 août 2026 — revue au commit <code>74f0902</code>,
+     corrections closes le jour même</p>
 </header>
 
 <nav class="sommaire">
@@ -87,7 +89,7 @@
     <li><a href="#methode">Comment cette revue a été faite, et ce qu'elle ne couvre pas</a></li>
     <li><a href="#synthese">Synthèse</a></li>
     <li><a href="#corriges">Les sept défauts corrigés</a></li>
-    <li><a href="#ouverts">Ce qui reste ouvert, et la décision à prendre</a></li>
+    <li><a href="#ouverts">Les cinq qui demandaient un arbitrage</a></li>
     <li><a href="#sain">Ce qui a été éprouvé et qui tient</a></li>
     <li><a href="#avant-invite">Avant d'inviter quelqu'un</a></li>
   </ol>
@@ -105,9 +107,11 @@
   déduite par la lecture. Aucune requête n'a été envoyée à votre serveur.
 </p>
 <p>
-  Les corrections apportées sont couvertes par <strong>24 nouvelles
+  Les corrections apportées sont couvertes par <strong>34 nouvelles
   vérifications</strong>, et chacune a été <strong>cassée volontairement</strong>
-  pour confirmer qu'un contrôle tombe. Sept mutations, sept détections.
+  pour confirmer qu'un contrôle tombe. Douze mutations, douze détections.
+  Une avait failli m'échapper : le contrôle du cookie abîmé <em>plantait</em>
+  au lieu d'échouer, ce qui le faisait passer pour non couvert.
 </p>
 
 <div class="fiche bas">
@@ -149,15 +153,15 @@
   <tr><td>Un lot d'écriture sans borne immobilisait le pool</td>
       <td><span class="g bas">Faible</span></td><td><span class="g ok">Corrigé</span></td></tr>
   <tr><td><strong>L'API tourne sous le compte root</strong></td>
-      <td><span class="g haut">Élevé</span></td><td>Ouvert — décision</td></tr>
+      <td><span class="g haut">Élevé</span></td><td><span class="g ok">Traité</span> — à passer sur le serveur</td></tr>
   <tr><td><strong>Aucune sauvegarde hors de la machine</strong></td>
-      <td><span class="g haut">Élevé</span></td><td>Ouvert — décision</td></tr>
+      <td><span class="g haut">Élevé</span></td><td><span class="g ok">Traité</span> — à passer sur le serveur</td></tr>
   <tr><td><strong>Détournement de consigne du modèle par le catalogue partagé</strong></td>
-      <td><span class="g haut">Élevé*</span></td><td>Ouvert — décision</td></tr>
+      <td><span class="g haut">Élevé*</span></td><td><span class="g ok">Corrigé</span></td></tr>
   <tr><td>Actions GitHub épinglées sur une étiquette, pas une empreinte</td>
-      <td><span class="g moyen">Moyen</span></td><td>Ouvert — décision</td></tr>
+      <td><span class="g moyen">Moyen</span></td><td><span class="g ok">Corrigé</span></td></tr>
   <tr><td>Aucune limitation de débit sur les lectures publiques</td>
-      <td><span class="g bas">Faible</span></td><td>Ouvert — décision</td></tr>
+      <td><span class="g bas">Faible</span></td><td><span class="g ok">Corrigé</span></td></tr>
 </table>
 <p class="sous">
   * Élevé <em>le jour où une deuxième personne utilise le service</em>. Aujourd'hui,
@@ -368,8 +372,35 @@
 </div>
 
 <!-- ==================================================================== -->
-<h2 id="ouverts">4. Ce qui reste ouvert</h2>
-<p class="sous">Chacun demande un arbitrage, un accès au serveur, ou les deux.</p>
+<h2 id="ouverts">4. Les cinq qui demandaient un arbitrage</h2>
+<p class="sous">Rendu, et ce qui a été décidé. Les fiches d'origine sont conservées telles quelles.</p>
+
+<div class="fiche corrige">
+  <h3>Ce qui a été décidé, le 16 août au soir</h3>
+  <table style="margin:10px 0 0">
+    <tr><td style="width:26%"><strong>4.1 — root</strong></td>
+        <td><code>vps-sortir-de-root.sh</code> : compte système sans interpréteur,
+            fichier d'extension systemd qui survit aux réinstallations, retour
+            arrière automatique si le service ne répond plus.
+            <strong>Recette d'abord, production ensuite.</strong></td></tr>
+    <tr><td><strong>4.2 — sauvegardes</strong></td>
+        <td>Cliché quotidien sur le serveur, vérifié complet, conservé quatorze
+            jours ; le poste rapatrie <em>tout ce qui lui manque</em> quand il est
+            allumé. Une clé SSH dédiée qui ne sait que lire les sauvegardes —
+            ni déployer, ni ouvrir un terminal.</td></tr>
+    <tr><td><strong>4.3 — le modèle</strong></td>
+        <td>Deux appels séparés. Celui qui voit la bibliothèque n'a
+            <strong>aucun outil</strong> ; celui qui a la recherche web ne reçoit
+            que votre intention et des noms de rayons. Prix : deux appels au
+            lieu d'un sur cette route.</td></tr>
+    <tr><td><strong>4.4 — actions</strong></td>
+        <td>Épinglées sur l'empreinte de leur commit, résolues chez GitHub par
+            <code>epingler-actions.sh</code>, rejouable pour suivre les correctifs.</td></tr>
+    <tr><td><strong>4.5 — lectures</strong></td>
+        <td>Soixante requêtes par minute et par adresse sur les deux routes
+            publiques coûteuses. Les personnes connectées ne sont pas limitées.</td></tr>
+  </table>
+</div>
 
 <div class="fiche haut">
   <div class="entete"><h3>4.1 — L'API tourne sous le compte root</h3>

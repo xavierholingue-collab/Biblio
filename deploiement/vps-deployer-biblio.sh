@@ -502,6 +502,23 @@ npm install --omit=dev --no-audit --no-fund --silent >/tmp/npm-${BASE}.log 2>&1 
   || { echo "  ECHEC dependances"; tail -5 /tmp/npm-${BASE}.log; exit 1; }
 echo "  dependances installees"
 
+# --- LES FICHIERS REVIENNENT AU COMPTE DE SERVICE ----------------------------
+#
+# rsync et npm ont travaille en root : tout ce qui vient d'etre pose lui
+# appartient. Tant que le service tournait en root, cela n'avait aucune
+# importance. Depuis qu'il en est sorti, un dossier appartenant a root ne
+# serait plus modifiable par lui — et surtout, on veut que le service ne
+# puisse pas reecrire son propre code.
+#
+# On ne fait rien si le compte n'existe pas : cet environnement tourne
+# encore en root, et c'est un etat valide tant que vps-sortir-de-root.sh
+# n'y est pas passe.
+COMPTE_SERVICE="${SERVICE}"
+if id -u "${COMPTE_SERVICE}" >/dev/null 2>&1; then
+  chown -R "${COMPTE_SERVICE}:${COMPTE_SERVICE}" "${RACINE_API}" 2>/dev/null \
+    && echo "  fichiers rendus a ${COMPTE_SERVICE}"
+fi
+
 # --- Redemarrage et verification ---------------------------------------------
 systemctl restart "${SERVICE}"
 sleep 5

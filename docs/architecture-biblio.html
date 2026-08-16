@@ -188,6 +188,23 @@
   l'API que par Caddy, jamais directement depuis l'extérieur.
 </p>
 
+<div class="note">
+  <span class="titre">Sous quelle identité tourne l'API</span>
+  <p>
+    Jusqu'au 16/08/2026 : <code>root</code>. Pas une faille en soi, mais le
+    multiplicateur de toutes les autres — une exécution de code arbitraire
+    dans Node devenait root sur une machine qui héberge deux autres sites.
+  </p>
+  <p>
+    Depuis : un compte système sans interpréteur, <code>biblio-api</code>
+    (et <code>biblio-recette-api</code>), propriétaire du seul dossier de
+    l'API. Le fichier de secrets lui est <em>lisible</em> et non modifiable.
+    Le réglage vit dans un fichier d'extension systemd, qui survit à la
+    réécriture de l'unité par l'installeur — sans quoi il serait effacé sans
+    un mot à la prochaine installation.
+  </p>
+</div>
+
 <h3>Les comptes PostgreSQL, et pourquoi il y en a deux</h3>
 <table>
   <tr><td style="width:120px"><code>biblio</code></td>
@@ -755,14 +772,25 @@ sudo -u postgres psql -d biblio_repetition -f verifier-migration.sql</code></pre
 <h2 id="manque">11. Ce qui n'existe pas encore</h2>
 <p class="sous">Un document d'architecture qui ne dit que ce qui marche est un document de vente.</p>
 
-<div class="note alerte">
-  <span class="titre">Aucune sauvegarde périodique</span>
+<div class="note">
+  <span class="titre">Sauvegardes — corrigé le 16/08/2026</span>
   <p>
-    La base n'est sauvegardée <strong>qu'avant chaque migration</strong>, c'est-à-dire
-    à chaque livraison. Entre deux livraisons, rien. Si le VPS disparaissait un
-    jour sans déploiement, tout ce qui a été ajouté depuis la dernière livraison
-    serait perdu — et les sauvegardes elles-mêmes sont sur la <em>même machine</em>.
-    C'est le manque le plus sérieux de cette liste.
+    Il n'y en avait aucune de périodique : la base n'était sauvegardée
+    qu'avant chaque migration, et les archives dormaient sur la machine
+    qu'elles protègent. C'était le seul manque dont la défaillance était
+    <em>irréversible</em>.
+  </p>
+  <p>
+    Désormais : un cliché quotidien à 3h30, vérifié complet — le nombre de
+    possessions <em>et</em> la marque de fin de <code>pg_dump</code> —
+    conservé quatorze jours. Le poste rapatrie <strong>tout ce qui lui
+    manque</strong> quand il est allumé, par une clé SSH qui ne sait que
+    lire les sauvegardes.
+  </p>
+  <p>
+    Ce que cela ne protège pas, et qu'il faut savoir : les clichés partent
+    en clair vers OneDrive. Qui accède au poste lit la bibliothèque. Et une
+    absence de plus de quatorze jours laisse un trou définitif.
   </p>
 </div>
 

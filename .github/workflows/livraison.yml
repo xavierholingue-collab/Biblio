@@ -53,9 +53,9 @@ jobs:
         ports: ['5432:5432']
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
         with: { node-version: '22' }
 
       - name: Vérifier la syntaxe
@@ -225,7 +225,7 @@ jobs:
           tar czf paquet.tar.gz --exclude=node_modules api web db deploiement
           echo "poids : $(du -h paquet.tar.gz | cut -f1)"
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with: { name: paquet, path: paquet.tar.gz, retention-days: 7 }
 
   # ==========================================================================
@@ -246,8 +246,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v8
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
         with: { name: paquet }
 
       - name: Préparer l accès SSH
@@ -333,8 +333,8 @@ jobs:
     environment: production
 
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v8
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
         with: { name: paquet }
 
       - name: Préparer l accès SSH
@@ -392,7 +392,7 @@ jobs:
       # Cet étage regarde la page à notre place, dans Chromium, sur écran
       # de bureau et sur mobile.
       # ------------------------------------------------------------------
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
         with: { node-version: '22' }
 
       - name: Installer Playwright
@@ -412,7 +412,7 @@ jobs:
 
       # En cas d'échec, la capture d'écran et la trace disent ce que le
       # navigateur voyait — bien plus utile qu'un message d'assertion.
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         if: failure()
         with:
           name: playwright-preuves

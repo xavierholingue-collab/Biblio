@@ -379,6 +379,46 @@ function noterEchec(ip) {
   tentatives.set(ip, t);
 }
 
+/* ===========================================================================
+   CE QUE COÛTE UNE LECTURE PUBLIQUE
+
+   « GET /api/livres » rend aujourd'hui 246 ouvrages AVEC LEURS RÉSUMÉS
+   ENTIERS — quelques centaines de kilooctets — sans authentification et sans
+   cache. Une boucle sur cette adresse consomme la bande passante et le
+   processeur du serveur, et l'ennui ne s'arrête pas à la bibliothèque : la
+   machine héberge deux autres sites derrière le même Caddy.
+
+   Soixante requêtes par minute et par adresse. Un visiteur ordinaire en fait
+   trois ou quatre en ouvrant la page ; il ne s'en apercevra jamais. Une
+   boucle, si.
+
+   POURQUOI PAS DANS CADDY, qui serait le bon endroit : son module de
+   limitation n'est pas dans la version standard, et reconstruire Caddy pour
+   cela ajouterait une dépendance à maintenir sur un serveur qui sert aussi
+   deux autres sites.
+
+   ET COMME LE LIMITEUR DE CONNEXION, IL NE DOIT PAS DEVENIR L'ATTAQUE :
+   même balayage, même plafond dur. Une table qui grossit sans fin protège
+   d'un abus en en créant un autre.
+   =========================================================================== */
+const LECTURES_PAR_MINUTE = 60;
+const lectures = new Map();
+
+function tropDeLectures(ip) {
+  const maintenant = Date.now();
+  if (lectures.size > 5000) {
+    for (const [cle, v] of lectures) if (maintenant - v.debut > 60_000) lectures.delete(cle);
+    if (lectures.size > 5000 && !lectures.has(ip)) return true;  // fermé, pas ouvert
+  }
+  const t = lectures.get(ip);
+  if (!t || maintenant - t.debut > 60_000) {
+    lectures.set(ip, { debut: maintenant, nombre: 1 });
+    return false;
+  }
+  t.nombre += 1;
+  return t.nombre > LECTURES_PAR_MINUTE;
+}
+
 /* --------------------------------------------------------------- Données */
 
 /* =========================================================================
@@ -1085,24 +1125,41 @@ RÈGLES
 - Explique en une ou deux phrases ce que CE livre précisément apporte à CETTE question.
 - Un livre déjà "Lu" reste recommandable : dis ce qu'une relecture ciblée apporterait.
 - Si sa bibliothèque couvre mal le sujet, dis-le franchement plutôt que de forcer des titres.
-${inclureExternes !== false ? `- Ajoute ensuite 2 à 3 ouvrages ABSENTS de sa bibliothèque qui comblent les lacunes.
-  Vérifie leur existence par recherche web (titre, auteur, éditeur, année exacts).` : "- N'ajoute aucune suggestion extérieure."}
+- N'ajoute aucune suggestion extérieure : ce n'est pas ton rôle ici.
 
 Réponds UNIQUEMENT par un objet JSON, sans texte autour ni balises Markdown :
 {
   "lecture_de_la_demande": "1 à 2 phrases : ce que tu comprends de sa question.",
   "parcours": [ { "id": "x042", "ordre": 1, "pourquoi": "...", "a_chercher": "le chapitre à viser" } ],
-  "lacune": "1 à 2 phrases, ou chaîne vide.",
-  "suggestions_externes": [ { "titre": "", "auteur": "Nom Prénom", "editeur": "", "annee": 2020, "isbn": "", "pourquoi": "" } ]
+  "lacune": "1 à 2 phrases, ou chaîne vide."
 }`;
 
+  /* =======================================================================
+     PREMIER APPEL : IL VOIT TOUT, IL NE PEUT RIEN ENVOYER.
+
+     AUCUN OUTIL. C'est la seule barrière qui tienne contre un détournement
+     de consigne, et il faut dire pourquoi les autres ne tiennent pas.
+
+     Cette consigne contient la bibliothèque entière — titres, auteurs,
+     thèmes, ouvrages personnels compris. Or ces titres viennent du
+     CATALOGUE PARTAGÉ, table qu'un autre locataire peut écrire dès qu'il
+     possède le même ISBN. Il peut donc y déposer un texte rédigé pour
+     s'adresser au modèle plutôt qu'au lecteur.
+
+     Tant que le même appel disposait de la recherche web, ce texte pouvait
+     demander une recherche dont la REQUÊTE contenait vos titres privés. Les
+     données sortaient sans jamais passer par une réponse que vous auriez
+     lue. Aucune consigne de prudence n'y change quoi que ce soit : une
+     instruction qui demande d'ignorer les instructions reste une
+     instruction, et c'est au modèle de trancher entre les deux.
+
+     Un modèle sans outil ne peut divulguer que dans sa réponse — laquelle
+     est assainie plus bas, et vous revient à vous seul.
+     ======================================================================= */
   const d = await appelerAnthropic(dans, "/api/recommandation", {
     model: MODELE,
     max_tokens: 4000,
     messages: [{ role: "user", content: consigne }],
-    ...(inclureExternes !== false
-      ? { tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 4 }] }
-      : {}),
   });
 
   const info = extraireJson((d.content ?? []).filter(b => b.type === "text").map(b => b.text).join("\n"));
@@ -1142,20 +1199,91 @@ Réponds UNIQUEMENT par un objet JSON, sans texte autour ni balises Markdown :
     p.ordre = Number.isFinite(Number(p.ordre)) ? Number(p.ordre) : 99;
   }
 
-  info.suggestions_externes = inclureExternes === false ? []
-    : (Array.isArray(info.suggestions_externes) ? info.suggestions_externes : [])
-        .slice(0, 5)
-        .map(s => ({
-          titre: texteCourt(s.titre, 300),
-          auteur: texteCourt(s.auteur, 200),
-          editeur: texteCourt(s.editeur, 150),
-          // Un nombre, ou rien. Jamais une chaîne venue du modèle.
-          annee: Number.isInteger(Number(s.annee)) && Number(s.annee) > 0
-                 && Number(s.annee) < 2200 ? Number(s.annee) : null,
-          isbn: String(s.isbn ?? "").replace(/[^0-9Xx]/g, "").slice(0, 13),
-          pourquoi: texteCourt(s.pourquoi, 600),
-        }))
-        .filter(s => s.titre);
+  /* =======================================================================
+     SECOND APPEL : IL PEUT ENVOYER, IL N'A RIEN À DIRE.
+
+     Un appel séparé, avec la recherche web, pour les lectures que vous ne
+     possédez pas. Ce qu'il reçoit est ce qui compte :
+
+       — VOTRE INTENTION, que vous avez écrite vous-même. Personne d'autre
+         ne peut la rédiger.
+       — LES NOMS DES RAYONS, tirés d'une liste fixée dans le code.
+
+     Et rien d'autre. Ni titre, ni auteur, ni thème venu de votre
+     bibliothèque.
+
+     CE QU'ON NE LUI PASSE SURTOUT PAS : la « lacune » produite par le
+     premier appel. Elle serait pourtant utile — c'est exactement ce qui
+     manque. Mais elle a été écrite APRÈS avoir lu vos données, donc par un
+     modèle qui aurait pu être détourné. La passer ici rouvrirait le canal
+     par la porte de derrière, avec l'air d'être prudent.
+
+     CE QUE ÇA COÛTE, honnêtement : les suggestions ignorent ce que vous
+     possédez déjà, et peuvent donc proposer un livre de vos étagères. On
+     les compare à votre bibliothèque APRÈS coup, ici, sans rien envoyer.
+     ======================================================================= */
+  info.suggestions_externes = [];
+
+  if (inclureExternes !== false) {
+    const rayons = Object.entries(SOUS_CATEGORIES)
+      .map(([c, l]) => `${c} : ${l.filter(s => s !== "Non classé").join(", ")}`).join("\n");
+
+    const consigneExterne = `Quelqu'un cherche à comprendre ceci :
+"""${intention}"""
+
+Propose 2 à 3 ouvrages qui répondent à cette question. Vérifie leur existence
+par recherche web : titre, auteur, éditeur et année doivent être exacts.
+N'invente rien ; si tu n'es sûr que de deux titres, n'en donne que deux.
+
+Range chacun dans l'un de ces rayons, en reprenant les libellés exactement :
+${rayons}
+
+Réponds UNIQUEMENT par un objet JSON, sans texte autour ni balises Markdown :
+{ "suggestions": [ { "titre": "", "auteur": "Nom Prénom", "editeur": "", "annee": 2020, "isbn": "", "pourquoi": "en une phrase" } ] }`;
+
+    /* Une route distincte au journal des appels : « d'où viennent mes
+       appels » doit pouvoir distinguer les deux moitiés de la fonction. */
+    const dExt = await appelerAnthropic(dans, "/api/recommandation-externe", {
+      model: MODELE,
+      max_tokens: 1500,
+      messages: [{ role: "user", content: consigneExterne }],
+      tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 4 }],
+    });
+
+    let brut = [];
+    try {
+      brut = extraireJson((dExt.content ?? []).filter(b => b.type === "text")
+        .map(b => b.text).join("\n")).suggestions ?? [];
+    } catch {
+      /* Une suggestion illisible ne doit pas emporter le parcours, qui est
+         la partie utile et qui a déjà coûté un appel. */
+      brut = [];
+    }
+
+    /* Ce que vous avez déjà, comparé ICI et non là-bas. L'ISBN d'abord ;
+       à défaut, titre et auteur mis à plat — accents, casse et ponctuation
+       retirés, car « H2G2, tome 1 » et « h2g2 tome 1 » sont le même livre. */
+    const aplatir = (s) => String(s ?? "").normalize("NFD")
+      .replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    const isbnsPossedes = new Set(livres.map(l => l.isbn).filter(Boolean));
+    const titresPossedes = new Set(livres.map(l => aplatir(l.titre) + "|" + aplatir(l.auteur)));
+
+    info.suggestions_externes = (Array.isArray(brut) ? brut : [])
+      .slice(0, 5)
+      .map(s => ({
+        titre: texteCourt(s.titre, 300),
+        auteur: texteCourt(s.auteur, 200),
+        editeur: texteCourt(s.editeur, 150),
+        // Un nombre, ou rien. Jamais une chaîne venue du modèle.
+        annee: Number.isInteger(Number(s.annee)) && Number(s.annee) > 0
+               && Number(s.annee) < 2200 ? Number(s.annee) : null,
+        isbn: String(s.isbn ?? "").replace(/[^0-9Xx]/g, "").slice(0, 13),
+        pourquoi: texteCourt(s.pourquoi, 600),
+      }))
+      .filter(s => s.titre)
+      .filter(s => !(s.isbn && isbnsPossedes.has(s.isbn)))
+      .filter(s => !titresPossedes.has(aplatir(s.titre) + "|" + aplatir(s.auteur)));
+  }
 
   await dans((c) => c.query(
     `insert into reading_quests (intention, reponse, modele, tenant_id)
@@ -1303,6 +1431,16 @@ const serveur = createServer(async (req, rep) => {
        d'un contexte — la lecture de « tenants » n'est pas cloisonnée, mais
        la faire ici garde toutes les décisions au même endroit. */
     const langue = await dans((c) => langueDemandee(c, url, session));
+
+    /* LES DEUX ROUTES QUI COÛTENT, QUAND PERSONNE N'EST CONNECTÉ.
+       Un utilisateur authentifié n'est pas limité ici : il est identifié,
+       borné par son quota sur ce qui se paie, et c'est sa propre
+       bibliothèque qu'il ralentirait. */
+    if (!session && (chemin === "/api/livres" || chemin === "/api/statistiques")
+        && tropDeLectures(ip)) {
+      return json(rep, { error: "Trop de requêtes. Réessayez dans une minute." },
+                  429, { "Retry-After": "60" });
+    }
 
     /* --- Routes ouvertes : ce que le locataire a rendu public --- */
     if (chemin === "/api/session") {
