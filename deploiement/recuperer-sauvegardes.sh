@@ -49,14 +49,15 @@ mkdir -p "${DESTINATION}" || echec "destination inaccessible"
 # « BatchMode=yes » : on ne veut AUCUNE question. Une tache planifiee qui
 # attend une reponse reste bloquee pour toujours, et personne ne s'en
 # apercoit avant d'avoir besoin des sauvegardes.
-liste=$(ssh -i "${CLEF}" -o BatchMode=yes -o ConnectTimeout=20 \
+liste=$(ssh -n -i "${CLEF}" -o BatchMode=yes -o ConnectTimeout=20 \
           "${SERVEUR}" lister 2>/tmp/biblio-sauvegarde.err)
 if [ -z "${liste}" ]; then
   echo "  ECHEC le serveur n'a rien renvoye :"
   sed 's/^/         /' /tmp/biblio-sauvegarde.err
   exit 1
 fi
-echo "  ${#liste} octets de liste, $(printf '%s\n' "${liste}" | wc -l) sauvegarde(s) sur le serveur"
+annoncees=$(printf '%s\n' "${liste}" | wc -l)
+echo "  ${annoncees} sauvegarde(s) sur le serveur"
 
 # --- Ce qui manque ici ----------------------------------------------------
 rapatriees=0; ignorees=0; echecs=0
@@ -72,7 +73,20 @@ while read -r taille nom; do
   fi
 
   printf '  ... %s (%s ko)\n' "${nom}" "$((taille / 1024))"
-  if ! ssh -i "${CLEF}" -o BatchMode=yes -o ConnectTimeout=20 \
+  # « -n » N'EST PAS UN ORNEMENT ICI.
+  #
+  # Sans lui, ssh lit l'entree standard — qui est, dans cette boucle, le
+  # RESTE DE LA LISTE. Il l'envoie a la commande distante, qui n'en fait
+  # rien, et la boucle « while read » ne trouve plus rien a lire.
+  #
+  # Constate le 16/08/2026, a la premiere execution : « 2 sauvegardes sur le
+  # serveur », une seule rapatriee, zero ignoree, et aucune erreur. Le
+  # compte rendu annoncait un succes en ayant laisse un fichier derriere.
+  #
+  # C'est le meme piege que j'avais decrit dix minutes plus tot a propos
+  # d'un copier-coller dans un terminal. Le connaitre ne suffit pas ; il
+  # faut le chercher partout ou un ssh vit dans une boucle.
+  if ! ssh -n -i "${CLEF}" -o BatchMode=yes -o ConnectTimeout=20 \
        "${SERVEUR}" "lire ${nom}" > "${local_fichier}.partiel" 2>>/tmp/biblio-sauvegarde.err; then
     rm -f "${local_fichier}.partiel"; echecs=$((echecs + 1))
     echo "      ECHEC transfert"; continue
@@ -102,6 +116,15 @@ fi
 
 echo
 ok "${rapatriees} rapatriee(s), ${ignorees} deja presente(s)"
+
+# LE COMPTE DOIT TOMBER JUSTE. Rapatriees + deja presentes + echecs doit
+# egaler ce que le serveur a annonce. Sans cette ligne, la boucle amputee du
+# 16/08/2026 rendait un compte rendu tout a fait rassurant.
+traitees=$((rapatriees + ignorees + echecs))
+if [ "${traitees}" != "${annoncees}" ]; then
+  echo "  ATTENTION ${traitees} sauvegarde(s) traitee(s) sur ${annoncees} annoncee(s)."
+  echo "            Il en manque : relancez, et si l'ecart persiste, dites-le."
+fi
 [ "${echecs}" -gt 0 ] && echo "  ATTENTION ${echecs} echec(s) — voir /tmp/biblio-sauvegarde.err"
 
 recent=$(find "${DESTINATION}" -name 'biblio-*.sql.gz' -printf '%T@ %p\n' 2>/dev/null \
