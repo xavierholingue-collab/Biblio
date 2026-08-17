@@ -1,24 +1,34 @@
 /* =========================================================================
    L'ENVOI DE COURRIEL — UN SEUL ENDROIT QUI SAIT PAR OÙ ÇA PART
 
-   Resend aujourd'hui, Brevo probablement demain. Cette phrase, dite le
-   16/08/2026, décide de la forme de ce fichier : le changement doit être
-   UNE VARIABLE D'ENVIRONNEMENT, pas une chasse au trésor dans le code.
+   « Resend aujourd'hui, Brevo probablement demain », dit le 16/08/2026. Cette
+   phrase a décidé de la forme du fichier : le changement devait être UNE
+   VARIABLE D'ENVIRONNEMENT, pas une chasse au trésor dans le code.
+
+   « Demain » a duré une heure. Resend demandait vingt euros par mois pour un
+   second domaine — y-factor occupait déjà le seul autorisé en gratuit — et
+   l'on est parti sur Brevo avant même le premier envoi. Le basculement a
+   coûté un mot dans un fichier d'environnement, et ZÉRO ligne de code.
+
+   C'est l'argument de cette forme, et il vaut d'être noté : la raison de
+   changer de fournisseur n'est presque jamais technique. Elle est
+   commerciale, elle arrive sans prévenir, et elle n'attend pas.
 
    Le reste de l'application appelle « envoyerCourriel » et ne sait rien
    d'autre. Aucune route, aucune page, aucun contrôle ne mentionne un
    fournisseur.
 
    ---------------------------------------------------------------------------
-   POURQUOI DEUX FOURNISSEURS ÉCRITS TOUT DE SUITE
+   POURQUOI LES DEUX RESTENT ÉCRITS
 
-   Écrire Brevo « le jour venu » revient à écrire du code non éprouvé un jour
-   où l'on est pressé, parce qu'on migre en général quand quelque chose ne va
-   plus. Les deux chemins sont donc là, et les CONTRÔLES VÉRIFIENT CE QUI PART
-   RÉELLEMENT — adresse, en-têtes, corps — pour chacun, contre un faux serveur.
+   Resend n'est plus utilisé, et son chemin demeure — éprouvé comme l'autre.
+   Le supprimer économiserait vingt lignes et coûterait le retour : le jour
+   où Brevo déplaît, il faudrait réécrire sous la contrainte ce qui existait.
 
-   Aucun compte n'est nécessaire pour éprouver cela. Ce qui reste à découvrir
-   le jour de la migration, c'est la configuration DNS, pas le code.
+   Les CONTRÔLES VÉRIFIENT CE QUI PART RÉELLEMENT — adresse, en-têtes, corps —
+   pour chacun, contre un faux serveur. Aucun compte n'est nécessaire pour
+   cela : ce qui reste à découvrir le jour d'une bascule, c'est la
+   configuration DNS, pas le code.
 
    ---------------------------------------------------------------------------
    SANS CLEF, ON N'ENVOIE RIEN — ET ON LE DIT
@@ -78,6 +88,34 @@ export function etatCourriel() {
   }
   if (!CLEF) {
     return { mode: SERVICE, pret: false, detail: "COURRIEL_CLEF absente" };
+  }
+
+  /* UNE CLEF NE CONTIENT QUE DE L'ASCII IMPRIMABLE, ET IL FAUT LE VÉRIFIER ICI.
+   *
+   * Constaté en production le 17/08/2026. La clef posée valait « xkeysib-… » :
+   * l'interface de Brevo n'affiche la clef ENTIÈRE qu'au moment de sa
+   * création, et la montre tronquée ensuite — points de suspension compris.
+   * Copiée depuis la liste, on emporte le « … ».
+   *
+   * Sans ce contrôle, l'erreur ne surgit qu'au premier envoi, et sous une
+   * forme illisible :
+   *
+   *   Cannot convert argument to a ByteString because the character at
+   *   index 8 has a value of 8230 which is greater than 255
+   *
+   * C'est « fetch » qui refuse de mettre un caractère non-ASCII dans un
+   * en-tête HTTP. Le message est exact et parfaitement inutile : rien n'y
+   * nomme la clef, ni Brevo, ni le courriel. On passe une demi-heure à
+   * chercher un problème de réseau.
+   *
+   * Ici, le même défaut se dit au démarrage, en français, avec le nom de la
+   * variable fautive. */
+  const fautif = [...CLEF].findIndex((c) => c.charCodeAt(0) < 0x20 || c.charCodeAt(0) > 0x7e);
+  if (fautif !== -1) {
+    return { mode: SERVICE, pret: false,
+             detail: `COURRIEL_CLEF contient un caractère interdit en position ${fautif + 1}`
+                   + ` (« ${CLEF[fautif]} »). Une clef tronquée, copiée depuis l'affichage`
+                   + ` du fournisseur ? Elle ne s'y montre entière qu'à sa création.` };
   }
   if (!/^[^\s<>@]+@[^\s<>@]+\.[^\s<>@]{2,}$/.test(EXPEDITEUR)) {
     return { mode: SERVICE, pret: false,

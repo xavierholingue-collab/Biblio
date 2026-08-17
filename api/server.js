@@ -1525,7 +1525,16 @@ const serveur = createServer(async (req, rep) => {
                    + `?jeton=${encodeURIComponent(demande.jeton)}`;
         const { sujet, texte, html } = messageDeConnexion(lien, DUREE_LIEN_MINUTES);
         try {
-          await envoyerCourriel({ a: courriel, sujet, texte, html });
+          const envoi = await envoyerCourriel({ a: courriel, sujet, texte, html });
+          /* UNE TRACE EN CAS DE SUCCÈS, ET PAS SEULEMENT D'ÉCHEC.
+             Sans elle, « le lien est-il parti ? » n'a pas de réponse : un
+             journal muet signifie aussi bien « aucune demande » que
+             « demande réussie ». Constaté le 17/08/2026, en cherchant
+             pourquoi rien n'arrivait.
+             SANS L'ADRESSE DU DESTINATAIRE : elle répondrait à la question
+             « qui utilise ce service ? », que personne n'a besoin de poser
+             au journal d'un serveur. */
+          console.log(`lien de connexion envoyé (${envoi.mode})`);
         } catch (e) {
           /* L'envoi a échoué : on le dit. Répondre « c'est parti » à qui
              n'aura jamais rien serait le laisser attendre indéfiniment.

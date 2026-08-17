@@ -152,6 +152,15 @@ verifier("une demande de lien aboutit", demande.statut === 200 && demande.corps?
 
 const envoi = recus[0];
 verifier("un courriel est bien parti", recus.length === 1, `${recus.length} envoi(s)`);
+
+/* UN ENVOI RÉUSSI LAISSE UNE TRACE. Sans elle, un journal muet signifie
+   aussi bien « aucune demande » que « demande réussie » — et l'on ne peut
+   pas répondre à « le lien est-il parti ? ». Mais SANS l'adresse : le
+   journal d'un serveur n'a pas à dire qui utilise le service. */
+verifier("un envoi réussi est journalisé",
+  /lien de connexion envoyé \(resend\)/.test(resend.lire()), resend.lire().slice(-200));
+verifier("… sans jamais nommer le destinataire",
+  !resend.lire().includes("xavier@exemple.fr"), "l'adresse figure dans le journal");
 verifier("Resend : autorisation par jeton porteur",
   envoi?.entetes.authorization === "Bearer cle-de-controle", envoi?.entetes.authorization);
 verifier("Resend : les champs sont ceux qu'il attend",
@@ -340,6 +349,27 @@ const bancal = await lancer("sans expéditeur", {
 }, PORT_BASE + 2);
 verifier("sans expéditeur configuré, la route refuse proprement",
   (await appel(bancal.port, "/api/lien", { courriel: "xavier@exemple.fr" })).statut === 503);
+
+/* UNE CLEF TRONQUÉE. Le défaut du 17/08/2026, constaté en production.
+   L'interface de Brevo n'affiche la clef entière qu'à sa création ; copiée
+   depuis la liste, on emporte les points de suspension. « fetch » refuse
+   alors de la mettre dans un en-tête, avec un message qui ne nomme ni la
+   clef, ni le courriel, ni le fournisseur. */
+const tronquee = await lancer("clef tronquée", {
+  DERRIERE_PROXY: "1",
+  ADRESSE_PUBLIQUE: "https://biblio.exemple.fr",
+  COURRIEL_SERVICE: "brevo",
+  COURRIEL_CLEF: "xkeysib-…",
+  COURRIEL_EXPEDITEUR: "biblio@exemple.fr",
+}, PORT_BASE + 6);
+recus.length = 0;
+const clefFautive = await appel(tronquee.port, "/api/lien", { courriel: "xavier@exemple.fr" });
+verifier("une clef contenant un caractère interdit est refusée AVANT l'envoi",
+  clefFautive.statut === 503, `statut ${clefFautive.statut}`);
+verifier("… et rien n'est parti", recus.length === 0, `${recus.length} envoi(s)`);
+verifier("… et le journal nomme la variable fautive et la position",
+  /COURRIEL_CLEF contient un caractère interdit en position 9/.test(tronquee.lire()),
+  tronquee.lire().slice(-300));
 
 /* En production, le mode « journal » écrirait le lien en clair dans le
    journal du serveur. On refuse. */
