@@ -794,25 +794,49 @@ sudo -u postgres psql -d biblio_repetition -f verifier-migration.sql</code></pre
   </p>
 </div>
 
-<div class="note manque">
-  <span class="titre">L'authentification par lien magique n'est pas branchée</span>
+<div class="note">
+  <span class="titre">La connexion par lien de courriel — branchée le 16/08/2026</span>
   <p>
-    Le module existe, il est éprouvé par 26 vérifications — empreinte du jeton
-    plutôt que le jeton, usage unique garanti par la base, quinze minutes de
-    validité, aucune énumération possible. Mais <code>server.js</code> ne
-    l'importe pas. On entre encore par un <strong>mot de passe unique partagé</strong>,
-    qui ouvre la bibliothèque désignée par <code>TENANT_DEFAUT</code>.
+    On demande un lien avec son adresse, on le reçoit, on clique. Pas de mot de
+    passe à retenir, et rien à voler dans la base : seule une <em>empreinte</em>
+    du jeton y est stockée, l'usage unique est garanti par la base elle-même, et
+    une adresse inconnue reçoit exactement la même réponse qu'une adresse
+    connue — sans quoi ce point d'entrée serait un annuaire des utilisateurs.
   </p>
   <p>
-    C'est le vrai préalable à l'invitation d'un ami : il n'y a aujourd'hui aucun
-    moyen pour une deuxième personne de se connecter à sa propre bibliothèque.
-    Et rien n'envoie de courriel — l'expédition du lien reste à écrire.
+    <strong>L'adresse du lien vient de la configuration</strong>
+    (<code>ADRESSE_PUBLIQUE</code>), jamais de l'en-tête <code>Host</code>. Le
+    lire reviendrait à laisser un inconnu choisir où atterrit votre jeton : il
+    demande un lien pour votre adresse en annonçant son propre domaine, vous
+    recevez un courriel authentique dont le lien pointe chez lui.
+  </p>
+  <p>
+    Le mot de passe unique reste en place à côté, le temps de la transition.
+  </p>
+</div>
+
+<div class="note">
+  <span class="titre">L'envoi passe par un seul fichier</span>
+  <p>
+    <code>api/courriel.mjs</code> connaît Resend et Brevo ; le reste du code
+    ignore lequel envoie. La bascule est une variable d'environnement, et les
+    deux chemins sont éprouvés contre un faux service — adresse, en-têtes,
+    corps. Migrer ne demandera que de la configuration DNS.
+  </p>
+  <p>
+    Sans clé, le lien s'inscrit <strong>dans le journal</strong> au lieu de
+    partir : c'est ce qui rend la recette utilisable sans dépenser ni écrire à
+    personne. En production, ce mode est <em>refusé</em> — un lien de connexion
+    en clair dans un journal serait une porte ouverte.
   </p>
 </div>
 
 <ul class="serre">
   <li><strong>Pas de surveillance externe.</strong> Si le service tombe, personne
       n'est prévenu. On l'apprend en ouvrant la page.</li>
+  <li><strong>Aucune restauration n'a été éprouvée.</strong> Les sauvegardes
+      sont vérifiées intègres, jamais remontées en base. À faire sur la
+      recette, une fois, pour de bon.</li>
   <li><strong>Pas de pages publiques <code>/u/xavier</code>.</strong> La colonne
       <code>identifiant</code> existe et attend.</li>
   <li><strong>Pas de pages légales</strong> — mentions, données personnelles.
@@ -884,9 +908,10 @@ sudo -u postgres psql -d biblio_repetition -f verifier-migration.sql</code></pre
   <p>
     Fichiers de référence : <code>db/0*.sql</code> (structure et cloisonnement),
     <code>api/server.js</code> (routes), <code>api/locataire.mjs</code> (contexte),
+    <code>api/authentification.mjs</code> et <code>api/courriel.mjs</code> (connexion),
     <code>deploiement/vps-deployer-biblio.sh</code> (déploiement),
     <code>deploiement/verifier-migration.sql</code> (répétition),
-    <code>tests/</code> (241 vérifications).
+    <code>tests/</code> (326 vérifications).
   </p>
 </footer>
 </div>

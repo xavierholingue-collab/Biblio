@@ -429,13 +429,29 @@
   <div class="modale-corps">
     <h2>Espace personnel</h2>
     <p style="font-size:14px;color:var(--ink-soft);margin:0 0 16px">
-      Les romans, les bandes dessinées et les fonctions d'édition demandent le mot de passe.
-      Le rayon professionnel, lui, reste en accès libre.
+      Recevez un lien de connexion par courriel — il n'y a pas de mot de passe
+      à retenir. Ce qui est publié reste, lui, en accès libre.
     </p>
+    <form id="formLien">
+      <div class="champ">
+        <label for="cCourriel">Votre adresse de courriel</label>
+        <input type="email" id="cCourriel" autocomplete="email" inputmode="email"
+               placeholder="vous@exemple.fr">
+      </div>
+      <div class="actions">
+        <button class="btn" type="submit" id="btnLien">Recevoir un lien</button>
+      </div>
+    </form>
+
+    <p style="font-size:13px;color:var(--ink-soft);margin:18px 0 10px;
+              border-top:1px solid var(--rule);padding-top:14px">
+      Ou, si vous connaissez le mot de passe de la bibliothèque :
+    </p>
+
     <form id="formConnexion">
       <div class="champ">
         <label for="cMdp">Mot de passe</label>
-        <input type="password" id="cMdp" autocomplete="current-password" required>
+        <input type="password" id="cMdp" autocomplete="current-password">
       </div>
       <div class="etat" id="etatConnexion"></div>
       <div class="actions">
@@ -670,6 +686,13 @@ let connecte = false;
 let iaPublique = false;
 
 async function demarrer() {
+  /* LE JETON EST ÉCHANGÉ AVANT TOUT LE RESTE.
+     Avant même de demander l'état de session : sinon on lirait « non
+     connecté », on dessinerait la vue publique, et il faudrait tout
+     redessiner une seconde plus tard. Et surtout, le jeton doit quitter la
+     barre d'adresse le plus tôt possible. */
+  await connexionParLien().catch(() => false);
+
   try {
     const s = await api("/session");
     connecte = s.connecte;
@@ -776,7 +799,76 @@ function appliquerDroits() {
 function ouvrirConnexion() {
   document.getElementById("etatConnexion").textContent = "";
   document.getElementById("modaleConnexion").showModal();
-  document.getElementById("cMdp").focus();
+  document.getElementById("cCourriel").focus();
+}
+
+/* =========================================================================
+   DEMANDER UN LIEN
+
+   LA RÉPONSE EST LA MÊME QUE LE COMPTE EXISTE OU NON — c'est décidé côté
+   serveur, et l'écran doit le respecter. Afficher « adresse inconnue »
+   ferait de cette fenêtre un annuaire des utilisateurs du service.
+
+   Le message dit donc « si cette adresse a un compte », ce qui est à la fois
+   vrai, utile, et muet.
+   ========================================================================= */
+async function demanderLien(evt) {
+  evt.preventDefault();
+  const btn = document.getElementById("btnLien");
+  const etatEl = document.getElementById("etatConnexion");
+  const courriel = document.getElementById("cCourriel").value.trim();
+  if (!courriel) { document.getElementById("cCourriel").focus(); return; }
+
+  btn.disabled = true;
+  etatEl.className = "etat";
+  etatEl.textContent = "Envoi…";
+  try {
+    await api("/lien", { corps: { courriel } });
+    etatEl.className = "etat";
+    etatEl.textContent = "Si cette adresse a un compte, le lien vient de partir. "
+      + "Il est valable un quart d'heure.";
+  } catch (e) {
+    etatEl.className = "etat err";
+    etatEl.textContent = e.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/* =========================================================================
+   ARRIVER PAR UN LIEN
+
+   LE JETON NE DOIT PAS SURVIVRE À SON USAGE DANS LA BARRE D'ADRESSE.
+
+   Une adresse de page finit dans l'historique du navigateur, dans les
+   journaux de tout serveur qu'elle traverse, et dans l'en-tête « Referer »
+   envoyé à la première image ou au premier lien externe de la page. Un jeton
+   de connexion qui y reste est un jeton qui fuit — même après avoir été
+   consommé, il raconte qu'il a existé.
+
+   On l'échange, puis on le retire IMMÉDIATEMENT par replaceState, qui
+   remplace l'entrée d'historique au lieu d'en ajouter une : le bouton
+   « précédent » ne doit pas ramener le jeton.
+   ========================================================================= */
+async function connexionParLien() {
+  const params = new URLSearchParams(location.search);
+  const jeton = params.get("jeton");
+  if (!jeton) return false;
+
+  // Retiré AVANT l'appel réseau : si celui-ci échoue ou traîne, le jeton ne
+  // doit déjà plus être dans la barre d'adresse.
+  params.delete("jeton");
+  const reste = params.toString();
+  history.replaceState(null, "", location.pathname + (reste ? "?" + reste : ""));
+
+  try {
+    await api("/connexion-lien", { corps: { jeton } });
+    connecte = true;
+    return true;
+  } catch (e) {
+    annoncer(e.message, true);
+    return false;
+  }
 }
 
 async function connexion(evt) {
@@ -1839,6 +1931,7 @@ async function importer(fichier) {
    ========================================================================= */
 
 document.getElementById("formConnexion").onsubmit = connexion;
+document.getElementById("formLien").onsubmit = demanderLien;
 document.getElementById("btnAnnulerConnexion").onclick =
   () => document.getElementById("modaleConnexion").close();
 

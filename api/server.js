@@ -9,6 +9,11 @@ import { randomBytes, createHmac, timingSafeEqual } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import pg from "pg";
 import { avecContexte, avecVisiteur } from "./locataire.mjs";
+import {
+  demanderLien, consommerLien, purgerLiens,
+  courrielPlausible, DUREE_LIEN_MINUTES,
+} from "./authentification.mjs";
+import { envoyerCourriel, messageDeConnexion, etatCourriel } from "./courriel.mjs";
 
 const PORT = Number(process.env.PORT ?? 3000);
 const MOT_DE_PASSE = process.env.MOT_DE_PASSE ?? "";
@@ -417,6 +422,77 @@ function tropDeLectures(ip) {
   }
   t.nombre += 1;
   return t.nombre > LECTURES_PAR_MINUTE;
+}
+
+/* ===========================================================================
+   L'ADRESSE QUI FIGURE DANS LE LIEN NE VIENT PAS DE LA REQUÊTE
+
+   La tentation est d'écrire `https://${req.headers.host}/…` : c'est court,
+   ça marche, et ça n'exige aucune configuration.
+
+   C'est aussi une façon de faire voler les jetons. L'en-tête « Host » est
+   fourni par le CLIENT. Quelqu'un qui demande un lien pour VOTRE adresse en
+   annonçant « Host: chez-moi.example » vous ferait recevoir un courriel
+   d'apparence normale, envoyé par le vrai service, signé par le vrai
+   domaine — et dont le lien pointe chez lui. Vous cliquez, il récupère un
+   jeton de connexion valable à votre nom.
+
+   Caddy filtre déjà par nom d'hôte, ce qui rend l'attaque difficile ici.
+   Mais « difficile grâce à la configuration d'un autre composant » n'est pas
+   une propriété de ce code : elle disparaît le jour où l'on ajoute un
+   domaine, ou où l'on passe derrière autre chose.
+
+   L'adresse vient donc de la CONFIGURATION. En local, où il n'y a pas de
+   proxy et où l'on veut pouvoir ouvrir localhost sur n'importe quel port, on
+   accepte l'hôte de la requête — le risque n'existe pas sans destinataire
+   extérieur.
+   =========================================================================== */
+const ADRESSE_PUBLIQUE = (process.env.ADRESSE_PUBLIQUE ?? "").replace(/\/+$/, "");
+
+function adressePublique(req) {
+  if (/^https?:\/\/[^\s/]+$/.test(ADRESSE_PUBLIQUE)) return ADRESSE_PUBLIQUE;
+
+  if (DERRIERE_PROXY) {
+    const e = new Error("ADRESSE_PUBLIQUE absente : impossible de fabriquer un lien sûr.");
+    e.statut = 503;
+    throw e;
+  }
+  return `http://${req.headers.host}`;
+}
+
+/* ===========================================================================
+   LES DEMANDES DE LIEN DE CONNEXION
+
+   Un limiteur À PART, et non celui des mots de passe, pour une raison de
+   fond : ici, CHAQUE demande compte, réussie ou non. Le limiteur de mot de
+   passe ne note que les échecs — c'est ce qu'on veut pour un mot de passe,
+   et ce serait sans effet ici, puisqu'une demande de lien « réussit »
+   toujours du point de vue du demandeur.
+
+   Ce qu'on empêche : qu'un inconnu fasse envoyer cinquante courriels à
+   quelqu'un dont il connaît l'adresse. Le service n'y perdrait rien ; la
+   personne visée, si — et c'est elle qu'on protège.
+
+   Cinq par quart d'heure et par adresse. Une personne qui n'a pas reçu son
+   lien en redemande deux ou trois fois ; personne n'en demande cinq.
+   =========================================================================== */
+const LIENS_PAR_QUART_HEURE = 5;
+const demandesLien = new Map();
+
+function tropDeDemandesLien(ip) {
+  const maintenant = Date.now();
+  if (demandesLien.size > 5000) {
+    for (const [cle, v] of demandesLien)
+      if (maintenant - v.debut > 15 * 60 * 1000) demandesLien.delete(cle);
+    if (demandesLien.size > 5000 && !demandesLien.has(ip)) return true;  // fermé
+  }
+  const t = demandesLien.get(ip);
+  if (!t || maintenant - t.debut > 15 * 60 * 1000) {
+    demandesLien.set(ip, { debut: maintenant, nombre: 1 });
+    return false;
+  }
+  t.nombre += 1;
+  return t.nombre > LIENS_PAR_QUART_HEURE;
 }
 
 /* --------------------------------------------------------------- Données */
@@ -1400,6 +1476,92 @@ const serveur = createServer(async (req, rep) => {
       });
     }
 
+    /* =====================================================================
+       CONNEXION PAR LIEN — DEMANDE
+
+       LA RÉPONSE EST LA MÊME QUE LE COMPTE EXISTE OU NON, et c'est la
+       propriété qui compte le plus ici. Sans elle, ce point d'entrée devient
+       un annuaire : on y teste des adresses jusqu'à trouver un compte, et
+       l'on apprend qui utilise le service.
+
+       Conséquence assumée : quelqu'un qui se trompe d'adresse n'aura aucun
+       message d'erreur, et attendra un courriel qui ne viendra pas. C'est le
+       prix, et il est plus faible que celui de l'inverse.
+       ===================================================================== */
+    if (chemin === "/api/lien" && req.method === "POST") {
+      const etat = etatCourriel();
+
+      /* EN PRODUCTION, LE MODE « JOURNAL » N'EST PAS UNE OPTION.
+         Il écrit le lien en clair dans le journal du serveur : acceptable en
+         recette, dont l'accès est déjà protégé, inacceptable ailleurs. On
+         refuse plutôt que d'envoyer un lien que personne ne recevra — ou
+         pire, que quelqu'un d'autre lirait. */
+      if (ENVIRONNEMENT === "production" && etat.mode === "journal") {
+        return json(rep, {
+          error: "La connexion par courriel n'est pas encore configurée ici.",
+        }, 503);
+      }
+      if (!etat.pret) {
+        console.error("courriel mal configuré :", etat.detail);
+        return json(rep, { error: "La connexion par courriel est indisponible." }, 503);
+      }
+
+      if (tropDeDemandesLien(ip)) {
+        return json(rep, { error: "Trop de demandes. Réessayez dans un quart d'heure." },
+                    429, { "Retry-After": "900" });
+      }
+
+      const { courriel } = await lireCorps(req);
+      /* Le seul refus explicite : une adresse qui n'en est pas une. Il ne
+         révèle rien — la forme d'une adresse n'est pas un secret. */
+      if (!courrielPlausible(courriel)) {
+        return json(rep, { error: "Cette adresse ne ressemble pas à un courriel." }, 400);
+      }
+
+      const demande = await avecVisiteur(bd, (c) => demanderLien(c, courriel));
+
+      if (demande.jeton) {
+        const lien = `${adressePublique(req)}/ma-bibliotheque.html`
+                   + `?jeton=${encodeURIComponent(demande.jeton)}`;
+        const { sujet, texte, html } = messageDeConnexion(lien, DUREE_LIEN_MINUTES);
+        try {
+          await envoyerCourriel({ a: courriel, sujet, texte, html });
+        } catch (e) {
+          /* L'envoi a échoué : on le dit. Répondre « c'est parti » à qui
+             n'aura jamais rien serait le laisser attendre indéfiniment.
+             Cela ne révèle rien : le message ne distingue pas un compte
+             inconnu d'un service en panne. */
+          console.error("envoi du lien impossible :", e.message);
+          return json(rep, { error: "L'envoi a échoué. Réessayez dans un moment." },
+                      e.statut ?? 502);
+        }
+      }
+
+      return json(rep, { envoye: true });
+    }
+
+    /* --- CONNEXION PAR LIEN — USAGE ------------------------------------ */
+    if (chemin === "/api/connexion-lien" && req.method === "POST") {
+      const { jeton } = await lireCorps(req);
+      const compte = await avecVisiteur(bd, (c) => consommerLien(c, jeton));
+
+      if (!compte) {
+        /* Un seul message pour trois cas — jeton inconnu, déjà utilisé,
+           périmé. Les distinguer dirait à un attaquant lequel de ses essais
+           a existé un jour. */
+        await new Promise(r => setTimeout(r, 400));
+        return json(rep, { error: "Ce lien n'est plus valable. Demandez-en un nouveau." }, 401);
+      }
+
+      const signe = signer({
+        c: compte.compte_id, t: compte.tenant_id,
+        expire: Date.now() + DUREE_SESSION,
+      });
+      return json(rep, { ok: true }, 200, {
+        "Set-Cookie": `${COOKIE_SESSION}=${signe}; HttpOnly;${COOKIE_SECURE} SameSite=Strict; Path=/; Max-Age=${DUREE_SESSION / 1000}`,
+      });
+    }
+
     if (chemin === "/api/deconnexion" && req.method === "POST") {
       return json(rep, { ok: true }, 200, { "Set-Cookie": COOKIES_ACCEPTES
           .map(n => `${n}=; HttpOnly;${COOKIE_SECURE} SameSite=Strict; Path=/; Max-Age=0`) });
@@ -1595,6 +1757,31 @@ async function attendreLaBase(essais = 30) {
 }
 
 await attendreLaBase();
+
+/* CE QUE VAUT LA CONFIGURATION DU COURRIEL, DIT AU DÉMARRAGE.
+   Une clef absente ou un expéditeur mal écrit ne doivent pas se découvrir
+   quand quelqu'un attend son lien. On ne refuse pas de démarrer : la
+   connexion par mot de passe, elle, fonctionne toujours. Mais on le dit
+   assez fort pour que ça se voie dans le journal d'un déploiement. */
+{
+  const etat = etatCourriel();
+  if (etat.mode === "journal" && ENVIRONNEMENT === "production") {
+    console.warn("COURRIEL : aucun expéditeur configuré. La connexion par lien "
+      + "refusera poliment. (COURRIEL_SERVICE, COURRIEL_CLEF, COURRIEL_EXPEDITEUR)");
+  } else if (!etat.pret) {
+    console.error(`COURRIEL MAL CONFIGURÉ (${etat.mode}) : ${etat.detail}`);
+  } else {
+    console.log(`Courriel : ${etat.mode} — ${etat.detail}`);
+  }
+  if (DERRIERE_PROXY && !/^https?:\/\/[^\s/]+$/.test(process.env.ADRESSE_PUBLIQUE ?? "")) {
+    console.warn("ADRESSE_PUBLIQUE absente : les liens de connexion seront refusés. "
+      + "Posez-la dans le fichier d'environnement (ex. https://biblio.xavier-holingue.eu).");
+  }
+}
+
+/* Les liens périmés n'ont aucune raison de s'accumuler. Au démarrage suffit :
+   une livraison par jour au pire, et rien ne dépend de cette purge. */
+avecVisiteur(bd, purgerLiens).catch(e => console.error("purge des liens :", e.message));
 
 /* Le locataire par défaut, résolu UNE fois au démarrage.
  *
