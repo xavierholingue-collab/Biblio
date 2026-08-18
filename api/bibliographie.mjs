@@ -272,16 +272,47 @@ const SOURCES = [
   ["googlebooks", chezGoogleBooks],
 ];
 
+/* CE QU'UNE NOTICE DOIT PORTER POUR QU'ON CESSE DE CHERCHER.
+ *
+ * « Trouvé » valait « porte un titre », et c'était le défaut du 18/08 : une
+ * notice indigente arrêtait la cascade, et les sources suivantes — qui
+ * avaient peut-être l'éditeur — n'étaient jamais interrogées. J'avais
+ * construit une hiérarchie de qualité puis écrit un critère d'arrêt qui
+ * l'ignore.
+ *
+ * Les pages n'en font PAS partie : elles manquent presque partout, et les
+ * exiger forcerait trois appels à chaque livre pour un champ décoratif. */
+const CHAMPS_ATTENDUS = ["titre", "auteur", "editeur", "annee"];
+
+const rempli = (v) => v !== null && v !== undefined && String(v).trim() !== "";
+const complete = (l) => CHAMPS_ATTENDUS.every((c) => rempli(l[c]));
+
+/** Comble les trous de « base » avec « autre ». N'écrase JAMAIS un champ
+ *  rempli : la première source est la meilleure, les suivantes ne servent
+ *  qu'à compléter. Rend true si quelque chose a été comblé. */
+function combler(base, autre) {
+  let comble = false;
+  for (const c of [...CHAMPS_ATTENDUS, "pages"]) {
+    if (!rempli(base[c]) && rempli(autre[c])) { base[c] = autre[c]; comble = true; }
+  }
+  return comble;
+}
+
 export async function chercherParIsbn(brut) {
   const isbn = isbn13(brut);
   if (!isbn) return { issue: "absente", muettes: [], detail: "ISBN-13 invalide" };
 
   const muettes = [];
+  const sources = [];
+  let livre = null;
 
   for (const [nom, interroger] of SOURCES) {
     try {
-      const livre = await interroger(isbn);
-      if (livre && livre.titre) return { issue: "trouvee", livre: { ...livre, isbn }, source: nom };
+      const trouve = await interroger(isbn);
+      if (trouve?.titre) {
+        if (!livre) { livre = { ...trouve }; sources.push(nom); }
+        else if (combler(livre, trouve)) sources.push(nom);
+      }
       // null : la source a répondu, elle ne connaît pas. On continue.
     } catch (e) {
       /* Le détail part au journal, jamais au client : il porte l'adresse
@@ -289,9 +320,77 @@ export async function chercherParIsbn(brut) {
       console.warn(`catalogue ${nom} injoignable — ${e.sansClef ? "clef absente" : e.message}`);
       muettes.push(nom);
     }
+    if (livre && complete(livre)) break;   // plus rien ne manque : on s'arrête
+  }
+
+  if (livre) {
+    /* DERNIER RECOURS POUR L'ÉDITEUR : UNE ÉDITION SŒUR.
+     *
+     * Un ISBN désigne une ÉDITION, pas une œuvre. Constaté le 18/08 sur
+     * « Pourquoi j'ai toujours raison » : la BnF connaît l'édition Flammarion
+     * de 2016 (9782081392335) et ignore la réédition de 2025 (9782080494115).
+     * Interroger par ISBN seul, c'est ignorer tout ce que la bibliothèque
+     * sait de l'ouvrage dès que l'édition change.
+     *
+     * ON NE REPREND QUE L'ÉDITEUR, et c'est une frontière, pas une prudence
+     * excessive. L'éditeur survit à une réédition ; la pagination, l'année et
+     * la collection, non. Afficher 415 pages parce qu'une autre édition les
+     * avait produirait une fiche FAUSSE — et une fiche fausse est pire qu'une
+     * fiche incomplète, parce qu'elle a l'air juste et que personne ne la
+     * vérifie.
+     *
+     * La fiche porte « editeur_autre_edition » pour que ce soit lisible dans
+     * six mois : ce qui est déduit doit se distinguer de ce qui est mesuré. */
+    if (!rempli(livre.editeur) && rempli(livre.titre) && rempli(livre.auteur)) {
+      try {
+        const voisine = await chezBnfParTitre(livre.titre, livre.auteur);
+        if (voisine?.editeur) {
+          livre.editeur = voisine.editeur;
+          livre.editeur_autre_edition = true;
+          sources.push("bnf:autre-edition");
+        }
+      } catch (e) {
+        console.warn("repli BnF par titre indisponible —", e.message);
+      }
+    }
+    return { issue: "trouvee", livre: { ...livre, isbn },
+             source: sources.join("+"), sources };
   }
 
   return { issue: muettes.length ? "injoignable" : "absente", muettes };
+}
+
+/* =========================================================================
+   LA BnF PAR TITRE ET AUTEUR
+
+   Appelée seulement quand l'ISBN n'a rien donné et qu'il manque l'éditeur.
+   Rend UNIQUEMENT ce qui traverse les rééditions.
+
+   LE TITRE EST NETTOYÉ DE SES GUILLEMETS AVANT D'ENTRER DANS LA REQUÊTE.
+   La syntaxe CQL délimite les termes par des guillemets doubles : un titre
+   qui en contient casserait la requête, et la casserait d'une manière qui
+   ressemble à « aucun résultat » plutôt qu'à une erreur. On les retire, on
+   ne les échappe pas — un guillemet dans un titre n'aide pas à le retrouver.
+   ========================================================================= */
+async function chezBnfParTitre(titre, auteur) {
+  const propre = (s) => String(s ?? "").replace(/["\\]/g, " ").trim().slice(0, 120);
+  const t = propre(titre), a = propre(auteur);
+  if (t.length < 4) return null;
+
+  const cql = `bib.title all "${t}" and bib.author all "${a}"`;
+  const url = `${adresse("bnf")}?version=1.2&operation=searchRetrieve`
+            + `&query=${encodeURIComponent(cql)}`
+            + `&recordSchema=dublincore&maximumRecords=1`;
+
+  const doc = analyseurXml.parse(await (await demander(url)).text());
+  const reponse = doc?.searchRetrieveResponse;
+  if (!reponse || Number(reponse.numberOfRecords ?? 0) === 0) return null;
+
+  const dc = premier(premier(reponse.records?.record)?.recordData?.dc);
+  if (!dc) return null;
+
+  const editeur = texte(premier(dc.publisher)).replace(/\s*\([^)]*\)\s*$/, "").trim();
+  return editeur ? { editeur } : null;
 }
 
 /* =========================================================================

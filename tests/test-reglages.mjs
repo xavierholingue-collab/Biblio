@@ -374,6 +374,43 @@ verifier("… et exactement 3 lignes sont écrites",
    dès qu'on touche à une note — et le livre redevient PUBLIC en silence.
    ===================================================================== */
 
+/* MÊME FAMILLE, TROUVÉE EN PRODUCTION LE 18/08 : UN CHAMP VIDE N'EST PAS
+   UNE CORRECTION.
+   Le titre, l'auteur, l'éditeur et l'année du CATALOGUE étaient écrasés sans
+   condition, alors que les pages et la couverture étaient protégées. Une
+   fiche issue de Google Books — qui rend rarement l'éditeur — venait donc
+   vider un éditeur que la BnF avait correctement renseigné.
+   ET LE CATALOGUE EST PARTAGÉ : l'effacement vaut pour tous les possesseurs
+   de la même édition. C'est le seul défaut de la série qui détruit. */
+await appel("/api/livres", { cookie: sessionX, methode: "PUT",
+  corps: { id: "x-philo-1", isbn: "9780000000101", titre: "Titre x-philo-1",
+           auteur: "Auteur", editeur: "Éditions de Contrôle", annee: 2011,
+           categorie: "Académique", sous_categorie: "Philosophie", sphere: "Pro" } });
+await appel("/api/livres", { cookie: sessionX, methode: "PUT",
+  corps: { id: "x-philo-1", isbn: "9780000000101", titre: "Titre x-philo-1",
+           auteur: "Auteur", editeur: "", annee: null,
+           categorie: "Académique", sous_categorie: "Philosophie", sphere: "Pro" } });
+const [notice] = await q(
+  `select o.editeur, o.annee from possessions p join ouvrages o on o.id = p.ouvrage_id
+    where p.id = 'x-philo-1' and p.tenant_id = $1`, [xavier.id]);
+verifier("un éditeur vide n'efface pas l'éditeur du catalogue",
+  notice?.editeur === "Éditions de Contrôle", JSON.stringify(notice));
+verifier("… ni une année absente l'année déjà connue",
+  notice?.annee === 2011, JSON.stringify(notice));
+
+/* Mais une VRAIE correction passe toujours : on n'a pas gelé le catalogue,
+   on a seulement refusé que le vide fasse autorité. */
+await appel("/api/livres", { cookie: sessionX, methode: "PUT",
+  corps: { id: "x-philo-1", isbn: "9780000000101", titre: "Titre x-philo-1",
+           auteur: "Auteur", editeur: "Éditions Corrigées", annee: 2012,
+           categorie: "Académique", sous_categorie: "Philosophie", sphere: "Pro" } });
+const [corrigee] = await q(
+  `select o.editeur, o.annee from possessions p join ouvrages o on o.id = p.ouvrage_id
+    where p.id = 'x-philo-1' and p.tenant_id = $1`, [xavier.id]);
+verifier("une correction réelle du catalogue reste possible",
+  corrigee?.editeur === "Éditions Corrigées" && corrigee?.annee === 2012,
+  JSON.stringify(corrigee));
+
 await appel("/api/reglages/livre", { cookie: sessionX, methode: "PUT",
   corps: { id: "x-philo-1", visibilite: "privee" } });
 await appel("/api/livres", { cookie: sessionX, methode: "PUT",

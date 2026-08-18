@@ -689,6 +689,12 @@ const EXEMPLES_QUETE = [
 let livres = [];
 let etat = { q: "", cat: "", sous: "", statut: "", sphere: "", tri: "auteur", vue: "liste" };
 let idEnCours = null;
+
+/* D'où vient la fiche que le formulaire affiche, quand elle vient d'une
+   recherche. Remise à zéro à chaque ouverture de la modale : sans cela, la
+   provenance du livre précédent se collerait au suivant — et une notice
+   saisie à la main passerait pour une notice de la BnF. */
+let sourceTrouvee = null;
 let ficheEnCours = null;
 
 /* =========================================================================
@@ -948,6 +954,11 @@ function versBase(l) {
     editeur: l.editeur || null, annee: l.annee ?? null, statut: l.statut,
     note: l.note ?? null, categorie: l.categorie, sous_categorie: l.sousCategorie,
     sphere: l.sphere || (l.categorie === "Académique" ? "Pro" : "Perso"),
+    /* La provenance voyage avec la fiche, sinon elle meurt ici — c'est le
+       défaut décrit plus haut pour « visibilite », et il se reproduit à
+       chaque champ qu'on ajoute sans penser à ce convoyeur. Absente pour un
+       livre modifié : le serveur garde alors ce qu'il savait déjà. */
+    source: l.source ?? null,
     cover_url: l.coverUrl ?? null, cover_statut: l.coverStatut ?? "inconnu",
     resume: l.resume ?? null, resume_points: l.resumePoints ?? null,
     resume_themes: l.resumeThemes ?? null, resume_modele: l.resumeModele ?? null,
@@ -987,7 +998,26 @@ async function supprimerLivre(id) {
   }
 }
 
+/* ANNONCER LÀ OÙ L'ŒIL SE TROUVE — 18/08/2026.
+ *
+ * « sauvegarde » vit dans l'en-tête de la page. Quand la modale est ouverte,
+ * elle est derrière : un enregistrement refusé s'annonçait donc à un endroit
+ * que personne ne regardait. Constaté en production sur un doublon — l'échec
+ * a été pris pour une application cassée, et compris seulement en consultant
+ * la bibliothèque depuis un autre appareil.
+ *
+ * LES ERREURS SEULES SONT RECOPIÉES DANS LA MODALE. Un « Enregistré » y
+ * apparaîtrait juste avant qu'elle ne se ferme — du bruit. Un refus, lui,
+ * laisse la modale ouverte : c'est précisément là qu'il faut le lire. */
 function annoncer(txt, err) {
+  if (err) {
+    const modale = document.getElementById("modale");
+    const dans = document.getElementById("etatRecherche");
+    if (modale?.open && dans) {
+      dans.className = "etat err";
+      dans.textContent = txt;
+    }
+  }
   const el = document.getElementById("sauvegarde");
   if (!el) return;
   el.textContent = txt;
@@ -1691,6 +1721,7 @@ function majSousDuFormulaire() {
 
 function ouvrirModale(id) {
   idEnCours = id;
+  sourceTrouvee = null;          // la provenance ne se transmet pas d'un livre à l'autre
   const l = id ? livres.find(x => x.id === id) : null;
 
   document.getElementById("modaleTitre").textContent = l ? "Modifier" : "Ajouter un livre";
@@ -1743,7 +1774,11 @@ async function enregistrer() {
     note: isNaN(note) ? null : note,
     categorie: document.getElementById("fCat").value,
     sousCategorie: document.getElementById("fSous").value,
-    isbn: document.getElementById("fIsbn").value.trim()
+    isbn: document.getElementById("fIsbn").value.trim(),
+    /* Seulement si la fiche vient d'une recherche : une saisie manuelle n'a
+       pas de provenance, et lui en inventer une rendrait le diagnostic faux
+       précisément là où il servirait. */
+    ...(sourceTrouvee ? { source: sourceTrouvee } : {}),
   };
 
   let livre;
@@ -1814,6 +1849,42 @@ async function chercherLivre() {
 
   try {
     const info = await appelerFonction("book-lookup", { requete });
+
+    /* VOUS L'AVEZ DÉJÀ — et on le dit avant de faire remplir un formulaire.
+     *
+     * L'API répond « deja » plutôt qu'une fiche. On ne pré-remplit rien : ce
+     * serait inviter à créer un doublon que la base refusera de toute façon.
+     * On propose d'ouvrir l'existante, qui est presque toujours plus riche —
+     * elle a eu le temps de recevoir un résumé, une note, un rayon corrigé. */
+    if (info.deja) {
+      etatEl.className = "etat";
+      etatEl.replaceChildren();
+
+      const phrase = document.createElement("div");
+      phrase.textContent = "Vous avez déjà « " + info.deja.titre + " » de "
+                         + info.deja.auteur + ".";
+      etatEl.appendChild(phrase);
+
+      const ouvrir = document.createElement("button");
+      ouvrir.type = "button";
+      ouvrir.className = "btn";
+      ouvrir.style.marginTop = "8px";
+      ouvrir.textContent = "Ouvrir sa fiche";
+      /* « ouvrirFiche » prend un IDENTIFIANT, pas un objet — vérifié plutôt
+         que supposé, après m'être trompé une première fois. */
+      ouvrir.onclick = () => {
+        document.getElementById("modale").close();
+        ouvrirFiche(info.deja.id);
+      };
+      etatEl.appendChild(ouvrir);
+      return;
+    }
+
+    /* On retient d'où vient la fiche pour l'enregistrer avec elle. Sans ce
+       report, la provenance mourrait entre la recherche et la sauvegarde —
+       exactement ce qui a coûté une demi-heure d'enquête le 18/08. */
+    sourceTrouvee = info.source ?? null;
+
     if (info.titre)   document.getElementById("fTitre").value   = info.titre;
     if (info.auteur)  document.getElementById("fAuteur").value  = info.auteur;
     if (info.editeur) document.getElementById("fEditeur").value = info.editeur;

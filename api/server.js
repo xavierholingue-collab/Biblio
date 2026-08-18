@@ -697,6 +697,29 @@ async function statistiques(client, session, langue) {
 }
 
 // Insertion ou mise à jour d'un lot d'ouvrages, en une seule requête.
+/* Le refus de la base, traduit en quelque chose d'actionnable.
+ *
+ * Le nom de la contrainte est lu tel quel — c'est lui qui distingue « vous
+ * possédez déjà cet ouvrage » d'un autre doublon. Le comparer par égalité
+ * plutôt que par « contient » : une contrainte future dont le nom
+ * contiendrait celui-ci hériterait sinon d'un message faux. */
+const CONTRAINTE_DOUBLON = "possessions_tenant_id_ouvrage_id_key";
+
+/* Le vocabulaire des provenances. Composables par « + », dans l'ordre où les
+ * sources ont répondu : « bnf », « bnf+openlibrary », « bnf:autre-edition ».
+ * La base contraint la forme, cette expression contraint le sens. */
+const SOURCES_CONNUES =
+  /^(bnf|bnf:autre-edition|openlibrary|googlebooks|modele)(\+(bnf|bnf:autre-edition|openlibrary|googlebooks|modele)){0,3}$/;
+
+function traduireConflit(e) {
+  if (e.code !== "23505" || e.constraint !== CONTRAINTE_DOUBLON) return e;
+  const q = new Error(
+    "Vous possédez déjà cet ouvrage. Ouvrez sa fiche pour la modifier "
+    + "plutôt que d'en créer une seconde.");
+  q.statut = 409;
+  return q;
+}
+
 async function enregistrerLivres(client, livres) {
   if (!livres.length) return 0;
 
@@ -731,6 +754,18 @@ async function enregistrerLivres(client, livres) {
       categorie: l.categorie,
       sous_categorie: l.sous_categorie ?? l.sousCategorie,
       sphere,
+
+      /* LA PROVENANCE, FILTRÉE ICI PLUTÔT QUE CRUE.
+       *
+       * Elle vient du navigateur, qui la tient de notre propre réponse — mais
+       * un client modifié écrit ce qu'il veut. La base borne déjà la FORME ;
+       * ici on borne le VOCABULAIRE, parce que c'est en JavaScript qu'il vit
+       * et qu'il changera avec les sources.
+       *
+       * Ce qui ne correspond pas devient NULL, pas une erreur : refuser
+       * l'enregistrement d'un livre parce qu'une métadonnée de diagnostic est
+       * mal formée serait disproportionné. */
+      source: SOURCES_CONNUES.test(String(l.source ?? "")) ? String(l.source) : null,
 
       /* VISIBILITÉ : NULL SIGNIFIE « JE NE ME PRONONCE PAS ».
        *
@@ -769,7 +804,8 @@ async function enregistrerLivres(client, livres) {
   const SOURCE = `jsonb_to_recordset($1::jsonb) as e(
       id text, isbn text, titre text, auteur text, editeur text, annee int,
       pages int, cover_url text, cover_statut text, statut text, note numeric,
-      categorie text, sous_categorie text, sphere text, visibilite text)`;
+      categorie text, sous_categorie text, sphere text, visibilite text,
+      source text)`;
 
   const MOI = `nullif(current_setting('app.tenant_id', true), '')::uuid`;
 
@@ -793,17 +829,36 @@ async function enregistrerLivres(client, livres) {
   //    jamais un ouvrage déjà connu — la correction est un geste séparé.
   await client.query(
     `insert into ouvrages (cle, isbn, titre, auteur, editeur, annee, pages,
-                           cover_url, cover_statut)
+                           cover_url, cover_statut, source, source_le)
      select distinct on (cle) * from (
        select ${CLE} as cle, e.isbn, e.titre, e.auteur, e.editeur, e.annee,
-              e.pages, e.cover_url, coalesce(e.cover_statut, 'inconnu')
+              e.pages, e.cover_url, coalesce(e.cover_statut, 'inconnu'),
+              e.source, case when e.source is not null then now() end
          from ${SOURCE}
          left join possessions p on p.tenant_id = ${MOI} and p.id = e.id
         where e.isbn is not null or p.id is null) t
      on conflict (cle) do nothing`, [charge]);
 
-  // 2. La possession. Le locataire vient du réglage de session, celui-là
-  //    même que la politique d'écriture vérifie.
+  /* 2. La possession. Le locataire vient du réglage de session, celui-là
+   *    même que la politique d'écriture vérifie.
+   *
+   * POURQUOI CETTE ÉCRITURE PEUT ÉCHOUER, ET CE QU'ON EN DIT.
+   *
+   * « on conflict (tenant_id, id) » ne couvre QUE la clé primaire. Il existe
+   * une seconde contrainte — « unique (tenant_id, ouvrage_id) » — qui interdit
+   * de posséder deux fois le même ouvrage, et celle-là n'est rattrapée par
+   * rien. Une fiche neuve, donc un « id » neuf, ne heurte pas la première et
+   * heurte la seconde.
+   *
+   * Sans le traitement ci-dessous, PostgreSQL lève un 23505 qui traverse tout
+   * et ressort en « Erreur interne. » — un message qui ne dit ni ce qui s'est
+   * passé, ni quoi faire. Constaté en production le 18/08 : l'utilisateur a
+   * conclu que l'application était cassée, et n'a compris qu'en allant
+   * consulter sa bibliothèque depuis un autre appareil.
+   *
+   * On nomme donc l'échec. Le 409 n'est pas décoratif : il dit à l'interface
+   * que ce n'est ni une panne (500) ni une faute de saisie (400), mais un état
+   * du monde — et qu'il y a quelque chose à proposer plutôt qu'à réessayer. */
   await client.query(
     `insert into possessions (tenant_id, id, ouvrage_id, statut, note,
                               categorie, sous_categorie, sphere, visibilite, maj_le)
@@ -827,7 +882,8 @@ async function enregistrerLivres(client, livres) {
        ouvrage_id = excluded.ouvrage_id, statut = excluded.statut,
        note = excluded.note, categorie = excluded.categorie,
        sous_categorie = excluded.sous_categorie, sphere = excluded.sphere,
-       visibilite = excluded.visibilite, maj_le = now()`, [charge]);
+       visibilite = excluded.visibilite, maj_le = now()`, [charge])
+    .catch((e) => { throw traduireConflit(e); });
 
   /* 3. La correction du catalogue, pour les ouvrages qu'on possède.
    *
@@ -839,9 +895,44 @@ async function enregistrerLivres(client, livres) {
    * La politique « ouvrages_correction » limite la casse : on ne touche
    * qu'à ce qu'on possède. Une modification qu'elle refuse ne lève pas
    * d'erreur, elle touche zéro ligne. */
+  /* UN CHAMP VIDE N'EST PAS UNE CORRECTION — 18/08/2026.
+   *
+   * Les pages et la couverture étaient déjà protégées par « coalesce ». Le
+   * titre, l'auteur, l'éditeur et l'année, non : ils étaient écrasés sans
+   * condition. Une notice PLUS PAUVRE effaçait donc une notice PLUS RICHE.
+   *
+   * Constaté en production : un livre identifié par Google Books, qui rend
+   * rarement l'éditeur, serait venu vider l'éditeur d'une notice que la BnF
+   * avait correctement renseignée. L'enregistrement a échoué pour une autre
+   * raison — un doublon — et la transaction a tout annulé. Sans ce hasard,
+   * la donnée était perdue.
+   *
+   * ET LE CATALOGUE EST PARTAGÉ. L'effacement n'aurait pas touché la seule
+   * bibliothèque à l'origine du geste : il vaut pour tous les possesseurs de
+   * la même édition. C'est le seul défaut de cette série qui DÉTRUIT.
+   *
+   * « nullif(…, '') » parce que le vide arrive en chaîne vide, pas en NULL :
+   * un formulaire non rempli envoie "". Sans lui, coalesce garderait le vide
+   * et le correctif ne corrigerait rien.
+   *
+   * Ce que cela interdit, et c'est assumé : on ne peut plus EFFACER un champ
+   * du catalogue en le vidant. Corriger reste possible — on remplace par une
+   * valeur — mais vider demande un geste d'administration. C'est le bon sens
+   * de l'asymétrie : une correction est rare et réfléchie, un champ vide est
+   * le plus souvent un accident. */
   await client.query(
     `update ouvrages o set
-       titre = e.titre, auteur = e.auteur, editeur = e.editeur, annee = e.annee,
+       titre = coalesce(nullif(e.titre, ''), o.titre),
+       auteur = coalesce(nullif(e.auteur, ''), o.auteur),
+       editeur = coalesce(nullif(e.editeur, ''), o.editeur),
+       annee = coalesce(e.annee, o.annee),
+       /* La provenance suit la même règle que le reste : une fiche qui ne dit
+          pas d'où elle vient n'efface pas ce qu'on savait. « source_le » ne
+          bouge que si « source » bouge, sinon la date daterait le dernier
+          enregistrement plutôt que la dernière identification. */
+       source = coalesce(nullif(e.source, ''), o.source),
+       source_le = case when nullif(e.source, '') is not null then now()
+                        else o.source_le end,
        pages = coalesce(e.pages, o.pages),
        cover_url = coalesce(e.cover_url, o.cover_url),
        cover_statut = case when e.cover_url is not null
@@ -1455,6 +1546,45 @@ async function chercherLivre(dans, { requete }) {
   requete = String(requete ?? "").trim().slice(0, 300);
   if (!requete) { const e = new Error("Indiquez un ISBN ou un titre."); e.statut = 400; throw e; }
 
+  /* ==========================================================================
+     LE LIVRE QUE VOUS AVEZ DÉJÀ — LA QUESTION SE POSE EN PREMIER
+
+     Constaté le 18/08/2026 en production. Scanner un ouvrage déjà possédé
+     menait au bout du chemin : catalogues interrogés, modèle appelé, formulaire
+     rempli, vérifié, enregistré — et REFUSÉ à la dernière ligne par la
+     contrainte « unique (tenant_id, ouvrage_id) ». Sans message visible, parce
+     que l'échec s'affichait dans l'en-tête pendant que l'œil était dans la
+     modale. On ne l'apprenait qu'en allant voir sa bibliothèque.
+
+     La bonne réponse à « retrouve-moi ce livre » quand on le possède déjà
+     n'est pas une fiche : c'est « vous l'avez ». Elle ne coûte rien, elle
+     n'appelle personne, et elle arrive avant qu'on ait fait perdre du temps.
+
+     CE N'EST PAS UNE ERREUR, DONC PAS UN CODE D'ERREUR. Le corps porte
+     « deja » et l'interface décide quoi en faire — proposer d'ouvrir la fiche
+     existante, par exemple. Un 409 obligerait le navigateur à passer par son
+     chemin d'exception et perdrait l'identifiant en route.
+
+     La contrainte reste le dernier mot : ce contrôle-ci évite le gâchis, il
+     ne remplace pas le refus de la base. Une saisie manuelle simultanée, un
+     import, une reprise de données ne passeront pas par ici.
+     ========================================================================== */
+  const isbnDemande = isbn13(requete);
+  if (isbnDemande) {
+    const [deja] = await dans((c) => c.query(
+      `select p.id, o.titre, o.auteur
+         from possessions p
+         join ouvrages o on o.id = p.ouvrage_id
+        where p.tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid
+          and o.isbn = $1
+        limit 1`, [isbnDemande]).then(r => r.rows));
+
+    if (deja) {
+      return { deja: { id: deja.id, titre: deja.titre, auteur: deja.auteur },
+               isbn: isbnDemande };
+    }
+  }
+
   // La liste proposee au modele doit inclure les rayons que vous avez
   // acceptes depuis : sinon il rangerait en « Non classé » un ouvrage dont
   // le rayon existe desormais.
@@ -1631,6 +1761,11 @@ Sinon laisse "rayonSuggere" et "motif" vides.`;
     isbn: livre.isbn,
     source,
     identification: "catalogue",
+    /* Ce qui est DÉDUIT doit se distinguer de ce qui est MESURÉ. L'éditeur
+       peut venir d'une autre édition du même ouvrage ; l'interface doit
+       pouvoir le dire plutôt que de le présenter comme une donnée de la
+       notice scannée. */
+    editeurAutreEdition: livre.editeur_autre_edition === true,
   }, RAYONS);
 }
 
