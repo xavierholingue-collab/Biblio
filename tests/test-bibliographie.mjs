@@ -116,6 +116,13 @@ const catalogues = createServer(async (req, rep) => {
       : {}));
   }
   rep.writeHead(200, { "content-type": "application/json" });
+  if (cas === "couverture") {
+    /* « http: » en dur : de vieilles notices Google le rendent encore, et la
+       page étant servie en HTTPS l'image serait bloquée. On vérifie que la
+       réécriture a lieu côté serveur. */
+    return rep.end(JSON.stringify({ items: [{ volumeInfo: {
+      title: "T", imageLinks: { thumbnail: "http://exemple.test/couv.jpg" } } }] }));
+  }
   rep.end(JSON.stringify(cas === "trouve"
     ? { items: [{ volumeInfo: { title: "Titre Google", authors: ["Sylvie Augereau"],
                                 publisher: "GB", publishedDate: "2021", pageCount: 223 } }] }
@@ -133,7 +140,11 @@ const faussaire = createServer(async (req, rep) => {
   let j = null;
   try { j = JSON.parse(brut); } catch { /* corps illisible */ }
   recus.push({ texte: j?.messages?.[0]?.content ?? "",
-               outils: (j?.tools ?? []).map(t => t.name ?? t.type) });
+               outils: (j?.tools ?? []).map(t => t.name ?? t.type),
+               /* Le TYPE et pas seulement le nom : les deux versions de
+                  l'outil s'appellent « web_search », et c'est le type qui
+                  décide du filtrage dynamique — donc du coût. */
+               types: (j?.tools ?? []).map(t => t.type) });
 
   const charge = reponseModele ?? { auteur: "Augereau Sylvie", categorie: "Académique",
                                     sousCategorie: "Philosophie", rayonSuggere: "", motif: "" };
@@ -156,6 +167,10 @@ const serveur = spawn(process.execPath, [path.join(API, "server.js")], {
     ANTHROPIC_URL: `http://127.0.0.1:${MODELE_PORT}/v1/messages`,
     CATALOGUES_URL: `http://127.0.0.1:${CATA_PORT}/`,
     CLE_GOOGLE_BOOKS: "clef-google-de-controle",
+    /* Une valeur DIFFÉRENTE du défaut : c'est la seule façon de prouver que
+       la couture est branchée. Régler la variable sur ce que le code met déjà
+       en dur ne vérifierait rien. */
+    OUTIL_RECHERCHE: "web_search_20250305",
     FICHIER_AMORCE: "/inexistant", TENANT_DEFAUT: "xavier",
   },
   stdio: ["ignore", "pipe", "pipe"],
@@ -330,11 +345,51 @@ verifier("… et garde la recherche web",
   (recus[0]?.outils ?? []).includes("web_search"), JSON.stringify(recus[0]?.outils));
 verifier("… et rend une fiche", rTitre.corps?.titre === "Par le titre", rTitre.corps?.titre);
 
+/* LA VERSION DE L'OUTIL EST CELLE QUE L'ENVIRONNEMENT DIT.
+ *
+ * Les deux versions s'appellent « web_search » : seul le TYPE distingue celle
+ * qui filtre les résultats avant le contexte de celle qui les y déverse. Un
+ * contrôle qui ne regarde que le nom ne verrait pas la différence — et c'est
+ * pourtant elle qui décide de 95 % du coût d'un livre.
+ *
+ * On règle la variable sur l'ANCIENNE version, différente du défaut : si la
+ * couture n'était pas branchée, le serveur enverrait la nouvelle et ce
+ * contrôle tomberait. */
+verifier("la version de l'outil de recherche vient de l'environnement",
+  (recus[0]?.types ?? []).includes("web_search_20250305"),
+  JSON.stringify(recus[0]?.types));
+
 /* Un ISBN mal formé ne doit pas partir au catalogue non plus. */
 appelsCatalogue.length = 0;
 await chercher("978207295808");            // douze chiffres
 verifier("un ISBN incomplet n'est pas envoyé aux catalogues",
   appelsCatalogue.length === 0, JSON.stringify(appelsCatalogue));
+
+/* =====================================================================
+   6 bis. LA COUVERTURE DE SECOURS PASSE PAR L'API
+
+   Le navigateur appelait Google Books sans clef. Depuis 2026 c'est 429, et
+   l'échec est invisible : une couverture introuvable et une requête refusée
+   donnent le même écran. La clef ne peut pas descendre dans la page.
+   ===================================================================== */
+
+const couverture = (isbn) =>
+  fetch(`${BASE}/api/couverture?isbn=${encodeURIComponent(isbn)}`)
+    .then(async r => ({ statut: r.status, corps: await r.json().catch(() => null) }));
+
+plan = { bnf: "absent", openlibrary: "absent", googlebooks: "couverture" };
+const rCouv = await couverture(ISBN);
+verifier("la couverture de secours est rendue par l'API",
+  rCouv.corps?.url === "https://exemple.test/couv.jpg", JSON.stringify(rCouv.corps));
+
+/* La route est OUVERTE — la page publique en a besoin — donc elle ne doit
+   rien exiger d'autre qu'un ISBN valide, et ne rien rendre pour le reste. */
+verifier("un ISBN invalide ne déclenche aucun appel et rend null",
+  (await couverture("pas-un-isbn")).corps?.url === null);
+
+plan = { bnf: "absent", openlibrary: "absent", googlebooks: "absent" };
+verifier("sans couverture connue, l'API rend null plutôt qu'une erreur",
+  (await couverture(ISBN)).corps?.url === null);
 
 /* =====================================================================
    7. LES DEUX CHEMINS SONT SÉPARÉS AU JOURNAL

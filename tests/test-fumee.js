@@ -385,6 +385,67 @@ const attendre = ms => new Promise(r => setTimeout(r, ms));
     verifier("clé EAN-13 : un chiffre faux est refusé",
       refuses.every(c => !estEan13(c)),
       refuses.filter(estEan13).join(", "));
+
+    /* ------------------------- La porte de sortie -------------------------
+       Deux codes sur dix-huit n'ont pas été lus le 18/08/2026 — 11 %, aperçu
+       fluide, donc ni WebKit ni la caméra. La saisie manuelle existait déjà
+       mais rien ne la proposait à quelqu'un qui tient son téléphone.
+
+       ON N'ATTEND PAS DOUZE SECONDES POUR L'ÉPROUVER. On remplace « setTimeout »
+       par un espion : il capture le délai et le rappel, et on déclenche le
+       rappel à la main. Ce qui est vérifié est la LOGIQUE, pas la patience. */
+    const bornes = bloc.match(
+      /const DELAI_SAISIE_MANUELLE[\s\S]*?function armerSaisieManuelle\(\)[\s\S]*?\n}/)?.[0];
+    verifier("le repli de saisie manuelle est présent dans le script", !!bornes);
+
+    if (bornes) {
+      const bouton = { hidden: false };          // faux : on part visible…
+      let rappel = null, delai = null;
+      const fabriquer = new Function("$", "setTimeout", "clearTimeout",
+        bornes + "; return { armerSaisieManuelle, DELAI_SAISIE_MANUELLE };");
+      const outils = fabriquer(() => bouton,
+                               (f, d) => { rappel = f; delai = d; return 1; },
+                               () => {});
+
+      outils.armerSaisieManuelle();
+      verifier("… et l'armement le masque d'abord", bouton.hidden === true);
+
+      /* Trop tôt, on propose d'abandonner à quelqu'un qui vise encore ; trop
+         tard, on l'abandonne vraiment. La borne dit l'intention, pas la
+         valeur exacte — 12 s aujourd'hui, ajustable sans casser ce contrôle. */
+      verifier("le délai laisse le temps de viser sans faire attendre",
+        delai >= 8000 && delai <= 20000, String(delai));
+
+      rappel();
+      verifier("passé le délai, la saisie manuelle est offerte",
+        bouton.hidden === false);
+    }
+
+    verifier("le bouton de saisie manuelle part masqué dans le HTML",
+      d.getElementById("scanManuel") !== null && d.getElementById("scanManuel").hidden,
+      d.getElementById("scanManuel") ? "visible au chargement" : "absent");
+
+    /* ---------------- La page n'appelle plus Google directement -----------
+       Depuis 2026, googleapis.com refuse les requêtes sans clef (429,
+       « quota_limit_value: 0 »). La clef ne peut pas descendre dans une page
+       publique : elle y serait lisible par tout le monde. Le secours passe
+       donc par notre API.
+
+       CONTRÔLE DE FORME, et je préfère le dire : jsdom n'exécute pas ce code
+       et ne voit donc pas où part une requête. La mutation qui rétablit
+       l'appel direct ne fait tomber AUCUNE vérification de comportement —
+       essayée le 18/08. Celle-ci lit la source, ce qui est plus faible, mais
+       elle attrape exactement la régression qu'on redoute : quelqu'un qui
+       « simplifie » en rappelant Google depuis le navigateur.
+
+       PIÈGE ÉVITÉ DE JUSTESSE : la première version de ce contrôle lisait
+       « bloc », c'est-à-dire le script du SCANNER. Or les couvertures vivent
+       dans le script principal. La mutation passait donc au vert — un
+       contrôle qui regarde au mauvais endroit ne dit rien, et le dit avec
+       assurance. On lit le fichier entier. */
+    verifier("la page n'appelle pas googleapis directement",
+      !/fetch\(\s*["'`][^"'`]*googleapis/.test(html),
+      "un fetch vers googleapis.com subsiste dans la page");
   }
 
   /* Déconnexion */

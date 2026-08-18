@@ -299,6 +299,17 @@
     text-shadow: 0 1px 3px rgba(0,0,0,.8);
   }
   .scan-aide.err { color: #FFB3B3; }
+
+  /* La porte de sortie. Volontairement DISCRÈTE — bordée, pas pleine — pour
+     ne pas concurrencer le scan qui, lui, marche seize fois sur dix-huit. Elle
+     doit se voir quand on la cherche, pas attirer l'œil quand tout va bien. */
+  .scan-manuel {
+    position: absolute; left: 50%; transform: translateX(-50%);
+    bottom: calc(env(safe-area-inset-bottom) + 78px);
+    background: rgba(0,0,0,.35); color: #fff; border: 1px solid rgba(255,255,255,.75);
+    border-radius: 999px; padding: 10px 22px; font-size: 15px;
+    font-family: var(--sans); cursor: pointer;
+  }
   .scan-fermer {
     position: absolute; left: 50%; transform: translateX(-50%);
     bottom: calc(env(safe-area-inset-bottom) + 24px);
@@ -607,6 +618,9 @@
     <video id="scanVideo" playsinline muted autoplay></video>
     <div class="scan-visee" aria-hidden="true"></div>
     <p class="scan-aide" id="scanAide">Placez le code-barres dans le cadre.</p>
+    <!-- Caché au départ, offert au bout de douze secondes. Voir la note dans
+         le script : deux codes sur dix-huit n'ont pas été lus le 18/08. -->
+    <button class="scan-manuel" id="scanManuel" type="button" hidden>Saisir l'ISBN à la main</button>
     <button class="scan-fermer" id="scanFermer" type="button">Annuler</button>
   </div>
 </dialog>
@@ -1019,13 +1033,21 @@ function urlOpenLibrary(isbn) {
   return "https://covers.openlibrary.org/b/isbn/" + encodeURIComponent(isbn) + "-M.jpg?default=false";
 }
 
+/* LE SECOURS PASSE PAR NOTRE API DEPUIS LE 18/08/2026, ET IL LE FAUT.
+ *
+ * Cette fonction appelait googleapis.com directement, sans clef. Google a
+ * supprimé la consultation anonyme : la réponse est désormais un 429 avec
+ * « quota_limit_value: 0 ». Le secours ne fonctionnait donc plus, et le
+ * défaut était invisible — une couverture introuvable et une requête refusée
+ * produisent le même écran : la couverture dessinée.
+ *
+ * La clef ne peut pas descendre ici, elle serait publique. C'est l'API qui
+ * demande. Open Library, au-dessus, reste dans le navigateur : c'est une URL
+ * d'image déterministe, sans clef et sans appel d'API. */
 async function urlGoogleBooks(isbn) {
   try {
-    const r = await fetch("https://www.googleapis.com/books/v1/volumes?q=isbn:" + encodeURIComponent(isbn));
-    const d = await r.json();
-    const img = d.items?.[0]?.volumeInfo?.imageLinks;
-    const u = img?.thumbnail || img?.smallThumbnail;
-    return u ? u.replace(/^http:/, "https:") : null;
+    const d = await api("/couverture?isbn=" + encodeURIComponent(isbn));
+    return d?.url ?? null;
   } catch (e) { return null; }
 }
 
@@ -2042,7 +2064,38 @@ function aide(texte, erreur = false) {
   el.className = "scan-aide" + (erreur ? " err" : "");
 }
 
+/* =========================================================================
+   LA PORTE DE SORTIE — mesurée le 18/08/2026
+
+   Dix-huit livres scannés depuis l'icône d'accueil d'un iPhone. Seize lus,
+   DEUX NON LUS : 11 %. Ce n'est pas le défaut WebKit qu'on redoutait (l'aperçu
+   était fluide) — c'est zbar, la mise au point ou l'éclairage. Sur un produit
+   dont le scan est la porte d'entrée, 11 % d'échec silencieux est un problème
+   d'adoption à part entière.
+
+   Le pire n'est pas l'échec : c'est de ne pas savoir qu'une issue existe. La
+   saisie manuelle a toujours été possible — le champ est là, derrière — mais
+   rien ne le disait à quelqu'un qui tient son téléphone devant un livre.
+
+   DOUZE SECONDES, et pas trois. Trop tôt, on propose d'abandonner à quelqu'un
+   qui est simplement en train de viser, et on transforme un scan qui allait
+   réussir en saisie de treize chiffres. Le bouton apparaît, la caméra CONTINUE
+   de chercher : offrir une issue n'est pas fermer l'autre.
+   ========================================================================= */
+const DELAI_SAISIE_MANUELLE = 12_000;
+let horlogeManuelle = null;
+
+function armerSaisieManuelle() {
+  clearTimeout(horlogeManuelle);
+  $("scanManuel").hidden = true;
+  horlogeManuelle = setTimeout(() => { $("scanManuel").hidden = false; },
+                               DELAI_SAISIE_MANUELLE);
+}
+
 function arreter() {
+  clearTimeout(horlogeManuelle);
+  horlogeManuelle = null;
+  $("scanManuel").hidden = true;
   cancelAnimationFrame(scanne);
   scanne = null;
   // Sans cet arrêt explicite, la caméra reste allumée après la fermeture —
@@ -2091,6 +2144,7 @@ async function ouvrir() {
   }
 
   aide("Placez le code-barres dans le cadre.");
+  armerSaisieManuelle();
   boucler(video);
 }
 
@@ -2144,6 +2198,19 @@ function boucler(video) {
 if (capable) {
   $("btnScanner").onclick = ouvrir;
   $("scanFermer").onclick = arreter;
+
+  /* On ferme la caméra AVANT de donner le clavier : sur téléphone, laisser la
+     caméra tourner derrière un champ de saisie vide le témoin allumé, chauffe
+     l'appareil et n'apporte rien. « focus » après la fermeture du dialogue,
+     sinon le champ est encore masqué et le clavier ne s'ouvre pas. */
+  $("scanManuel").onclick = () => {
+    arreter();
+    const champ = $("rechercheIsbn");
+    $("etatRecherche").textContent =
+      "Saisissez les treize chiffres sous le code-barres.";
+    champ.focus();
+    champ.select?.();
+  };
   // Échap et le geste de retour ferment la fenêtre : la caméra doit
   // s'éteindre dans ces cas-là aussi.
   $("scanner").addEventListener("close", () => { if (flux) arreter(); });

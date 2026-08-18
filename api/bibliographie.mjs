@@ -294,6 +294,45 @@ export async function chercherParIsbn(brut) {
   return { issue: muettes.length ? "injoignable" : "absente", muettes };
 }
 
+/* =========================================================================
+   LA COUVERTURE DE SECOURS
+
+   Le navigateur cherche d'abord chez Open Library, par une URL d'image
+   DÉTERMINISTE — pas d'appel d'API, pas de clef, rien à rapatrier. Ce
+   chemin-là marche et reste où il est.
+
+   Le secours, lui, était cassé : la page appelait Google Books SANS CLEF, et
+   depuis 2026 cela rend 429. La recherche de couverture de secours échouait
+   donc en production, silencieusement, pour tout le monde. Personne ne s'en
+   plaint jamais — une couverture manquante ressemble à une couverture
+   absente, et l'application dessine la sienne.
+
+   La clef ne peut pas descendre dans le navigateur : elle y serait publique.
+   C'est donc l'API qui demande, et elle seule.
+
+   ON NE REND QUE L'ADRESSE, pas l'image. Relayer les octets ferait du serveur
+   un proxy d'images — bande passante, cache à gérer, et une porte pour faire
+   télécharger n'importe quoi par notre adresse IP. Le navigateur charge
+   l'image lui-même, comme il le fait déjà pour Open Library.
+   ========================================================================= */
+export async function couvertureDeSecours(brut) {
+  const isbn = isbn13(brut);
+  if (!isbn || !CLE_GOOGLE) return null;
+
+  try {
+    const url = `${adresse("googlebooks")}?q=isbn:${isbn}&key=${encodeURIComponent(CLE_GOOGLE)}`;
+    const j = await (await demander(url)).json();
+    const img = premier(j?.items)?.volumeInfo?.imageLinks;
+    const u = img?.thumbnail || img?.smallThumbnail;
+    /* « http: » en dur chez Google sur de vieilles notices : la page est
+       servie en HTTPS, une image en clair y serait bloquée. */
+    return u ? String(u).replace(/^http:/, "https:") : null;
+  } catch (e) {
+    console.warn("couverture de secours indisponible —", e.message);
+    return null;
+  }
+}
+
 /** L'état des catalogues au démarrage, pour le dire une fois plutôt qu'à
  *  chaque scan. Google sans clef n'empêche pas de démarrer — la BnF suffit
  *  au corpus français — mais il faut que ce soit écrit quelque part. */

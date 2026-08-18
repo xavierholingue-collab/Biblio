@@ -14,12 +14,40 @@ import {
   courrielPlausible, DUREE_LIEN_MINUTES,
 } from "./authentification.mjs";
 import { envoyerCourriel, messageDeConnexion, etatCourriel } from "./courriel.mjs";
-import { chercherParIsbn, isbn13, etatCatalogues } from "./bibliographie.mjs";
+import { chercherParIsbn, isbn13, etatCatalogues,
+         couvertureDeSecours } from "./bibliographie.mjs";
 
 const PORT = Number(process.env.PORT ?? 3000);
 const MOT_DE_PASSE = process.env.MOT_DE_PASSE ?? "";
 const CLE_ANTHROPIC = process.env.ANTHROPIC_API_KEY ?? "";
 const MODELE = process.env.MODELE ?? "claude-sonnet-5";
+
+/* =========================================================================
+   LA VERSION DE L'OUTIL DE RECHERCHE WEB — UN SEUL ENDROIT, ET UNE SORTIE
+
+   Mesuré le 18/08/2026 : après le passage des scans par les catalogues, le
+   RÉSUMÉ représente 95 % du coût d'un livre — 16 098 et 14 230 jetons
+   d'entrée sur les deux derniers, contre 877 pour le classement. Et ces
+   jetons ne sont pas l'invite : ce sont les résultats de recherche, injectés
+   dans le contexte et relus par le modèle à chaque tour.
+
+   « web_search_20260209 » fait FILTRER CES RÉSULTATS PAR DU CODE avant qu'ils
+   n'entrent dans le contexte. C'est le seul levier qui attaque cette part-là ;
+   baisser « max_uses » ne toucherait que les frais de recherche, un cinquième
+   du total.
+
+   POURQUOI UNE VARIABLE D'ENVIRONNEMENT PLUTÔT QU'UNE CONSTANTE. Le filtrage
+   dynamique s'exécute depuis le bac à sable d'exécution de code et demande un
+   modèle qui sait appeler un outil par programme. Sonnet 5 remplit la
+   condition annoncée (Claude 4.6 et suivants), mais je ne peux pas l'éprouver
+   sans appeler l'API pour de vrai — les contrôles parlent à un faux serveur.
+
+   Si l'API refuse, la réparation est « OUTIL_RECHERCHE=web_search_20250305 »
+   dans le fichier d'environnement et un redémarrage. Pas une livraison, pas
+   un correctif écrit sous la pression. C'est la même forme que COURRIEL_SERVICE
+   le 17/08, dont la bascule a coûté un mot et zéro ligne de code.
+   ========================================================================= */
+const OUTIL_RECHERCHE = process.env.OUTIL_RECHERCHE ?? "web_search_20260209";
 const FICHIER_AMORCE = process.env.FICHIER_AMORCE ?? "/seed/bibliotheque.json";
 // Faux par défaut : un visiteur anonyme ne doit pas pouvoir dépenser vos crédits.
 const IA_PUBLIQUE = process.env.IA_PUBLIQUE === "true";
@@ -1184,7 +1212,7 @@ Termine en appelant l'outil enregistrer_resume. N'écris rien d'autre.`;
     max_tokens: 2000,
     messages: [{ role: "user", content: consigne }],
     tools: [
-      { type: "web_search_20250305", name: "web_search", max_uses: 2 },
+      { type: OUTIL_RECHERCHE, name: "web_search", max_uses: 2 },
       OUTIL_RESUME,
     ],
   });
@@ -1377,7 +1405,7 @@ Réponds UNIQUEMENT par un objet JSON, sans texte autour ni balises Markdown :
       model: MODELE,
       max_tokens: 1500,
       messages: [{ role: "user", content: consigneExterne }],
-      tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 4 }],
+      tools: [{ type: OUTIL_RECHERCHE, name: "web_search", max_uses: 4 }],
     });
 
     let brut = [];
@@ -1489,7 +1517,7 @@ Si en revanche un rayon convient, laisse "rayonSuggere" et "motif" vides.`;
     model: MODELE,
     max_tokens: 1200,
     messages: [{ role: "user", content: consigne }],
-    tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 3 }],
+    tools: [{ type: OUTIL_RECHERCHE, name: "web_search", max_uses: 3 }],
   });
 
   const info = extraireJson((d.content ?? []).filter(b => b.type === "text").map(b => b.text).join("\n"));
@@ -1829,6 +1857,20 @@ const serveur = createServer(async (req, rep) => {
       return json(rep, await dans((c) => rayonsDisponibles(c)));
     }
 
+    /* LA COUVERTURE DE SECOURS — ouverte, parce que la page publique en a
+       besoin, et BORNÉE pour la même raison.
+       Elle ne touche ni la base ni le modèle : elle demande une adresse
+       d'image à Google Books avec notre clef, que le navigateur ne peut pas
+       porter. Un visiteur anonyme peut donc la solliciter, et le quota de
+       lecture qui protège déjà /api/livres la protège aussi — sans quoi on
+       offrirait un moyen d'épuiser notre quota Google depuis l'extérieur. */
+    if (chemin === "/api/couverture" && req.method === "GET") {
+      if (!session && tropDeLectures(ip)) {
+        return json(rep, { error: "Trop de requêtes. Réessayez dans une minute." }, 429);
+      }
+      return json(rep, { url: await couvertureDeSecours(url.searchParams.get("isbn")) });
+    }
+
     /* --- Les traitements qui coûtent de l'argent --- */
     const routesIA = ["/api/resume", "/api/recommandation", "/api/recherche-livre"];
     if (routesIA.includes(chemin) && !session && !IA_PUBLIQUE) {
@@ -1992,6 +2034,13 @@ await attendreLaBase();
   const cat = etatCatalogues();
   console.log(`Catalogues : bnf (${cat.bnf}), openlibrary (${cat.openlibrary}), `
             + `googlebooks (${cat.googlebooks})`);
+
+  /* Dit au démarrage, parce que c'est le premier endroit où regarder si les
+     résumés se mettent à échouer en 502 après une livraison. */
+  console.log(`Recherche web : ${OUTIL_RECHERCHE}`
+    + (OUTIL_RECHERCHE === "web_search_20250305"
+       ? " (sans filtrage dynamique — les résultats entrent entiers dans le contexte)"
+       : " (filtrage dynamique)"));
   if (!process.env.CLE_GOOGLE_BOOKS && ENVIRONNEMENT === "production") {
     console.warn("CLE_GOOGLE_BOOKS absente : Google Books est ignoré. La BnF et "
       + "Open Library suffisent au corpus français ; un ouvrage étranger absent "
