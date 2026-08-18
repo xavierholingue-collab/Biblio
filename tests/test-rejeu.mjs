@@ -187,17 +187,56 @@ if (passages.length === 3) {
      la PRÉSENCE de la levée dans le fichier — c'est plus faible, et c'est
      dit. La preuve par le comportement, elle, a eu lieu une fois : en
      recette, le 15/08/2026, sur la vraie bibliothèque. */
-  for (const [fichier, motif, quoi] of [
-    ["02-multi-locataire.sql", /no force row level security/,
-     "lève les politiques avant d'écrire"],
-    ["03-catalogue.sql", /alter table public\.possessions\s+no force/,
-     "lève les politiques avant son garde-fou"],
-    ["04-reglages.sql", /no force row level security/,
-     "lève les politiques avant d'installer les siennes"],
-  ]) {
-    const texte = fs.readFileSync(path.join(DB, fichier), "utf8");
-    verifier(`${fichier} ${quoi}`, motif.test(texte),
-      "la levée a disparu du fichier");
+  /* LA LISTE ÉCRITE À LA MAIN A DISPARU — 18/08/2026.
+   *
+   * Ces trois fichiers étaient nommés un par un. Le contrôle vérifiait donc
+   * exactement ce que quelqu'un avait pensé à y inscrire, et 05-usage-ia.sql
+   * est arrivé sans que rien ne s'en aperçoive. Une migration future qui
+   * écrirait sans lever les politiques ne ferait tomber aucune vérification :
+   * elle n'écrirait rien, en silence, et la livraison passerait au vert.
+   *
+   * C'est le troisième exemplaire du même défaut cette semaine — après le
+   * garde-fou RLS de SupPerf qui comparait le schéma à une liste, et la liste
+   * de migrations du banc d'essai. On dérive donc la règle du CONTENU.
+   *
+   * DEUX RÈGLES, ET AUCUNE EXCEPTION À DÉCLARER :
+   *
+   *   ① qui écrit doit lever. Sous « force row level security », une migration
+   *     qui insère sans lever n'échoue pas : la ligne sort du périmètre et
+   *     PostgreSQL rapporte zéro ligne touchée.
+   *   ② qui lève doit remettre. C'est le cas grave — les données restent
+   *     intactes, les contrôles de contenu au vert, et l'application lit tout.
+   *
+   * CE QU'ON RETIRE AVANT DE CHERCHER, et pourquoi chaque retrait compte :
+   * les commentaires (ces fichiers en sont pleins, en français, et le mot
+   * « update » y apparaît), et LES CORPS DE FONCTION — « as $$ … $$ ». Le
+   * corps de « consommer_appel_ia » contient un « insert into » qui ne
+   * s'exécute PAS au moment de la migration ; le compter exigerait une levée
+   * inutile de 04 et 05, et un contrôle qui réclame l'inutile finit désactivé.
+   * Les blocs « do $$ … $$ », eux, s'exécutent : on les garde. */
+  const sansCommentaires = (t) =>
+    t.replace(/\/\*[\s\S]*?\*\//g, "").replace(/--[^\n]*/g, "");
+
+  for (const fichier of FICHIERS) {
+    const brut = fs.readFileSync(path.join(DB, fichier), "utf8");
+    const propre = sansCommentaires(brut);
+    const executable = propre.replace(/\bas\s+\$\$[\s\S]*?\$\$/gi, "");
+
+    const ecrit  = /\b(insert\s+into|update\s+public\.|delete\s+from)/i.test(executable);
+    const leve   = /no\s+force\s+row\s+level\s+security/i.test(propre);
+    const remet  = /(?<!no\s)force\s+row\s+level\s+security/i.test(propre);
+
+    if (ecrit) {
+      verifier(`${fichier} écrit, donc lève les politiques`, leve,
+        "des écritures sans levée : elles ne toucheront aucune ligne, en silence");
+    }
+    if (leve) {
+      verifier(`${fichier} lève les politiques, donc les remet`, remet,
+        "levée sans remise : l'application lirait tout, et rien ne le dirait");
+    }
+    if (!ecrit && !leve) {
+      verifier(`${fichier} n'écrit rien, donc n'a rien à lever`, true);
+    }
   }
 
   const ouvertes = await q(

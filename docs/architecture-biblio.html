@@ -554,11 +554,31 @@ commit;   -- PostgreSQL défait le réglage lui-même</code></pre>
   votre compte.
 </p>
 
-<pre><code>consommer_appel_ia(route)
+<pre><code>consommer_appel_ia(route, modele)
   ├─ pas de locataire posé ?  → LÈVE une erreur          (jamais « 0 appels »)
   ├─ verrou sur la ligne du locataire  (for update)      (sinon 8 appels simultanés passent)
   ├─ compte du mois ≥ plafond ?  → refuse, code 53400    (l'API répond 429, pas 500)
-  └─ inscrit l'appel, PUIS le modèle est appelé</code></pre>
+  └─ inscrit l'appel et rend son identifiant, PUIS le modèle est appelé
+
+         … le modèle répond (ou pas) …
+
+enregistrer_usage_ia(id, issue, entrée, sortie, recherches)
+  ├─ 'ok'          l'appel a abouti, ses unités sont écrites
+  ├─ 'echec'       facturé, sans réponse — le quota reste consommé, c'est voulu
+  ├─ 'sans_mesure' abouti, mais la réponse ne portait pas d'« usage »
+  └─ 0 ligne touchée ?  → LÈVE   (sous RLS, écrire chez autrui ne lève pas tout seul)</code></pre>
+
+<p>
+  <strong>Depuis le 18/08/2026, le quota n'est plus la seule mesure.</strong> Il
+  compte des <em>appels</em>, et les appels ont cessé de se valoir : un résumé
+  lance deux recherches web, un parcours quatre, le second appel de la
+  recommandation aucune. La recherche web est facturée 10 $ pour mille, et
+  chaque lot de résultats entre dans le contexte — donc il est relu et
+  refacturé à chaque tour. Deux appels décomptés à l'identique peuvent différer
+  d'un facteur trois. Le plafond reste utile comme garde-fou ; il ne dit plus
+  la dépense. <code>05-usage-ia.sql</code> enregistre les unités réelles, et
+  <code>cout_ia_dollars()</code> est le seul endroit qui connaisse un tarif.
+</p>
 
 <ul class="serre">
   <li><strong>Le décompte est dans la base, pas dans l'API.</strong> Une
@@ -743,7 +763,14 @@ systemctl start biblio-api</code></pre>
 select count(*) from possessions;
 select identifiant, visibilite, langue, quota_ia_mois from tenants;
 select route, count(*) from appels_ia
- where cree_le >= date_trunc('month', now()) group by route;</code></pre>
+ where cree_le >= date_trunc('month', now()) group by route;
+
+-- Ce que ça a coûté, en dollars, par mois et par route
+select mois, route, appels, mesures, recherches_web, round(dollars, 4)
+  from cout_ia_par_mois order by mois desc, dollars desc;
+
+-- La mesure elle-même tient-elle ? Doit rendre ZÉRO ligne.
+select * from appels_ia_sans_mesure;</code></pre>
 <p class="sous">
   Pour <em>écrire</em> comme le fait l'application, il faut poser un locataire —
   sans quoi les politiques ne laisseront rien passer :

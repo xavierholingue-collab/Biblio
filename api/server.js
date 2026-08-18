@@ -1042,8 +1042,18 @@ async function appelerAnthropic(dans, route, corps) {
      La fonction lève si aucun locataire n'est posé : un appel anonyme ne peut
      pas être décompté, donc il n'a pas lieu. C'est la propriété qui rend le
      plafond réel plutôt que décoratif. */
+  /* Le modèle vient du CORPS, pas de la variable d'environnement.
+   *
+   * C'est « corps.model » qui est réellement facturé. Lire MODELE ici
+   * enregistrerait ce que l'application croit employer, et le jour où un
+   * appelant passera un modèle différent — la première passe sur un modèle
+   * moins cher est une piste ouverte — la mesure attribuerait la dépense au
+   * mauvais tarif sans que rien ne le signale. */
+  let appelId = null;
   try {
-    await dans((c) => c.query("select * from consommer_appel_ia($1)", [route]));
+    const { rows } = await dans((c) =>
+      c.query("select * from consommer_appel_ia($1, $2)", [route, corps?.model ?? null]));
+    appelId = rows?.[0]?.appel_id ?? null;
   } catch (e) {
     // 53400 : configuration_limit_exceeded. « Revenez le mois prochain »
     // n'est pas une panne, et ne doit pas s'afficher comme telle.
@@ -1060,22 +1070,65 @@ async function appelerAnthropic(dans, route, corps) {
     throw e;
   }
 
-  const r = await fetch(ANTHROPIC_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": CLE_ANTHROPIC,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify(corps),
-  });
+  /* NOTER CE QUE L'APPEL A COÛTÉ, SANS JAMAIS FAIRE ÉCHOUER L'APPEL.
+   *
+   * L'utilisateur a son résumé ; une écriture de comptabilité ratée ne doit
+   * pas le lui retirer. Mais un échec silencieux nous ramènerait au point de
+   * départ — un compteur qu'on croit tenu et qui ne l'est plus.
+   *
+   * D'où le partage : ici on journalise, et la vue « appels_ia_sans_mesure »
+   * garde la trace durable. Le journal se perd à la rotation, la ligne en base
+   * reste. Un contrôle qui ne vit que dans un journal n'est pas un contrôle. */
+  const noter = async (issue, usage) => {
+    if (appelId === null) return;
+    try {
+      await dans((c) => c.query(
+        "select enregistrer_usage_ia($1::bigint, $2, $3, $4, $5)",
+        [appelId, issue,
+         usage?.input_tokens ?? null,
+         usage?.output_tokens ?? null,
+         usage?.server_tool_use?.web_search_requests ?? null]));
+    } catch (e) {
+      console.error(`usage de l'appel ${appelId} non enregistré (${issue}) —`, e.message);
+    }
+  };
+
+  let r;
+  try {
+    r = await fetch(ANTHROPIC_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": CLE_ANTHROPIC,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify(corps),
+    });
+  } catch (e) {
+    /* Réseau coupé, service muet. L'appel est décompté — c'est la règle du
+       16/08 : ce qui coûte est la tentative — et il faut pouvoir distinguer
+       cette ligne d'une ligne dont la mesure a été perdue. */
+    await noter("echec");
+    throw e;
+  }
+
   if (!r.ok) {
+    await noter("echec");
     const detail = (await r.text()).slice(0, 300);
     const e = new Error(`Le modèle a refusé la requête (HTTP ${r.status}) : ${detail}`);
     e.statut = 502;
     throw e;
   }
-  return r.json();
+
+  const reponse = await r.json();
+
+  /* « sans_mesure » plutôt que « ok » sans jetons : l'appel a abouti, mais la
+     réponse ne portait pas d'« usage ». C'est le signe que le fournisseur a
+     changé la forme de sa réponse, et c'est précisément ce qu'on ne veut pas
+     découvrir six mois plus tard en s'étonnant d'un total trop bas. */
+  await noter(reponse?.usage ? "ok" : "sans_mesure", reponse?.usage);
+
+  return reponse;
 }
 
 function extraireJson(texte) {
