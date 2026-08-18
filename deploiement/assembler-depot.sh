@@ -77,7 +77,7 @@ for t in test-fumee.js test-accueil.js parcours.spec.mjs playwright.config.mjs \
          test-http-cloisonnement.mjs test-resumes-langues.mjs \
          test-catalogue.mjs test-environnement.mjs test-rejeu.mjs \
          test-reglages.mjs test-durcissement.mjs test-lien-magique.mjs \
-         test-usage-ia.mjs banc-postgres.mjs; do
+         test-usage-ia.mjs test-bibliographie.mjs banc-postgres.mjs; do
   [ -f "${DEPOT}/tests/${t}" ] || echec "tests/${t} absent — la CI l'appelle pourtant"
 done
 

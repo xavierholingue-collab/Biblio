@@ -165,7 +165,7 @@ jobs:
         run: |
           psql -h localhost -U biblio -d biblio -v ON_ERROR_STOP=1 -c \
             "create role biblio_app login password 'controle' nosuperuser nobypassrls;"
-          for base in rls lang cat clois ctx rejeu regl durc lien usag; do
+          for base in rls lang cat clois ctx rejeu regl durc lien usag bibl; do
             psql -h localhost -U biblio -d biblio -v ON_ERROR_STOP=1 -c \
               "create database biblio_${base} owner biblio_app;"
           done
@@ -173,7 +173,7 @@ jobs:
       - name: Cloisonnement, visibilite, catalogue, contexte, reglages, durcissement
         env: { PGPASSWORD: controle }
         run: |
-          npm install pg --no-audit --no-fund --silent
+          npm install pg fast-xml-parser --no-audit --no-fund --silent
           lancer () {
             echo "== $2"
             PGURL=postgres://biblio_app:controle@localhost:5432/biblio_$1 \
@@ -190,6 +190,7 @@ jobs:
           lancer durc  test-durcissement.mjs
           lancer lien  test-lien-magique.mjs
           lancer usag  test-usage-ia.mjs
+          lancer bibl  test-bibliographie.mjs
 
       # ------------------------------------------------------------------
       # AUTHENTIFICATION PAR LIEN MAGIQUE

@@ -47,14 +47,38 @@
    pour rien.
 
    ---------------------------------------------------------------------------
-   DDL SEULEMENT — donc pas de levée de politiques ici.
+   CE FICHIER A COMMENCÉ PAR NE RIEN ÉCRIRE. IL ÉCRIT MAINTENANT.
 
-   04-reglages.sql lève « force row level security » avant de travailler parce
-   qu'il ÉCRIT. Ce fichier ne fait que déclarer, et le DDL n'est pas soumis aux
-   politiques. SI L'ON AJOUTE UN JOUR UN REMPLISSAGE RÉTROACTIF ICI, il faudra
-   lever et remettre comme le fait 04 — sans quoi il s'exécutera sous le
-   cloisonnement qu'il installe, et n'écrira rien en silence.
+   La première version portait ici : « DDL seulement, donc pas de levée de
+   politiques — si l'on ajoute un jour un remplissage rétroactif, il faudra
+   lever et remettre comme le fait 04 ». Ce jour est arrivé le soir même.
+
+   Ce qui l'a provoqué mérite d'être raconté, parce que le défaut était dans le
+   contrôle et non dans le code. Mise en production le 18/08, la vue
+   « appels_ia_sans_mesure » a immédiatement signalé une ligne du 15/08 comme
+   « restée en vol ». Elle n'était pas en vol : elle est ANTÉRIEURE À
+   L'INSTRUMENT. La vue ne savait pas distinguer « la mesure a échoué » de
+   « la mesure n'existait pas encore ».
+
+   Ce n'est pas anodin. UN CONTRÔLE QUI CRIE SUR L'HISTOIRE FINIT DÉSACTIVÉ,
+   et le jour où il criera pour une vraie raison, personne ne regardera. Une
+   ligne parasite aujourd'hui, mille après une reprise de données.
+
+   D'où le remplissage ci-dessous, et donc la levée des politiques. Sous
+   « force row level security », un « update » lancé sans locataire ne lève
+   pas : aucune ligne ne correspond à la politique, PostgreSQL en rapporte
+   zéro, et la migration s'achève sans avoir rien fait. En silence.
    =========================================================================== */
+
+/* --------------------------------------------------------------------------
+   LEVER LE CLOISONNEMENT AVANT D'ÉCRIRE — même geste que 02, 03 et 04.
+   -------------------------------------------------------------------------- */
+do $$
+begin
+  if to_regclass('public.appels_ia') is not null then
+    execute 'alter table public.appels_ia no force row level security';
+  end if;
+end $$;
 
 /* ------------------------------------------------------- Ce qu'on mesure
 
@@ -71,6 +95,9 @@
                    consommé, c'est voulu, et il faut pouvoir le voir ;
      'sans_mesure' l'appel a abouti mais la réponse ne portait pas d'« usage ».
                    Le fournisseur a changé la forme de sa réponse.
+     'avant_mesure' la ligne est antérieure à cette migration. On ne sait rien
+                   d'elle et on ne saura jamais rien : c'est un fait, pas une
+                   anomalie.
 
    NULL signifie « en vol ». Une ligne restée NULL une heure après sa création
    raconte un processus mort au milieu d'un appel.
@@ -87,7 +114,29 @@ alter table public.appels_ia
 
 alter table public.appels_ia drop constraint if exists appels_ia_issue_connue;
 alter table public.appels_ia add constraint appels_ia_issue_connue
-  check (issue is null or issue in ('ok', 'echec', 'sans_mesure'));
+  check (issue is null or issue in ('ok', 'echec', 'sans_mesure', 'avant_mesure'));
+
+/* --------------------------------------- Marquer ce qui précède l'instrument
+
+   UNE DATE ÉCRITE EN DUR, ET C'EST TOUT L'INTÉRÊT.
+
+   La tentation est d'écrire « where issue is null » : plus court, et faux de
+   la pire façon. Rejouée dans six mois — ce que ce fichier doit supporter —
+   cette condition marquerait « avant_mesure » toute ligne EN VOL à cet
+   instant, c'est-à-dire un appel réellement en cours. Le contrôle perdrait
+   exactement ce qu'il est censé attraper, et il le perdrait en silence.
+
+   Une constante ne peut pas dériver. Le 18/08/2026 est le jour où les
+   colonnes sont apparues en production ; tout ce qui précède est, par
+   construction, hors de portée de la mesure. Aucune ligne future ne peut
+   entrer dans ce filtre, quel que soit le nombre de rejeux.
+
+   C'est la règle « borner toute exception » : une exception datée s'épuise,
+   une exception conditionnelle s'étend. */
+update public.appels_ia
+   set issue = 'avant_mesure'
+ where issue is null
+   and cree_le < timestamptz '2026-08-18 00:00:00+02';
 
 /* ==========================================================================
    CONSOMMER, EN RENDANT DE QUOI REVENIR ÉCRIRE
@@ -310,7 +359,24 @@ with (security_invoker = true) as
            when a.modele is null           then 'sans modèle'
          end as anomalie
     from public.appels_ia a
-   where a.cree_le < now() - interval '1 hour'
+   /* L'EXCLUSION EST EN TÊTE, pas dans une des trois branches. Une ligne
+      antérieure à l'instrument n'a ni modèle, ni issue, ni jetons : elle
+      remplirait DEUX motifs sur trois. La sortir une fois, au-dessus, plutôt
+      que de la sortir trois fois et d'en oublier une à la quatrième. */
+   where a.issue is distinct from 'avant_mesure'
+     and a.cree_le < now() - interval '1 hour'
      and (   a.issue is null
           or (a.issue = 'ok' and a.jetons_entree is null)
           or a.modele is null);
+
+/* --------------------------------------------------------------------------
+   REMETTRE LE CLOISONNEMENT
+
+   Sans cette ligne, le compte applicatif — propriétaire de la table —
+   échapperait à la politique posée par 04. Les données seraient intactes, les
+   contrôles de contenu au vert, et l'écriture libre pour tout le monde.
+
+   test-rejeu.mjs le vérifie deux fois : dans pg_class après le rejeu, et par
+   la règle « qui lève doit remettre », qui lit ce fichier.
+   -------------------------------------------------------------------------- */
+alter table public.appels_ia force row level security;

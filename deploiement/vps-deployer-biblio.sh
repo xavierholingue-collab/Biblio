@@ -85,12 +85,33 @@ tar -tzf "${TRAVAIL}/paquet.tar.gz" >/dev/null 2>&1 || { echo "  ECHEC archive i
 mkdir -p "${TRAVAIL}/contenu"
 tar -xzf "${TRAVAIL}/paquet.tar.gz" -C "${TRAVAIL}/contenu" || { echo "  ECHEC extraction"; exit 1; }
 
-for attendu in api/server.js api/package.json api/locataire.mjs web/index.html \
+for attendu in api/server.js api/package.json web/index.html \
                db/01-schema.sql \
                deploiement/calculer-csp.mjs deploiement/verifier-migration.sql; do
   [ -f "${TRAVAIL}/contenu/${attendu}" ] \
     || { echo "  ECHEC fichier attendu absent : ${attendu}"; exit 1; }
 done
+
+# LES MODULES DE L'API NE SONT PLUS NOMMES NON PLUS — meme correction que
+# pour les migrations, et pour la meme raison.
+#
+# Cette liste portait « api/locataire.mjs ». Elle n'a JAMAIS porte
+# « api/courriel.mjs », arrive le 17/08, ni « api/bibliographie.mjs », arrive
+# le 18/08. Une liste ecrite a la main ne protege que des fichiers qu'on a
+# pense a y ecrire : elle vieillit en silence et donne l'apparence d'un
+# controle.
+#
+# On demande donc a server.js lui-meme ce dont il a besoin. Un module absent
+# du paquet ferait echouer l'API AU DEMARRAGE, apres l'arret du service en
+# place — le controle final la verrait tomber, mais apres coup. Ici on refuse
+# avant d'avoir rien touche, et en nommant le fichier.
+modules=$(grep -oE 'from "\./[A-Za-z0-9_.-]+\.mjs"' "${TRAVAIL}/contenu/api/server.js" \
+          | sed 's|.*"\./||; s|"$||' | sort -u)
+for m in ${modules}; do
+  [ -f "${TRAVAIL}/contenu/api/${m}" ] \
+    || { echo "  ECHEC server.js importe api/${m}, absent du paquet"; exit 1; }
+done
+echo "  modules de l API presents ($(echo "${modules}" | wc -w) importes)"
 
 # LES MIGRATIONS NE SONT PLUS NOMMEES UNE PAR UNE, ET C'EST UNE CORRECTION.
 #

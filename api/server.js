@@ -14,6 +14,7 @@ import {
   courrielPlausible, DUREE_LIEN_MINUTES,
 } from "./authentification.mjs";
 import { envoyerCourriel, messageDeConnexion, etatCourriel } from "./courriel.mjs";
+import { chercherParIsbn, isbn13, etatCatalogues } from "./bibliographie.mjs";
 
 const PORT = Number(process.env.PORT ?? 3000);
 const MOT_DE_PASSE = process.env.MOT_DE_PASSE ?? "";
@@ -1431,6 +1432,27 @@ async function chercherLivre(dans, { requete }) {
   // le rayon existe desormais.
   const RAYONS = await dans((c) => rayonsDisponibles(c));
 
+  /* ==========================================================================
+     LE CATALOGUE D'ABORD. LE MODÈLE POUR CE QU'IL EST SEUL À SAVOIR FAIRE.
+
+     Un seul appel faisait jusqu'ici deux métiers : IDENTIFIER l'ouvrage — ce
+     qu'une bibliothèque nationale fait gratuitement et mieux — et le CLASSER
+     dans un rayon, ce qu'aucun catalogue ne sait faire parce que les rayons
+     sont les vôtres.
+
+     Mesuré le 18/08/2026 : l'identification par le modèle coûtait 0,075 € par
+     livre, et sur les deux ISBN qui avaient résisté ce soir-là, la BnF a
+     répondu juste là où le modèle proposait une édition erronée « sans
+     pouvoir confirmer ».
+
+     Quand le catalogue répond, LES DONNÉES BIBLIOGRAPHIQUES NE SONT MÊME PAS
+     SOUMISES AU MODÈLE : on ne lui demande que le rayon et l'ordre du nom. Ce
+     qu'on ne lui demande pas, il ne peut pas le déformer. */
+  const catalogue = isbn13(requete) ? await chercherParIsbn(requete) : null;
+
+  if (catalogue?.issue === "trouvee") return await classerDepuisCatalogue(
+    dans, catalogue.livre, catalogue.source, RAYONS);
+
   const consigne = `Trouve les informations bibliographiques du livre correspondant à : "${requete}".
 Utilise la recherche web pour vérifier. N'invente aucune donnée : si une information
 est introuvable, mets une chaîne vide ou null.
@@ -1472,6 +1494,122 @@ Si en revanche un rayon convient, laisse "rayonSuggere" et "motif" vides.`;
 
   const info = extraireJson((d.content ?? []).filter(b => b.type === "text").map(b => b.text).join("\n"));
 
+  /* D'OÙ VIENT CETTE FICHE — ET POURQUOI CE CHAMP EXISTE.
+   *
+   * La cascade distingue « absente » (les catalogues ont répondu qu'ils ne
+   * connaissent pas) de « injoignable » (ils se sont tus). J'ai défendu cette
+   * distinction longuement dans « bibliographie.mjs »… et en mutant le code,
+   * j'ai constaté qu'elle ne changeait RIEN : les deux cas tombaient sur le
+   * même chemin, la mutation qui les confondait ne faisait tomber aucun
+   * contrôle. Une distinction sans conséquence est un commentaire, pas une
+   * propriété.
+   *
+   * Elle en a une désormais, et elle est utile aux deux bouts. Pour la
+   * personne : « aucun catalogue n'a répondu » invite à réessayer plus tard,
+   * « aucun catalogue ne connaît cet ISBN » non. Pour nous : le jour où le
+   * coût des scans remontera, ce champ dira si c'est parce que la BnF était
+   * en panne ou parce que les ouvrages sont réellement inconnus — deux
+   * causes, deux remèdes. */
+  info.identification =
+      catalogue?.issue === "injoignable" ? "modele-catalogues-muets"
+    : catalogue?.issue === "absente"     ? "modele-catalogues-sans-notice"
+    :                                      "modele-sans-isbn";
+
+  if (catalogue?.issue === "injoignable") {
+    console.warn(`catalogues muets (${catalogue.muettes.join(", ")}) — `
+               + `identification par le modèle, à revérifier`);
+  }
+
+  return normaliserFiche(info, RAYONS);
+}
+
+/* ==========================================================================
+   LE CLASSEMENT SEUL — SANS RECHERCHE WEB
+
+   Appelé quand un catalogue a déjà identifié l'ouvrage. Deux différences avec
+   le chemin complet, et les deux comptent.
+
+   ① PAS D'OUTIL DE RECHERCHE. C'est là qu'était l'argent : deux tiers du coût
+     d'un scan venaient des résultats de recherche réinjectés dans le contexte
+     et relus à chaque tour. Ici l'invite fait quelques centaines de jetons et
+     n'en reçoit aucun en retour.
+
+   ② UNE ROUTE DISTINCTE AU JOURNAL. « /api/recherche-livre-classement » plutôt
+     que « /api/recherche-livre » : sans cela, les deux chemins se mélangeraient
+     dans « cout_ia_par_mois » et l'on ne pourrait pas prouver le gain. Une
+     optimisation qu'on ne peut pas mesurer est une opinion.
+   ========================================================================== */
+async function classerDepuisCatalogue(dans, livre, source, RAYONS) {
+  const consigne = `Un catalogue de bibliothèque a identifié cet ouvrage. Les données ci-dessous
+font foi : ne les corrige pas, ne les complète pas, ne cherche rien.
+
+Titre : ${livre.titre}
+Auteur (tel que catalogué) : ${livre.auteur || "inconnu"}
+Éditeur : ${livre.editeur || "inconnu"}
+Année : ${livre.annee ?? "inconnue"}
+
+Tu as DEUX choses à faire, et rien d'autre.
+
+1. Remettre le nom de l'auteur dans l'ordre « Nom Prénom » (exemple :
+   « Augereau, Sylvie » et « Sylvie Augereau » donnent tous deux
+   « Augereau Sylvie »). N'ajoute aucun mot qui ne soit pas dans le nom fourni.
+   Si l'auteur est inconnu, laisse la chaîne vide.
+
+2. Ranger l'ouvrage dans un rayon.
+
+Réponds UNIQUEMENT par un objet JSON, sans texte autour ni balises Markdown :
+{"auteur":"Nom Prénom","categorie":"","sousCategorie":"","rayonSuggere":"","motif":""}
+
+- "categorie" vaut exactement l'une de : "Académique", "Roman", "BD".
+- "sousCategorie" vaut exactement l'une des valeurs autorisées pour cette catégorie :
+Académique : ${RAYONS["Académique"].join(" | ")}
+Roman : ${RAYONS["Roman"].join(" | ")}
+BD : ${RAYONS["BD"].join(" | ")}
+
+Si aucun rayon ne convient réellement, mets "sousCategorie" à "Non classé",
+"rayonSuggere" au nom court du rayon qui manquerait (deux à quatre mots, dans
+le même style que les autres), et "motif" à une phrase disant pourquoi.
+Sinon laisse "rayonSuggere" et "motif" vides.`;
+
+  const d = await appelerAnthropic(dans, "/api/recherche-livre-classement", {
+    model: MODELE,
+    max_tokens: 600,
+    messages: [{ role: "user", content: consigne }],
+  });
+
+  const rendu = extraireJson((d.content ?? []).filter(b => b.type === "text").map(b => b.text).join("\n"));
+
+  /* LE MODÈLE PEUT RÉORDONNER UN NOM, PAS L'INVENTER.
+   *
+   * On lui demande une permutation ; rien ne l'oblige à s'y tenir, et un nom
+   * fabriqué serait indétectable à l'œil sur une fiche qu'on ne relit pas.
+   * On compare donc les MOTS, sans ordre ni accents ni casse : s'ils ne
+   * correspondent pas à ceux du catalogue, on garde le nom du catalogue.
+   * Une fiche mal ordonnée se corrige ; une fiche fausse se propage. */
+  const mots = (s) => String(s ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .toLowerCase().split(/[^a-z0-9]+/).filter(Boolean).sort().join(" ");
+  const auteur = mots(rendu.auteur) === mots(livre.auteur)
+    ? String(rendu.auteur ?? "").trim()
+    : livre.auteur;
+
+  /* Les données du catalogue écrasent tout ce que le modèle aurait pu dire :
+     elles ne lui ont pas été demandées, elles ne peuvent pas venir de lui. */
+  return normaliserFiche({
+    ...rendu,
+    titre: livre.titre,
+    auteur,
+    editeur: livre.editeur,
+    annee: livre.annee,
+    isbn: livre.isbn,
+    source,
+    identification: "catalogue",
+  }, RAYONS);
+}
+
+/* Ce que les DEUX chemins doivent subir avant de traverser l'API. Écrit une
+   fois : deux copies d'une règle de nettoyage divergent, et c'est la copie
+   oubliée qui laisse passer. */
+function normaliserFiche(info, RAYONS) {
   /* La categorie reste contrainte a la liste fermee : elle commande le reste
      de l'application. Le RAYON, lui, retombe desormais sur « Non classé »
      plutot que sur une chaine vide.

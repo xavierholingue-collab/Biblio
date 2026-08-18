@@ -394,6 +394,66 @@ verifier("une fois les lignes fautives retirées, le contrôle repasse au vert",
   (await q("select * from appels_ia_sans_mesure")).length === 0);
 
 /* =====================================================================
+   8 bis. CE QUI PRÉCÈDE L'INSTRUMENT N'EST PAS UNE ANOMALIE
+
+   Constaté en production le 18/08/2026, une heure après la mise en service :
+   la vue signalait une ligne du 15/08 comme « restée en vol ». Elle n'était
+   pas en vol, elle était antérieure aux colonnes. Un contrôle qui crie sur
+   l'histoire finit désactivé, et le jour où il criera pour une vraie raison,
+   personne ne regardera.
+
+   LE PIÈGE À ÉVITER EST DANS LE REMPLISSAGE, PAS DANS LA VUE. Écrire
+   « where issue is null » marquerait, à chaque rejeu, les appels EN COURS à
+   cet instant — le contrôle perdrait exactement ce qu'il doit attraper. D'où
+   une date écrite en dur, et les deux vérifications ci-dessous : celle qui
+   dit que ça marque, et celle qui dit que ça ne marque PAS trop.
+   ===================================================================== */
+
+const DB = ["db", path.join("..", "db")].find(d => fs.existsSync(path.join(d, "05-usage-ia.sql")));
+const rejouer05 = () =>
+  banc.dans(null, fs.readFileSync(path.join(DB, "05-usage-ia.sql"), "utf8"));
+
+const [ancienne] = await q(
+  `insert into appels_ia (tenant_id, route, cree_le)
+   values ($1, '/api/resume', timestamptz '2026-08-15 10:10:27+02') returning id`,
+  [xavier.id]);
+
+verifier("avant remplissage, une ligne d'avant l'instrument passe pour une anomalie",
+  (await q("select * from appels_ia_sans_mesure where id = $1", [ancienne.id])).length === 1);
+
+/* Le témoin, et c'est LUI qui compte : postérieur à la date butoir, sans
+   issue, assez vieux pour sortir du délai. Il représente un appel réellement
+   en vol au moment d'un rejeu. Le remplissage ne doit pas y toucher. */
+const [temoin] = await q(
+  `insert into appels_ia (tenant_id, route, modele, cree_le)
+   values ($1, '/api/resume', 'claude-sonnet-5', now() - interval '3 hours')
+   returning id`, [xavier.id]);
+
+await rejouer05();
+
+const [apres] = await q("select issue from appels_ia where id = $1", [ancienne.id]);
+verifier("le remplissage marque « avant_mesure » ce qui précède l'instrument",
+  apres?.issue === "avant_mesure", String(apres?.issue));
+verifier("… et la vue cesse de la signaler",
+  (await q("select * from appels_ia_sans_mesure where id = $1", [ancienne.id])).length === 0);
+
+const [intact] = await q("select issue from appels_ia where id = $1", [temoin.id]);
+verifier("un appel POSTÉRIEUR à la date butoir n'est PAS marqué par le rejeu",
+  intact?.issue === null, String(intact?.issue));
+verifier("… et reste signalé comme resté en vol",
+  (await q("select anomalie from appels_ia_sans_mesure where id = $1", [temoin.id]))[0]
+    ?.anomalie === "resté en vol");
+
+/* Le rejeu remet-il le cloisonnement ? 05 lève désormais les politiques pour
+   écrire ; l'oubli de la remise ne se verrait dans aucune donnée. */
+const [forceApresRejeu] = await q(
+  "select relforcerowsecurity from pg_class where relname = 'appels_ia'");
+verifier("après rejeu de 05, « appels_ia » est de nouveau sous « force »",
+  forceApresRejeu?.relforcerowsecurity === true, JSON.stringify(forceApresRejeu));
+
+await q("delete from appels_ia where id = any($1::bigint[])", [[ancienne.id, temoin.id]]);
+
+/* =====================================================================
    9. LE QUOTA N'A PAS ÉTÉ CASSÉ PAR LE CHANGEMENT DE SIGNATURE
    ===================================================================== */
 
