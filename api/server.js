@@ -1977,6 +1977,26 @@ await attendreLaBase();
     console.warn("ADRESSE_PUBLIQUE absente : les liens de connexion seront refusés. "
       + "Posez-la dans le fichier d'environnement (ex. https://biblio.xavier-holingue.eu).");
   }
+
+  /* L'ÉTAT DES CATALOGUES, DIT UNE FOIS PLUTÔT QU'À CHAQUE SCAN.
+   *
+   * « etatCatalogues » était exportée, importée… et jamais appelée. L'intention
+   * — dire au démarrage ce sur quoi on peut compter — n'existait que dans le
+   * nom de la fonction. Une fonction morte qui décrit une garantie est pire
+   * qu'aucune : elle rassure à la relecture.
+   *
+   * On ne refuse pas de démarrer sans clef Google : la BnF couvre le corpus
+   * français, qui est celui de la bibliothèque. Mais il faut que la troisième
+   * source manquante se voie dans le journal d'un déploiement, plutôt que de
+   * se découvrir sur un livre étranger introuvable six mois plus tard. */
+  const cat = etatCatalogues();
+  console.log(`Catalogues : bnf (${cat.bnf}), openlibrary (${cat.openlibrary}), `
+            + `googlebooks (${cat.googlebooks})`);
+  if (!process.env.CLE_GOOGLE_BOOKS && ENVIRONNEMENT === "production") {
+    console.warn("CLE_GOOGLE_BOOKS absente : Google Books est ignoré. La BnF et "
+      + "Open Library suffisent au corpus français ; un ouvrage étranger absent "
+      + "des deux partira au modèle, donc coûtera.");
+  }
 }
 
 /* Les liens périmés n'ont aucune raison de s'accumuler. Au démarrage suffit :
