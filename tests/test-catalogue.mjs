@@ -82,7 +82,7 @@ const [amie] = await q(
 
 const poser = (tenant, id, isbn, titre, visibilite, sphere = "Pro") => q(
   `insert into books (id,isbn,titre,auteur,categorie,sous_categorie,sphere,tenant_id,visibilite)
-   values ($1,$2,$3,'Auteur','Académique','Philosophie',$4,$5,$6)`,
+   values ($1,$2,$3,'Auteur','Savoirs','Philosophie',$4,$5,$6)`,
   [id, isbn, titre, sphere, tenant, visibilite]);
 
 // Le même ISBN, écrit différemment : les tirets ne doivent pas empêcher

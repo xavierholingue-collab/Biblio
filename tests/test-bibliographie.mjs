@@ -175,7 +175,7 @@ const faussaire = createServer(async (req, rep) => {
                   décide du filtrage dynamique — donc du coût. */
                types: (j?.tools ?? []).map(t => t.type) });
 
-  const charge = reponseModele ?? { auteur: "Augereau Sylvie", categorie: "Académique",
+  const charge = reponseModele ?? { auteur: "Augereau Sylvie", categorie: "Savoirs",
                                     sousCategorie: "Philosophie", rayonSuggere: "", motif: "" };
   rep.writeHead(200, { "content-type": "application/json" });
   rep.end(JSON.stringify({
@@ -286,13 +286,13 @@ verifier("la fiche dit qu'elle vient d'un catalogue",
    4. LE MODÈLE PEUT RÉORDONNER UN NOM, PAS L'INVENTER
    ===================================================================== */
 
-reponseModele = { auteur: "Augereau Sylvie", categorie: "Académique",
+reponseModele = { auteur: "Augereau Sylvie", categorie: "Savoirs",
                   sousCategorie: "Philosophie", rayonSuggere: "", motif: "" };
 const rOrdre = await chercher(ISBN);
 verifier("une permutation légitime du nom est acceptée",
   rOrdre.corps?.auteur === "Augereau Sylvie", rOrdre.corps?.auteur);
 
-reponseModele = { auteur: "Kahneman Daniel", categorie: "Académique",
+reponseModele = { auteur: "Kahneman Daniel", categorie: "Savoirs",
                   sousCategorie: "Philosophie", rayonSuggere: "", motif: "" };
 const rInvente = await chercher(ISBN);
 verifier("un nom INVENTÉ est refusé, et celui du catalogue conservé",
@@ -309,7 +309,7 @@ reponseModele = null;
 plan = { bnf: "muet", openlibrary: "muet", googlebooks: "muet" };
 appelsCatalogue.length = 0; recus.length = 0;
 reponseModele = { titre: "Trouvé par le modèle", auteur: "Auteur X", editeur: "E",
-                  annee: 2020, isbn: ISBN, categorie: "Académique",
+                  annee: 2020, isbn: ISBN, categorie: "Savoirs",
                   sousCategorie: "Philosophie", rayonSuggere: "", motif: "" };
 
 const rMuet = await chercher(ISBN);
@@ -365,7 +365,7 @@ verifier("un nom Open Library reste permutable par le modèle",
 plan = { bnf: "trouve", openlibrary: "absent", googlebooks: "absent" };
 appelsCatalogue.length = 0; recus.length = 0;
 reponseModele = { titre: "Par le titre", auteur: "A", editeur: "E", annee: 2020,
-                  isbn: "", categorie: "Académique", sousCategorie: "Philosophie",
+                  isbn: "", categorie: "Savoirs", sousCategorie: "Philosophie",
                   rayonSuggere: "", motif: "" };
 const rTitre = await chercher("Système 1 système 2");
 verifier("une recherche par titre n'interroge aucun catalogue",
@@ -537,7 +537,7 @@ await banc.semer({ tenant: bob, id: "b-deja", isbn: "9782072958084",
                    visibilite: "publique" });
 plan = { bnf: "absent", openlibrary: "absent", googlebooks: "absent", bnfTitre: "absent" };
 reponseModele = { titre: "Cherché", auteur: "A", editeur: "E", annee: 2020,
-                  isbn: "9782072958084", categorie: "Académique",
+                  isbn: "9782072958084", categorie: "Savoirs",
                   sousCategorie: "Philosophie", rayonSuggere: "", motif: "" };
 const rAutrui = await chercher("9782072958084");
 verifier("le livre d'un autre locataire n'est pas un doublon",
@@ -550,7 +550,7 @@ const conflit = await fetch(`${BASE}/api/livres`, {
   method: "PUT",
   headers: { "content-type": "application/json", cookie: session },
   body: JSON.stringify([{ id: "u-deja-bis", isbn: ISBN, titre: "Doublon",
-                          auteur: "A", categorie: "Académique",
+                          auteur: "A", categorie: "Savoirs",
                           sous_categorie: "Philosophie", sphere: "Pro" }]),
 }).then(async r => ({ statut: r.status, corps: await r.json().catch(() => null) }));
 
@@ -585,7 +585,7 @@ const poser = (corps) => fetch(`${BASE}/api/livres`, {
 }).then(r => r.status);
 
 await poser({ id: "u-prov", isbn: "9782072958085", titre: "Avec provenance",
-              auteur: "A", categorie: "Académique", sous_categorie: "Philosophie",
+              auteur: "A", categorie: "Savoirs", sous_categorie: "Philosophie",
               sphere: "Pro", source: rProv.corps.source });
 const [enBase] = await q(
   "select source, source_le from ouvrages where isbn = '9782072958085'");
@@ -596,7 +596,7 @@ verifier("… datée", enBase?.source_le !== null && enBase?.source_le !== undef
 /* Une provenance inventée n'entre pas. Ce champ ne commande rien, mais un
    diagnostic pollué ne vaut pas mieux qu'un diagnostic absent. */
 await poser({ id: "u-prov2", isbn: "9782072958086", titre: "Provenance douteuse",
-              auteur: "A", categorie: "Académique", sous_categorie: "Philosophie",
+              auteur: "A", categorie: "Savoirs", sous_categorie: "Philosophie",
               sphere: "Pro", source: "<script>alert(1)</script>" });
 const [sale] = await q("select source from ouvrages where isbn = '9782072958086'");
 verifier("une provenance hors vocabulaire est ignorée, pas enregistrée",
@@ -607,7 +607,7 @@ verifier("… sans faire échouer l'enregistrement du livre",
 /* Et une modification ultérieure sans provenance n'efface pas celle qu'on
    avait — même règle que pour l'éditeur. */
 await poser({ id: "u-prov", isbn: "9782072958085", titre: "Avec provenance",
-              auteur: "A", categorie: "Académique", sous_categorie: "Philosophie",
+              auteur: "A", categorie: "Savoirs", sous_categorie: "Philosophie",
               sphere: "Pro", note: 4 });
 const [garde] = await q("select source from ouvrages where isbn = '9782072958085'");
 verifier("une fiche sans provenance n'efface pas celle qui était connue",
@@ -654,6 +654,71 @@ const sansSession = await fetch(`${BASE}/api/catalogue?q=Typex%20Andy`)
   .then(r => r.status);
 verifier("la recherche libre est refusée sans session",
   sansSession === 401, String(sansSession));
+
+/* =====================================================================
+   6 sexies. « avec_sources » — TROIS ÉTATS, ET NULL N'EST PAS FALSE
+
+   Le registre traverse les catégories : un livre d'art peut être savant, un
+   livre de management anecdotique. C'est une dimension, pas une case — d'où
+   une colonne plutôt qu'une quatrième catégorie.
+
+   Le troisième état est celui qui compte. « Non renseigné » doit rester
+   distinct de « pas d'appareil critique » : sans quoi tous les ouvrages
+   arrivés avant ce lot passeraient pour non sourcés, ce qui serait une
+   affirmation que personne n'a portée.
+   ===================================================================== */
+
+const poserL = (corps) => fetch(`${BASE}/api/livres`, {
+  method: "PUT",
+  headers: { "content-type": "application/json", cookie: session },
+  body: JSON.stringify([corps]),
+}).then(r => r.status);
+
+const base = { categorie: "Savoirs", sous_categorie: "Philosophie", sphere: "Pro",
+               titre: "Ouvrage sourcé", auteur: "A" };
+
+await poserL({ ...base, id: "u-src1", isbn: "9782072958091", avec_sources: true });
+await poserL({ ...base, id: "u-src2", isbn: "9782072958092", avec_sources: false });
+await poserL({ ...base, id: "u-src3", isbn: "9782072958093" });
+
+const lu = async (isbn) =>
+  (await q("select avec_sources from ouvrages where isbn = $1", [isbn]))[0]?.avec_sources;
+
+verifier("« sourcé » est enregistré", await lu("9782072958091") === true);
+verifier("« sans appareil critique » aussi, et il n'est pas confondu avec l'ignorance",
+  await lu("9782072958092") === false, String(await lu("9782072958092")));
+verifier("… et l'absence de réponse reste NULL",
+  await lu("9782072958093") === null, String(await lu("9782072958093")));
+
+/* Un enregistrement muet n'efface pas un jugement porté — même règle que
+   l'éditeur et la provenance. */
+await poserL({ ...base, id: "u-src1", isbn: "9782072958091", note: 4 });
+verifier("une fiche qui ne se prononce pas n'efface pas « sourcé »",
+  await lu("9782072958091") === true, String(await lu("9782072958091")));
+
+/* Ce qui n'est pas un booléen devient NULL, pas true. Une chaîne « false »
+   est vraie en JavaScript : la lire sans vérifier son type transformerait
+   « non sourcé » en « sourcé ». */
+await poserL({ ...base, id: "u-src4", isbn: "9782072958094", avec_sources: "false" });
+verifier("une valeur mal typée devient NULL, jamais true",
+  await lu("9782072958094") === null, String(await lu("9782072958094")));
+
+/* =====================================================================
+   6 septies. LA COMPATIBILITÉ « Académique » → « Savoirs »
+
+   Une page laissée ouverte sur un téléphone enverra l'ancienne valeur après
+   la livraison. La base la refuse — c'est voulu. L'API la traduit à l'entrée
+   pour que ce refus ne tombe pas sur quelqu'un qui n'a rien fait.
+   ===================================================================== */
+
+const statutAncien = await poserL({ ...base, id: "u-ancien", isbn: "9782072958095",
+                                    categorie: "Académique" });
+verifier("une page ancienne qui envoie « Académique » n'échoue pas",
+  statutAncien === 200, String(statutAncien));
+verifier("… et la valeur est traduite en « Savoirs »",
+  (await q("select categorie from possessions where id = 'u-ancien'"))[0]?.categorie
+    === "Savoirs",
+  JSON.stringify(await q("select categorie from possessions where id = 'u-ancien'")));
 
 /* =====================================================================
    7. LES DEUX CHEMINS SONT SÉPARÉS AU JOURNAL

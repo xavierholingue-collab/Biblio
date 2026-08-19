@@ -230,7 +230,7 @@ verifier("aucun résumé privé n'apparaît chez le visiteur",
 await appel("/api/livres", {
   cookie, methode: "PUT",
   corps: { id: "deux-langues", titre: "Titre deux-langues", auteur: "Auteur",
-           categorie: "Académique", sous_categorie: "Philosophie", sphere: "Pro",
+           categorie: "Savoirs", sous_categorie: "Philosophie", sphere: "Pro",
            resume: "TENTATIVE D ECRITURE PAR LA FICHE" },
 });
 const [ligne] = await q(

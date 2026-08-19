@@ -88,7 +88,7 @@ await appli.query(fs.readFileSync(path.join(DB, "01-schema.sql"), "utf8"));
 
 const poser = (id, isbn, sphere) => q(
   `insert into books (id,isbn,titre,auteur,categorie,sous_categorie,sphere,resume)
-   values ($1,$2,'Titre '||$1,'Auteur','Académique','Philosophie',$3,'Résumé de '||$1)`,
+   values ($1,$2,'Titre '||$1,'Auteur','Savoirs','Philosophie',$3,'Résumé de '||$1)`,
   [id, isbn, sphere]);
 
 /* TOUT EN « Perso », donc TOUT EN PRIVÉ. Ce n'est pas une bibliothèque

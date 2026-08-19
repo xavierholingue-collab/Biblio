@@ -194,7 +194,7 @@ const bd = new pg.Pool({
 /* ---------------------------------------------------------------- Outils */
 
 const SOUS_CATEGORIES = {
-  "Académique": [
+  "Savoirs": [
     "Management & leadership", "Stratégie & marketing", "Industrie, opérations & lean",
     "Numérique, IA & SI", "Innovation & entrepreneuriat", "Économie",
     "Politique, société & géopolitique", "Philosophie", "Décision, biais & rationalité",
@@ -545,7 +545,7 @@ function tropDeDemandesLien(ip) {
    personne ne s'en apercevrait avant de lire une réponse JSON. */
 const CHAMPS_LIVRE = `b.id, b.ouvrage_id, b.isbn, b.titre, b.auteur, b.editeur,
   b.annee, b.pages, b.statut, b.note, b.categorie, b.sous_categorie, b.sphere,
-  b.cover_url, b.cover_statut, b.visibilite`;
+  b.cover_url, b.cover_statut, b.visibilite, b.avec_sources`;
 
 const CHAMPS_RESUME = `r.resume, r.points as resume_points, r.themes as resume_themes,
   r.modele as resume_modele, r.fiabilite as resume_fiabilite,
@@ -738,7 +738,7 @@ async function enregistrerLivres(client, livres) {
   const norme = (v) => String(v ?? "").replace(/[^0-9Xx]/g, "");
   const entrees = livres.map((l) => {
     const isbn = norme(l.isbn);
-    const sphere = l.sphere ?? (l.categorie === "Académique" ? "Pro" : "Perso");
+    const sphere = l.sphere ?? (l.categorie === "Savoirs" ? "Pro" : "Perso");
     return {
       id: l.id,
       isbn: isbn.length === 13 ? isbn : null,
@@ -751,7 +751,22 @@ async function enregistrerLivres(client, livres) {
       cover_statut: l.cover_statut ?? l.coverStatut ?? "inconnu",
       statut: l.statut ?? "A lire",
       note: l.note ?? null,
-      categorie: l.categorie,
+      /* « Académique » traduite à L'ENTRÉE, pour la durée de la transition.
+       *
+       * Le renommage du 19/08 a retiré cette valeur de la contrainte. Une page
+       * laissée ouverte dans un navigateur — un téléphone posé sur une
+       * étagère — l'enverra pourtant après la livraison, et la base la
+       * refuserait par un 500 que l'utilisateur n'aurait pas mérité.
+       *
+       * Traduire vaut mieux que refuser POUR CE CAS PRÉCIS : la valeur est
+       * connue, sans ambiguïté, et son remplacement est exactement ce que la
+       * migration a fait aux 265 lignes existantes. Le refus en base reste le
+       * dernier mot pour tout le reste.
+       *
+       * À RETIRER quand plus aucune page ancienne ne peut traîner — disons
+       * après quelques semaines. Une compatibilité sans date de péremption
+       * devient une seconde définition permanente. */
+      categorie: l.categorie === "Académique" ? "Savoirs" : l.categorie,
       sous_categorie: l.sous_categorie ?? l.sousCategorie,
       sphere,
 
@@ -766,6 +781,11 @@ async function enregistrerLivres(client, livres) {
        * l'enregistrement d'un livre parce qu'une métadonnée de diagnostic est
        * mal formée serait disproportionné. */
       source: SOURCES_CONNUES.test(String(l.source ?? "")) ? String(l.source) : null,
+
+      /* TROIS ÉTATS, et « null » n'est pas « false ». Un booléen mal typé —
+         une chaîne « false », un 0 — deviendrait « je sais que non » au lieu
+         de « je ne sais pas ». On n'accepte donc que de vrais booléens. */
+      avec_sources: typeof l.avec_sources === "boolean" ? l.avec_sources : null,
 
       /* VISIBILITÉ : NULL SIGNIFIE « JE NE ME PRONONCE PAS ».
        *
@@ -805,7 +825,7 @@ async function enregistrerLivres(client, livres) {
       id text, isbn text, titre text, auteur text, editeur text, annee int,
       pages int, cover_url text, cover_statut text, statut text, note numeric,
       categorie text, sous_categorie text, sphere text, visibilite text,
-      source text)`;
+      source text, avec_sources boolean)`;
 
   const MOI = `nullif(current_setting('app.tenant_id', true), '')::uuid`;
 
@@ -829,11 +849,12 @@ async function enregistrerLivres(client, livres) {
   //    jamais un ouvrage déjà connu — la correction est un geste séparé.
   await client.query(
     `insert into ouvrages (cle, isbn, titre, auteur, editeur, annee, pages,
-                           cover_url, cover_statut, source, source_le)
+                           cover_url, cover_statut, source, source_le, avec_sources)
      select distinct on (cle) * from (
        select ${CLE} as cle, e.isbn, e.titre, e.auteur, e.editeur, e.annee,
               e.pages, e.cover_url, coalesce(e.cover_statut, 'inconnu'),
-              e.source, case when e.source is not null then now() end
+              e.source, case when e.source is not null then now() end,
+              e.avec_sources
          from ${SOURCE}
          left join possessions p on p.tenant_id = ${MOI} and p.id = e.id
         where e.isbn is not null or p.id is null) t
@@ -933,6 +954,10 @@ async function enregistrerLivres(client, livres) {
        source = coalesce(nullif(e.source, ''), o.source),
        source_le = case when nullif(e.source, '') is not null then now()
                         else o.source_le end,
+       /* Même règle que partout : une fiche qui ne se prononce pas n'efface
+          pas un jugement déjà porté. « null » veut dire « je ne sais pas », et
+          « je ne sais pas » n'écrase pas « je sais ». */
+       avec_sources = coalesce(e.avec_sources, o.avec_sources),
        pages = coalesce(e.pages, o.pages),
        cover_url = coalesce(e.cover_url, o.cover_url),
        cover_statut = case when e.cover_url is not null
@@ -1616,13 +1641,13 @@ Utilise la recherche web pour vérifier. N'invente aucune donnée : si une infor
 est introuvable, mets une chaîne vide ou null.
 
 Réponds UNIQUEMENT par un objet JSON, sans texte autour ni balises Markdown :
-{"titre":"","auteur":"Nom Prénom","editeur":"","annee":2020,"isbn":"","categorie":"","sousCategorie":"","rayonSuggere":"","motif":""}
+{"titre":"","auteur":"Nom Prénom","editeur":"","annee":2020,"isbn":"","categorie":"","sousCategorie":"","rayonSuggere":"","motif":"","avecSources":null}
 
 - "auteur" au format « Nom Prénom » (exemple : « Kahneman Daniel »).
 - "isbn" au format ISBN-13 sans tirets.
-- "categorie" vaut exactement l'une de : "Académique", "Roman", "BD".
+- "categorie" vaut exactement l'une de : "Savoirs", "Roman", "BD".
 - "sousCategorie" vaut exactement l'une des valeurs autorisées pour cette catégorie :
-Académique : ${RAYONS["Académique"].join(" | ")}
+Savoirs : ${RAYONS["Savoirs"].join(" | ")}
 Roman : ${RAYONS["Roman"].join(" | ")}
 BD : ${RAYONS["BD"].join(" | ")}
 
@@ -1715,12 +1740,19 @@ Tu as DEUX choses à faire, et rien d'autre.
 
 2. Ranger l'ouvrage dans un rayon.
 
-Réponds UNIQUEMENT par un objet JSON, sans texte autour ni balises Markdown :
-{"auteur":"Nom Prénom","categorie":"","sousCategorie":"","rayonSuggere":"","motif":""}
+3. Dire si l'ouvrage porte un APPAREIL CRITIQUE : notes, bibliographie, index,
+   références vérifiables. Mets "avecSources" à true ou false SEULEMENT si tu
+   le sais. Dans le doute, mets null — c'est la réponse attendue le plus
+   souvent, et elle vaut mieux qu'une supposition.
+   Ce n'est pas un jugement de qualité : un beau livre sans bibliographie
+   n'est pas moins bon, il est autre chose.
 
-- "categorie" vaut exactement l'une de : "Académique", "Roman", "BD".
+Réponds UNIQUEMENT par un objet JSON, sans texte autour ni balises Markdown :
+{"auteur":"Nom Prénom","categorie":"","sousCategorie":"","rayonSuggere":"","motif":"","avecSources":null}
+
+- "categorie" vaut exactement l'une de : "Savoirs", "Roman", "BD".
 - "sousCategorie" vaut exactement l'une des valeurs autorisées pour cette catégorie :
-Académique : ${RAYONS["Académique"].join(" | ")}
+Savoirs : ${RAYONS["Savoirs"].join(" | ")}
 Roman : ${RAYONS["Roman"].join(" | ")}
 BD : ${RAYONS["BD"].join(" | ")}
 
@@ -1766,6 +1798,7 @@ Sinon laisse "rayonSuggere" et "motif" vides.`;
        pouvoir le dire plutôt que de le présenter comme une donnée de la
        notice scannée. */
     editeurAutreEdition: livre.editeur_autre_edition === true,
+    avecSources: rendu.avecSources,
   }, RAYONS);
 }
 
@@ -1792,6 +1825,13 @@ function normaliserFiche(info, RAYONS) {
   if (info.sousCategorie !== "Non classé") { info.rayonSuggere = ""; info.motif = ""; }
 
   if (info.isbn) info.isbn = String(info.isbn).replace(/[^0-9Xx]/g, "");
+
+  /* LE MODÈLE PROPOSE, LA FORME DÉCIDE. Il rend parfois la chaîne "true" ou
+     "null" au lieu du booléen. Tout ce qui n'est pas un vrai booléen devient
+     null — c'est-à-dire « on ne sait pas », qui est la valeur honnête quand
+     la réponse est mal formée. */
+  info.avecSources = typeof info.avecSources === "boolean" ? info.avecSources : null;
+
   return info;
 }
 

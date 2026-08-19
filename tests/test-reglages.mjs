@@ -74,13 +74,13 @@ const bob = await locataire("bob", "publique", "fr", 5);
    par livre qui contredisent leur rayon — sans quoi on ne saurait pas si
    c'est le rayon ou le livre qui décide. */
 await semer({ tenant: xavier.id, id: "x-philo-1", isbn: "9780000000101",
-              categorie: "Académique", sous_categorie: "Philosophie" });
+              categorie: "Savoirs", sous_categorie: "Philosophie" });
 await semer({ tenant: xavier.id, id: "x-philo-2", isbn: "9780000000102",
-              categorie: "Académique", sous_categorie: "Philosophie" });
+              categorie: "Savoirs", sous_categorie: "Philosophie" });
 await semer({ tenant: xavier.id, id: "x-eco-1", isbn: "9780000000103",
-              categorie: "Académique", sous_categorie: "Économie" });
+              categorie: "Savoirs", sous_categorie: "Économie" });
 await semer({ tenant: bob, id: "b-philo-1", isbn: "9780000000201",
-              categorie: "Académique", sous_categorie: "Philosophie" });
+              categorie: "Savoirs", sous_categorie: "Philosophie" });
 
 /* ---------------------------------------------------- Un modèle factice
 
@@ -202,7 +202,7 @@ verifier("au départ, la page publique est vide",
   JSON.stringify(await publieDuVisiteur()) === "[]");
 
 const r1 = await appel("/api/reglages/rayon", { cookie: sessionX, methode: "PUT",
-  corps: { categorie: "Académique", sousCategorie: "Philosophie", visibilite: "publique" } });
+  corps: { categorie: "Savoirs", sousCategorie: "Philosophie", visibilite: "publique" } });
 verifier("publier un rayon publie ses ouvrages",
   JSON.stringify(await publieDuVisiteur()) === JSON.stringify(["x-philo-1", "x-philo-2"]),
   JSON.stringify(await publieDuVisiteur()));
@@ -238,7 +238,7 @@ verifier("rouvrir la bibliothèque rend exactement ce qui était réglé",
   JSON.stringify(await publieDuVisiteur()));
 
 const r2 = await appel("/api/reglages/rayon", { cookie: sessionX, methode: "PUT",
-  corps: { categorie: "Académique", sousCategorie: "Philosophie", visibilite: "heritee" } });
+  corps: { categorie: "Savoirs", sousCategorie: "Philosophie", visibilite: "heritee" } });
 verifier("revenir à « hérité » efface le réglage plutôt que de le stocker",
   (await q("select count(*)::int n from rayons_reglages where tenant_id = $1",
            [xavier.id]))[0].n === 0,
@@ -385,11 +385,11 @@ verifier("… et exactement 3 lignes sont écrites",
 await appel("/api/livres", { cookie: sessionX, methode: "PUT",
   corps: { id: "x-philo-1", isbn: "9780000000101", titre: "Titre x-philo-1",
            auteur: "Auteur", editeur: "Éditions de Contrôle", annee: 2011,
-           categorie: "Académique", sous_categorie: "Philosophie", sphere: "Pro" } });
+           categorie: "Savoirs", sous_categorie: "Philosophie", sphere: "Pro" } });
 await appel("/api/livres", { cookie: sessionX, methode: "PUT",
   corps: { id: "x-philo-1", isbn: "9780000000101", titre: "Titre x-philo-1",
            auteur: "Auteur", editeur: "", annee: null,
-           categorie: "Académique", sous_categorie: "Philosophie", sphere: "Pro" } });
+           categorie: "Savoirs", sous_categorie: "Philosophie", sphere: "Pro" } });
 const [notice] = await q(
   `select o.editeur, o.annee from possessions p join ouvrages o on o.id = p.ouvrage_id
     where p.id = 'x-philo-1' and p.tenant_id = $1`, [xavier.id]);
@@ -403,7 +403,7 @@ verifier("… ni une année absente l'année déjà connue",
 await appel("/api/livres", { cookie: sessionX, methode: "PUT",
   corps: { id: "x-philo-1", isbn: "9780000000101", titre: "Titre x-philo-1",
            auteur: "Auteur", editeur: "Éditions Corrigées", annee: 2012,
-           categorie: "Académique", sous_categorie: "Philosophie", sphere: "Pro" } });
+           categorie: "Savoirs", sous_categorie: "Philosophie", sphere: "Pro" } });
 const [corrigee] = await q(
   `select o.editeur, o.annee from possessions p join ouvrages o on o.id = p.ouvrage_id
     where p.id = 'x-philo-1' and p.tenant_id = $1`, [xavier.id]);
@@ -415,7 +415,7 @@ await appel("/api/reglages/livre", { cookie: sessionX, methode: "PUT",
   corps: { id: "x-philo-1", visibilite: "privee" } });
 await appel("/api/livres", { cookie: sessionX, methode: "PUT",
   corps: { id: "x-philo-1", isbn: "9780000000101", titre: "Titre x-philo-1",
-           auteur: "Auteur", categorie: "Académique",
+           auteur: "Auteur", categorie: "Savoirs",
            sous_categorie: "Philosophie", sphere: "Pro", note: 5 } });
 verifier("modifier une note n'efface pas la visibilité choisie",
   (await q("select visibilite from possessions where tenant_id = $1 and id = 'x-philo-1'",
@@ -432,7 +432,7 @@ verifier("… mais la note a bien été enregistrée (sinon on ne prouve rien)",
    disparaît de la page publique sans explication. */
 await appel("/api/livres", { cookie: sessionX, methode: "PUT",
   corps: { id: "x-neuf", isbn: "9780000000999", titre: "Neuf", auteur: "A",
-           categorie: "Académique", sous_categorie: "Économie", sphere: "Pro" } });
+           categorie: "Savoirs", sous_categorie: "Économie", sphere: "Pro" } });
 verifier("un ouvrage neuf reçoit le point de départ, pas « hérité »",
   (await q("select visibilite from possessions where tenant_id = $1 and id = 'x-neuf'",
            [xavier.id]))[0].visibilite === "publique");

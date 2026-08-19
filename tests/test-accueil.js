@@ -43,10 +43,10 @@ function verifier(nom, condition, detail) {
    effectifs, les rapports 2:1 doivent se retrouver dans la géométrie. Un
    jeu de données uniforme ne prouverait rien.                               */
 const RAYONS = [
-  { sous_categorie: "Politique, société & géopolitique", categorie: "Académique", n: 40, lus: 40, pages_volume: 12000, pages_connues: 30 },
-  { sous_categorie: "Philosophie",                       categorie: "Académique", n: 20, lus: 10 },
-  { sous_categorie: "Management & leadership",           categorie: "Académique", n: 10, lus: 5 },
-  { sous_categorie: "Économie",                          categorie: "Académique", n: 5,  lus: 0 },
+  { sous_categorie: "Politique, société & géopolitique", categorie: "Savoirs", n: 40, lus: 40, pages_volume: 12000, pages_connues: 30 },
+  { sous_categorie: "Philosophie",                       categorie: "Savoirs", n: 20, lus: 10 },
+  { sous_categorie: "Management & leadership",           categorie: "Savoirs", n: 10, lus: 5 },
+  { sous_categorie: "Économie",                          categorie: "Savoirs", n: 5,  lus: 0 },
   { sous_categorie: "Classique",                         categorie: "Roman",      n: 1,  lus: 1 },
 ];
 const TOTAL = RAYONS.reduce((s, r) => s + r.n, 0);   // 76

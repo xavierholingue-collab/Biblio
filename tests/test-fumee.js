@@ -68,7 +68,7 @@ const appels = [];
 let table = [
   { id: "b001", isbn: "9782081285750", titre: "C'est (vraiment?) moi qui décide",
     auteur: "Ariely Dan", editeur: "Flammarion", annee: 2011, statut: "Lu", note: 5,
-    categorie: "Académique", sous_categorie: "Décision, biais & rationalité", sphere: "Pro",
+    categorie: "Savoirs", sous_categorie: "Décision, biais & rationalité", sphere: "Pro",
     cover_url: null, cover_statut: "inconnu", resume: null, resume_points: null,
     resume_themes: null, resume_modele: null, resume_fiabilite: null, resume_genere_le: null },
   { id: "b002", isbn: "9782266243124", titre: "Ne le dis à personne",
@@ -149,7 +149,7 @@ w.fetch = (url, options = {}) => {
   }
   if (chemin === "/api/recherche-livre") {
     return reponse({ titre: "Nexus", auteur: "Harari Yuval Noah", editeur: "Albin Michel",
-                     annee: 2024, isbn: "9782226476494", categorie: "Académique",
+                     annee: 2024, isbn: "9782226476494", categorie: "Savoirs",
                      sousCategorie: "Numérique, IA & SI" });
   }
   // Requête sortante vers Google Books : coupée.

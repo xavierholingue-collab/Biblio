@@ -10,7 +10,7 @@ create table if not exists public.books (
   statut          text not null default 'A lire'
                     check (statut in ('Lu', 'En cours', 'A lire')),
   note            numeric(2,1) check (note >= 0 and note <= 5),
-  categorie       text not null check (categorie in ('Académique', 'Roman', 'BD')),
+  categorie       text not null check (categorie in ('Savoirs', 'Roman', 'BD')),
   sous_categorie  text not null,
   sphere          text not null default 'Pro' check (sphere in ('Perso', 'Pro')),
   cover_url       text,
@@ -83,7 +83,7 @@ create trigger books_touch_updated_at
    « Management & leadership » faute d'avoir le droit de dire non.
    --------------------------------------------------------------------------- */
 create table if not exists public.rayons_ajoutes (
-  categorie   text        not null check (categorie in ('Académique', 'Roman', 'BD')),
+  categorie   text        not null check (categorie in ('Savoirs', 'Roman', 'BD')),
   libelle     text        not null check (length(btrim(libelle)) between 2 and 60),
   cree_le     timestamptz not null default now(),
   primary key (categorie, libelle)

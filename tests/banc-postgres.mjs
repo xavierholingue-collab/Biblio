@@ -110,7 +110,7 @@ export async function ouvrirBanc({ port = 55501 } = {}) {
      possession, dans cet ordre. Les contrôles décrivent ce qu'ils veulent
      éprouver, pas la mécanique d'insertion. */
   const semer = async ({ tenant, id, isbn = null, titre = "Titre " + id,
-                         auteur = "Auteur", categorie = "Académique",
+                         auteur = "Auteur", categorie = "Savoirs",
                          sous_categorie = "Philosophie", sphere = "Pro",
                          visibilite = "heritee", statut = "A lire",
                          note = null, annee = null, pages = null }) => {

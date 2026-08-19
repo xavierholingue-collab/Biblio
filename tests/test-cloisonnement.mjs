@@ -57,8 +57,8 @@ await semer({ tenant: alice, id: "a-her-rayonpub", isbn: "9790000000006",
               sous_categorie: "Innovation & entrepreneuriat", visibilite: "heritee" });
 
 await q(`insert into rayons_reglages (tenant_id, categorie, sous_categorie, visibilite)
-         values ($1,'Académique','Économie','privee'),
-                ($1,'Académique','Innovation & entrepreneuriat','publique')`, [alice]);
+         values ($1,'Savoirs','Économie','privee'),
+                ($1,'Savoirs','Innovation & entrepreneuriat','publique')`, [alice]);
 
 // Chez bob, bibliothèque PRIVÉE — dont un ouvrage explicitement public.
 await semer({ tenant: bob, id: "b-pub", isbn: "9790000000007", visibilite: "publique" });

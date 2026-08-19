@@ -96,7 +96,7 @@ create table if not exists public.possessions (
   statut         text not null default 'A lire'
                  check (statut in ('Lu', 'En cours', 'A lire')),
   note           numeric(2,1) check (note >= 0 and note <= 5),
-  categorie      text not null check (categorie in ('Académique', 'Roman', 'BD')),
+  categorie      text not null check (categorie in ('Savoirs', 'Roman', 'BD')),
   sous_categorie text not null,
   sphere         text not null default 'Pro' check (sphere in ('Perso', 'Pro')),
   visibilite     text not null default 'heritee'
@@ -449,13 +449,36 @@ create policy resumes_ouvrages_maj on public.resumes_ouvrages for update
  *
  * La sécurité, elle, reste dans les politiques : même si ce filtre était
  * retiré, rien de privé ne pourrait sortir. */
+/* ================================================== L'APPAREIL CRITIQUE
+
+   « avec_sources » dit si l'ouvrage porte notes, bibliographie, index. Il
+   vit ici, dans le CATALOGUE, et pas sur la possession : c'est une propriété
+   de l'édition, pas de l'exemplaire. Le jugement porté une fois profite à
+   tous ceux qui possèdent la même — c'est l'économie de la découpe.
+
+   TROIS ÉTATS, et le troisième est le plus important : true, false, et NULL
+   qui veut dire « on ne sait pas ». NULL n'est pas false. Même règle que
+   « visibilite » : l'absence d'information n'est pas une information.
+
+   Ajoutée ICI et non dans 07-savoirs.sql, parce que la vue ci-dessous la
+   lit — et que 03 se rejoue AVANT 07. Déclarée plus tard, la vue
+   référencerait une colonne encore absente, et la migration tomberait sur la
+   production sans avoir touché une base neuve. L'ordre de rejeu se raisonne
+   à l'écriture, pas au premier échec.
+
+   Le nom n'est pas « source » : cette colonne existe déjà sur la même table,
+   pour la provenance de la notice. Deux sens du même mot à une colonne
+   d'écart se confondraient à la première relecture rapide.
+   ================================================== */
+alter table public.ouvrages add column if not exists avec_sources boolean;
+
 create or replace view public.livres
 with (security_invoker = true) as
 select p.tenant_id,
        p.id,
        o.id as ouvrage_id,
        o.isbn, o.titre, o.auteur, o.editeur, o.annee, o.pages,
-       o.cover_url, o.cover_statut,
+       o.cover_url, o.cover_statut, o.avec_sources,
        p.statut, p.note, p.categorie, p.sous_categorie, p.sphere, p.visibilite,
        p.ajoute_le, p.maj_le
   from public.possessions p

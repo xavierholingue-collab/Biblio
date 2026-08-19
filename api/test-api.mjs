@@ -42,7 +42,7 @@ async function appel(chemin, options = {}) {
 const T1 = "zz-test-1", T2 = "zz-test-2";
 const gabarit = (id, sphere) => ({
   id, titre: "Ouvrage de test " + id, auteur: "Zzz Testeur", editeur: "Ed. Test",
-  annee: 2026, statut: "A lire", note: null, categorie: "Académique",
+  annee: 2026, statut: "A lire", note: null, categorie: "Savoirs",
   sous_categorie: "Philosophie", sphere, isbn: "978000000000" + id.slice(-1),
 });
 

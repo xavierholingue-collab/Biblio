@@ -427,6 +427,39 @@ begin
       'politiques ne s''appliqueraient pas au compte de l''application.', orphelins;
   end if;
 
+  /* ------------------------------------------------------------------
+     LE RENOMMAGE « Académique » → « Savoirs » A-T-IL PORTÉ ? — 19/08/2026
+
+     Ce contrôle ne peut PAS exister dans le banc d'essai, et c'est pour cela
+     qu'il est ici. Sur une base neuve, 01-schema.sql crée la contrainte avec
+     la nouvelle valeur : « Académique » ne peut même pas y être semée, donc
+     la migration n'a rien à migrer et un test ne prouverait rien.
+
+     Seule la RÉPÉTITION SUR UNE COPIE DE LA PRODUCTION voit les 265 lignes
+     réelles. C'est le seul endroit d'où l'on peut affirmer que le renommage
+     a effectivement eu lieu.
+
+     Un « update » qui ne touche aucune ligne ne lève pas — c'est la famille
+     de défaut de toute cette base de code. Ici, la contrainte remise l'aurait
+     attrapé (elle refuse « Académique »), mais compter est plus clair qu'un
+     effet de bord : on veut savoir que zéro reste, pas espérer qu'une autre
+     règle l'a empêché.
+     ------------------------------------------------------------------ */
+  select count(*) into orphelins
+    from public.possessions where categorie = 'Académique';
+  if orphelins > 0 then
+    raise exception '% possession(s) encore en « Académique » après 07-savoirs.sql.',
+      orphelins;
+  end if;
+
+  select count(*) into orphelins
+    from public.rayons_reglages where categorie = 'Académique';
+  if orphelins > 0 then
+    raise exception '% réglage(s) de rayon encore en « Académique » : ils ne '
+      's''appliqueraient plus à rien, sans lever la moindre erreur.', orphelins;
+  end if;
+  raise notice '  renommage Savoirs : aucune trace d''« Académique »';
+
   /* On annonce le compte des POSSESSIONS, pas celui de « books ». C'est la
      bibliothèque d'aujourd'hui, pas celle du 15/08 — et sur une base ayant
      vécu, les deux nombres diffèrent. */
