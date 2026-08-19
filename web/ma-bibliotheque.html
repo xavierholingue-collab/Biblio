@@ -1837,6 +1837,123 @@ async function supprimer() {
 }
 
 // Recherche bibliographique : passe désormais par la fonction serveur.
+/* =========================================================================
+   CHERCHER PAR TITRE QUAND L'ISBN NE DONNE RIEN — 19/08/2026
+
+   Éprouvé sur le cas qui l'a motivé : un tirage de luxe de « Typex's Andy »
+   (Casterman) dont l'ISBN n'est dans aucune base. Deux mots lus sur la
+   couverture — « Typex Andy » — rendent la notice complète à la BnF.
+
+   Pendant qu'on cherchait à deviner un livre à partir de treize chiffres que
+   personne ne connaît, la personne qui le tient pouvait lire son titre.
+
+   TOUT EST PRÉREMPLI, ET LA FICHE EST MARQUÉE. La notice trouvée est souvent
+   celle d'une AUTRE édition : l'année et la pagination lui appartiennent, pas
+   à l'exemplaire en main — 549 pages pour le broché, 578 pour le tirage de
+   luxe. On remplit quand même, parce que c'est plus rapide à corriger qu'à
+   saisir, mais la provenance devient « bnf:autre-edition » quand l'ISBN de la
+   notice diffère de celui qu'on a scanné. Ce qui est déduit doit rester
+   distinguable de ce qui est mesuré.
+
+   AUCUN APPEL AU MODÈLE. La BnF répond en quelques dizaines de millisecondes,
+   gratuitement, et elle a raison là où le modèle se trompait.
+   ========================================================================= */
+function chercheurParTitre() {
+  const bloc = document.createElement("div");
+  bloc.style.marginTop = "8px";
+
+  const ligne = document.createElement("div");
+  ligne.className = "ligne-isbn";
+
+  const champ = document.createElement("input");
+  champ.type = "text";
+  champ.placeholder = "Titre, auteur…";
+  champ.setAttribute("aria-label", "Chercher dans le catalogue de la BnF");
+  champ.maxLength = 150;
+
+  const bouton = document.createElement("button");
+  bouton.type = "button";
+  bouton.className = "btn";
+  bouton.textContent = "Chercher";
+
+  const resultats = document.createElement("div");
+  resultats.style.marginTop = "8px";
+
+  const lancer = async () => {
+    const q = champ.value.trim();
+    if (q.length < 3) return;
+    bouton.disabled = true;
+    resultats.replaceChildren();
+    resultats.textContent = "Recherche…";
+    try {
+      const r = await api("/catalogue?q=" + encodeURIComponent(q));
+      const notices = r?.notices ?? [];
+      resultats.replaceChildren();
+      if (!notices.length) {
+        resultats.textContent = "Rien trouvé sous ce titre. Complétez à la main.";
+        return;
+      }
+      for (const n of notices) resultats.appendChild(ligneNotice(n));
+    } catch (e) {
+      resultats.textContent = "Recherche impossible : " + e.message;
+    } finally {
+      bouton.disabled = false;
+    }
+  };
+
+  bouton.onclick = lancer;
+  champ.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); lancer(); }
+  });
+
+  ligne.append(champ, bouton);
+  bloc.append(ligne, resultats);
+  setTimeout(() => champ.focus(), 0);
+  return bloc;
+}
+
+/* Une notice proposée. On montre l'ANNÉE et l'ISBN de la notice : c'est ce
+   qui permet de voir, avant de cliquer, qu'il s'agit d'une autre édition. */
+function ligneNotice(n) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "btn";
+  b.style.cssText = "display:block;width:100%;text-align:left;margin-bottom:6px";
+
+  const t = document.createElement("div");
+  t.textContent = n.titre;
+  const d = document.createElement("div");
+  d.style.cssText = "color:var(--ink-soft);font-size:13px";
+  d.textContent = [n.auteur, n.editeur, n.annee, n.pages ? n.pages + " p." : null]
+    .filter(Boolean).join(" · ");
+  b.append(t, d);
+
+  b.onclick = () => {
+    const mettre = (id, v) => { if (v) document.getElementById(id).value = v; };
+    mettre("fTitre", n.titre);
+    mettre("fAuteur", n.auteur);
+    mettre("fEditeur", n.editeur);
+    mettre("fAnnee", n.annee);
+
+    /* L'ISBN SCANNÉ RESTE CELUI DE LA FICHE. C'est votre exemplaire qu'on
+       enregistre, pas celui de la notice : le catalogue partagé est indexé
+       par édition, et rattacher un tirage de luxe à la clé du broché
+       mélangerait deux ouvrages qui n'ont ni la même pagination ni le même
+       résumé. */
+    const isbnFiche = document.getElementById("fIsbn").value.trim();
+    const autreEdition = !!(n.isbnNotice && isbnFiche && n.isbnNotice !== isbnFiche);
+    sourceTrouvee = autreEdition ? "bnf:autre-edition" : "bnf";
+
+    const etatEl = document.getElementById("etatRecherche");
+    etatEl.className = "etat";
+    etatEl.textContent = autreEdition
+      ? "Complété depuis une autre édition (" + n.annee + ", ISBN " + n.isbnNotice
+        + ") — vérifiez l'année et la pagination."
+      : "Complété depuis le catalogue de la BnF — vérifiez puis enregistrez.";
+  };
+  return b;
+}
+
 async function chercherLivre() {
   const requete = document.getElementById("rechercheIsbn").value.trim();
   const etatEl = document.getElementById("etatRecherche");
@@ -1884,6 +2001,44 @@ async function chercherLivre() {
        report, la provenance mourrait entre la recherche et la sauvegarde —
        exactement ce qui a coûté une demi-heure d'enquête le 18/08. */
     sourceTrouvee = info.source ?? null;
+
+    /* RIEN TROUVÉ SE DIT, ET SE DIT ICI — 19/08/2026.
+     *
+     * Le message « Informations trouvées — vérifiez puis enregistrez »
+     * s'affichait SANS CONDITION, y compris quand la recherche n'avait rien
+     * rapporté. L'application affirmait donc un succès qu'elle n'avait pas
+     * eu, laissait le formulaire vide, et l'utilisateur découvrait le
+     * problème en pressant Enregistrer — sous la forme « Titre et auteur
+     * sont obligatoires », qui lui reproche un oubli dont il n'est pas
+     * l'auteur.
+     *
+     * Constaté sur « Typex's Andy » (Casterman, 2018) : l'exemplaire scanné
+     * est un tirage de luxe dont l'ISBN n'est dans aucune base — la BnF
+     * connaît le broché, sous un titre différent. Aucune faute de personne,
+     * juste un livre que les catalogues ignorent. Ce cas EXISTERA toujours ;
+     * ce qui doit changer, c'est ce qu'on en dit.
+     *
+     * On reporte l'ISBN dans le champ : sans lui, la saisie manuelle commence
+     * par recopier treize chiffres qu'on vient justement de scanner. */
+    if (!info.titre) {
+      const isbnLu = info.isbn
+        || (window.scannerOutils?.estEan13?.(requete) ? requete : "");
+      if (isbnLu) document.getElementById("fIsbn").value = isbnLu;
+
+      etatEl.className = "etat";
+      etatEl.replaceChildren();
+      const l1 = document.createElement("div");
+      l1.textContent = isbnLu
+        ? "Aucun catalogue ne connaît cet ISBN."
+        : "Aucun catalogue ne connaît cette référence.";
+      const l2 = document.createElement("div");
+      l2.style.color = "var(--ink-soft)";
+      l2.textContent = "C'est fréquent pour les tirages limités et les petits"
+                     + " éditeurs. Cherchez-le par son titre :";
+      etatEl.append(l1, l2);
+      etatEl.append(chercheurParTitre());
+      return;
+    }
 
     if (info.titre)   document.getElementById("fTitre").value   = info.titre;
     if (info.auteur)  document.getElementById("fAuteur").value  = info.auteur;

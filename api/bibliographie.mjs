@@ -180,8 +180,13 @@ async function chezBnf(isbn) {
   if (!reponse || Number(reponse.numberOfRecords ?? 0) === 0) return null;
 
   const dc = premier(premier(reponse.records?.record)?.recordData?.dc);
-  if (!dc) return null;
+  return dc ? { ...noticeBnf(dc), source: "bnf" } : null;
+}
 
+/* Le Dublin Core de la BnF, traduit en fiche de lecture. Écrit une fois :
+   trois chemins le lisent — par ISBN, par titre pour l'éditeur manquant, et
+   la recherche libre — et trois copies de ces nettoyages divergeraient. */
+function noticeBnf(dc) {
   /* Le titre BnF porte la mention de responsabilité après « / », selon la
      norme ISBD : « Le vin : … / Sylvie Augereau ; photographies, … ». On la
      retire — elle répète l'auteur et alourdit une fiche de lecture. */
@@ -200,8 +205,57 @@ async function chezBnf(isbn) {
   /* « 1 vol. (223 p.) : ill. en coul. ; 29 cm » */
   const pagesM = texte(premier(dc.format)).match(/\((\d+)\s*p/);
 
+  /* L'ISBN de LA NOTICE, qui n'est pas forcément celui qu'on a scanné —
+     c'est précisément l'information qui permet de dire « cette fiche vient
+     d'une autre édition ». */
+  const isbnM = []
+    .concat(dc.identifier ?? [])
+    .map((v) => texte(v).match(/ISBN\s*(97[89]\d{10})/)?.[1])
+    .find(Boolean) ?? null;
+
   return { titre, auteur, editeur, annee: annee(dc.date),
-           pages: pagesM ? Number(pagesM[1]) : null, source: "bnf" };
+           pages: pagesM ? Number(pagesM[1]) : null, isbnNotice: isbnM };
+}
+
+/* =========================================================================
+   LA RECHERCHE LIBRE — DEUX MOTS LUS SUR LA COUVERTURE
+
+   Éprouvé le 19/08/2026 sur le cas qui a motivé ce code : un tirage de luxe
+   de « Typex's Andy » (Casterman) dont l'ISBN n'est dans aucune base. La
+   requête « Typex Andy » — deux mots visibles sur la couverture — rend UNE
+   notice, la bonne, complète.
+
+   C'est la leçon de ce cas : pendant qu'on cherche à deviner un livre à
+   partir de treize chiffres que personne ne connaît, la personne qui l'a en
+   main peut lire son titre. La machine devinait mal ce que l'humain lit
+   sans effort.
+
+   GRATUIT ET SANS MODÈLE. La BnF répond en quelques dizaines de
+   millisecondes ; l'identification par le modèle coûtait 0,075 € et se
+   trompait sur ce livre-là.
+   ========================================================================= */
+export async function chercherParTexte(brut, maximum = 5) {
+  /* Les guillemets délimitent les termes en CQL : un titre qui en contient
+     casserait la requête, et la casserait en ressemblant à « aucun
+     résultat » plutôt qu'à une erreur. */
+  const q = String(brut ?? "").replace(/["\\]/g, " ").trim().slice(0, 150);
+  if (q.length < 3) return [];
+
+  const cql = `bib.anywhere all "${q}"`;
+  const url = `${adresse("bnf")}?version=1.2&operation=searchRetrieve`
+            + `&query=${encodeURIComponent(cql)}`
+            + `&recordSchema=dublincore&maximumRecords=${Math.min(10, maximum)}`;
+
+  const doc = analyseurXml.parse(await (await demander(url)).text());
+  const reponse = doc?.searchRetrieveResponse;
+  if (!reponse || Number(reponse.numberOfRecords ?? 0) === 0) return [];
+
+  const brutes = [].concat(reponse.records?.record ?? []);
+  return brutes
+    .map((r) => premier(r?.recordData?.dc))
+    .filter(Boolean)
+    .map(noticeBnf)
+    .filter((n) => n.titre);
 }
 
 /* =========================================================================
@@ -389,7 +443,12 @@ async function chezBnfParTitre(titre, auteur) {
   const dc = premier(premier(reponse.records?.record)?.recordData?.dc);
   if (!dc) return null;
 
-  const editeur = texte(premier(dc.publisher)).replace(/\s*\([^)]*\)\s*$/, "").trim();
+  /* On lit la notice entière puis on n'en garde QUE l'éditeur. Le reste est
+     jeté délibérément : pagination et année appartiennent à l'édition
+     trouvée, pas à celle qu'on tient. Jeter ici plutôt que de ne pas lire,
+     pour que le jour où l'on voudra un autre champ stable, la question se
+     pose à cet endroit et pas ailleurs. */
+  const { editeur } = noticeBnf(dc);
   return editeur ? { editeur } : null;
 }
 

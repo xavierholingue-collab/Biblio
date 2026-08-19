@@ -398,10 +398,37 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
         with: { node-version: '22' }
 
+      # ------------------------------------------------------------------
+      # UNE ETAPE SANS BORNE A FAIT PASSER UNE PRODUCTION SAINE POUR UN
+      # ECHEC — 18/08/2026.
+      #
+      # Toutes les autres etapes portaient un timeout ; celle-ci, non. Les
+      # miroirs Ubuntu du runner (azure.archive.ubuntu.com) sont tombes,
+      # « apt » a reessaye pendant dix-neuf minutes, et la livraison a ete
+      # annulee a la main. La production, elle, etait deployee depuis le
+      # debut : les quatre etapes qui comptent etaient vertes.
+      #
+      # DEUX CORRECTIFS, ET LE SECOND EST LE VRAI.
+      #
+      # « --with-deps » est retire : il reinstalle des paquets systeme a
+      # CHAQUE livraison, donc depend d'apt, donc de miroirs qu'on ne
+      # choisit pas. Les runners GitHub embarquent deja Chromium et ses
+      # bibliotheques ; ce qui n'est pas demande ne peut pas tomber.
+      #
+      # Le timeout reste, parce qu'il protege d'autre chose : le
+      # telechargement du navigateur lui-meme peut trainer. Cinq minutes
+      # suffisent largement, et un depassement dit franchement « le reseau
+      # n'a pas suivi » au lieu d'attendre le plafond de six heures.
+      #
+      # Portee de cet echec, pour memoire : ce travail s'execute APRES le
+      # deploiement. Il constate, il ne protege pas. Le vrai garde-fou est
+      # la recette qui conditionne la production, et elle avait tenu.
+      # ------------------------------------------------------------------
       - name: Installer Playwright
+        timeout-minutes: 5
         run: |
           npm install @playwright/test --no-audit --no-fund
-          npx playwright install --with-deps chromium
+          npx playwright install chromium
 
       - name: Parcours en navigateur réel
         env:

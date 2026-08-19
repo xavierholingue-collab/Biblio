@@ -614,6 +614,48 @@ verifier("une fiche sans provenance n'efface pas celle qui était connue",
   garde?.source === "bnf+openlibrary", JSON.stringify(garde));
 
 /* =====================================================================
+   6 quinquies. LA RECHERCHE LIBRE DANS LE CATALOGUE
+
+   Le recours quand aucune base ne connaît l'ISBN — tirage de luxe,
+   micro-éditeur, parution trop récente. Deux mots lus sur la couverture,
+   aucun appel au modèle.
+   ===================================================================== */
+
+const parTexte = (q) => fetch(`${BASE}/api/catalogue?q=${encodeURIComponent(q)}`,
+  { headers: { cookie: session } })
+  .then(async r => ({ statut: r.status, corps: await r.json().catch(() => null) }));
+
+plan = { bnf: "trouve", openlibrary: "absent", googlebooks: "absent", bnfTitre: "trouve" };
+recus.length = 0;
+const rTexte = await parTexte("Typex Andy");
+
+verifier("la recherche libre rend des notices",
+  Array.isArray(rTexte.corps?.notices) && rTexte.corps.notices.length > 0,
+  JSON.stringify(rTexte.corps));
+verifier("… nettoyées comme les autres (titre sans mention de responsabilité)",
+  rTexte.corps?.notices?.[0]?.titre
+    === "Le vin : par ceux qui le font pour ceux qui le boivent",
+  rTexte.corps?.notices?.[0]?.titre);
+verifier("… avec l'ISBN DE LA NOTICE, qui dit s'il s'agit d'une autre édition",
+  rTexte.corps?.notices?.[0]?.isbnNotice === "9782072958083",
+  String(rTexte.corps?.notices?.[0]?.isbnNotice));
+verifier("… et sans appeler le modèle", recus.length === 0, String(recus.length));
+
+/* Une requête trop courte ne part pas : trois caractères ne cherchent rien
+   et rendraient le catalogue entier par pertinence. */
+verifier("une requête de moins de trois caractères ne cherche pas",
+  (await parTexte("ab")).corps?.notices?.length === 0);
+
+/* ELLE EXIGE UNE SESSION. Contrairement à /api/couverture, dont la page
+   publique a besoin, celle-ci ne sert qu'au formulaire d'ajout — et elle
+   appelle un service extérieur en notre nom. Placée par erreur avant le
+   garde du routeur, elle aurait été ouverte à tous. */
+const sansSession = await fetch(`${BASE}/api/catalogue?q=Typex%20Andy`)
+  .then(r => r.status);
+verifier("la recherche libre est refusée sans session",
+  sansSession === 401, String(sansSession));
+
+/* =====================================================================
    7. LES DEUX CHEMINS SONT SÉPARÉS AU JOURNAL
 
    Sans deux routes distinctes, « cout_ia_par_mois » mélangerait le classement

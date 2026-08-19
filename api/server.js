@@ -14,7 +14,7 @@ import {
   courrielPlausible, DUREE_LIEN_MINUTES,
 } from "./authentification.mjs";
 import { envoyerCourriel, messageDeConnexion, etatCourriel } from "./courriel.mjs";
-import { chercherParIsbn, isbn13, etatCatalogues,
+import { chercherParIsbn, chercherParTexte, isbn13, etatCatalogues,
          couvertureDeSecours } from "./bibliographie.mjs";
 
 const PORT = Number(process.env.PORT ?? 3000);
@@ -2017,6 +2017,28 @@ const serveur = createServer(async (req, rep) => {
     /* --- Toutes les routes suivantes exigent une session --- */
     if (!session && !routesIA.includes(chemin)) {
       return json(rep, { error: "Non authentifié" }, 401);
+    }
+
+    /* LA RECHERCHE LIBRE DANS LE CATALOGUE — gratuite, sans modèle.
+     *
+     * Elle sert quand aucun catalogue ne connaît l'ISBN : tirage de luxe,
+     * micro-éditeur, parution trop récente. La personne qui tient le livre
+     * lit deux mots sur la couverture — ce qu'aucune machine ne sait faire à
+     * partir de treize chiffres que personne ne connaît.
+     *
+     * PLACÉE APRÈS LE CONTRÔLE DE SESSION, et pas avant.
+     *
+     * Je l'avais d'abord écrite à côté de /api/couverture, en commentant
+     * qu'elle exigeait une session — alors que cet endroit du routeur est
+     * AVANT le garde. Le commentaire aurait décrit une protection que le
+     * code n'appliquait pas, ce qui est pire que pas de commentaire : on
+     * relit, on est rassuré, on passe.
+     *
+     * Elle n'a rien à faire en accès libre : contrairement à /api/couverture,
+     * dont la page publique a besoin, celle-ci ne sert qu'au formulaire
+     * d'ajout. Et elle appelle un service extérieur en notre nom. */
+    if (chemin === "/api/catalogue" && req.method === "GET") {
+      return json(rep, { notices: await chercherParTexte(url.searchParams.get("q")) });
     }
 
     if (chemin === "/api/livres" && req.method === "PUT") {

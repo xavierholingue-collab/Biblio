@@ -448,6 +448,43 @@ const attendre = ms => new Promise(r => setTimeout(r, ms));
       "un fetch vers googleapis.com subsiste dans la page");
   }
 
+  /* ------------- « Informations trouvées » ne se dit plus à vide ----------
+     Le 18/08, la page affichait ce message SANS CONDITION, y compris quand
+     la recherche n'avait rien rapporté : elle affirmait un succès qu'elle
+     n'avait pas eu, puis reprochait à l'utilisateur un formulaire vide
+     qu'elle avait laissé vide.
+
+     CONTRÔLE DE FORME, et je préfère le dire : jsdom n'exécute pas ce bloc
+     — il vit dans un script que la page charge, et le simuler demanderait
+     de reconstruire l'API entière. On vérifie donc que le message est
+     GARDÉ par un test sur le titre, ce qui attrape la régression exacte :
+     quelqu'un qui remettrait l'affirmation inconditionnelle. */
+  const bloc2 = html.match(/async function chercherLivre\(\)[\s\S]*?\n}/)?.[0];
+  verifier("le bloc de recherche est trouvé", !!bloc2);
+  if (bloc2) {
+    verifier("un résultat sans titre est annoncé comme introuvable",
+      /if\s*\(!info\.titre\)/.test(bloc2)
+      && /Aucun catalogue ne conna/.test(bloc2),
+      "rien ne distingue le succès de l'échec");
+    /* CE QU'IL FAUT VÉRIFIER EST QUE LE GARDE SORT, pas où il se trouve.
+     *
+     * Première version : comparer les positions du garde et du message de
+     * succès dans le texte source. Elle échouait — parce que le COMMENTAIRE
+     * qui explique le correctif cite le message, et qu'il est placé avant le
+     * garde. L'indexOf tombait sur la documentation.
+     *
+     * Un contrôle mis en échec par sa propre explication : c'est ce qui
+     * arrive quand on mesure la forme du texte plutôt que le comportement.
+     * Ici, la propriété est « le garde interrompt la fonction » — un return
+     * entre l'accolade ouvrante et sa fermeture. */
+    verifier("… et ce garde interrompt la fonction",
+      /if\s*\(!info\.titre\)\s*\{[^}]*?\breturn;/s.test(bloc2),
+      "le garde n'a pas de return : le message de succès s'affichera quand même");
+    verifier("… l'ISBN scanné est reporté pour la saisie manuelle",
+      /fIsbn"\)\.value = isbnLu/.test(bloc2),
+      "il faudrait recopier treize chiffres à la main");
+  }
+
   /* Déconnexion */
   d.getElementById("btnDeconnexion").dispatchEvent(new w.Event("click"));
   await attendre(60);
