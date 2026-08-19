@@ -1463,7 +1463,7 @@ Réponds UNIQUEMENT par un objet JSON, sans texte autour ni balises Markdown :
      On borne donc chaque champ à son type et à sa longueur, ici, une fois,
      plutôt que de compter sur l'échappement de chaque page. */
   const texteCourt = (v, n) =>
-    String(v ?? "").replace(/[ -]/g, " ").trim().slice(0, n);
+    String(v ?? "").replace(/[\u0000-\u001F\u007F]/g, " ").trim().slice(0, n);
 
   info.lecture_de_la_demande = texteCourt(info.lecture_de_la_demande, 600);
   info.lacune = texteCourt(info.lacune, 600);
@@ -1818,7 +1818,19 @@ function normaliserFiche(info, RAYONS) {
   else if (!RAYONS[info.categorie].includes(info.sousCategorie)) info.sousCategorie = "Non classé";
 
   // Texte libre venu du modele : borne et nettoye avant de traverser l'API.
-  const propre = (v, n) => String(v ?? "").replace(/[ -]/g, " ").trim().slice(0, n);
+  const propre = (v, n) =>
+  /* LES CARACTÈRES DE CONTRÔLE, EN ÉCHAPPEMENTS ET NON EN LITTÉRAL.
+   *
+   * Cette regex retirait les caractères de contrôle en EN CONTENANT — un
+   * octet nul et un \x1F, tapés tels quels. Invisibles à la relecture, et
+   * avec une conséquence qu'on ne devine pas : l'octet nul fait passer
+   * server.js pour un fichier BINAIRE aux yeux de grep.
+   *
+   * Le contrôle du déployeur qui déduit les modules importés de ce fichier
+   * n'en trouvait donc AUCUN — « modules de l API presents (0 importes) »
+   * — et passait au vert. Une protection écrite le 18/08 n'a jamais rien
+   * protégé, à cause de deux octets écrits ailleurs. */
+  String(v ?? "").replace(/[\u0000-\u001F]/g, " ").trim().slice(0, n);
   info.rayonSuggere = propre(info.rayonSuggere, 60);
   info.motif = propre(info.motif, 300);
   // Une suggestion n'a de sens que si le livre est effectivement non classe.

@@ -478,9 +478,25 @@ select p.tenant_id,
        p.id,
        o.id as ouvrage_id,
        o.isbn, o.titre, o.auteur, o.editeur, o.annee, o.pages,
-       o.cover_url, o.cover_statut, o.avec_sources,
+       o.cover_url, o.cover_statut,
        p.statut, p.note, p.categorie, p.sous_categorie, p.sphere, p.visibilite,
-       p.ajoute_le, p.maj_le
+       p.ajoute_le, p.maj_le,
+       /* EN DERNIÈRE POSITION, ET CE N'EST PAS UN DÉTAIL DE STYLE.
+        *
+        * « create or replace view » ne sait qu'AJOUTER une colonne à la fin.
+        * Insérée au milieu, elle décale les suivantes et PostgreSQL refuse :
+        *
+        *   ERREUR : ne peut pas modifier le nom de la colonne « statut »
+        *            de la vue en « avec_sources »
+        *
+        * Constaté en recette le 19/08/2026, sur la base qui porte les vraies
+        * données. Une base neuve n'aurait rien dit : la vue y est CRÉÉE, pas
+        * remplacée, et l'ordre des colonnes n'y pose aucune question. Ce
+        * défaut n'existe que pour une base qui a déjà vécu — c'est-à-dire
+        * exactement celle qu'on ne peut pas se permettre de casser.
+        *
+        * Toute colonne ajoutée à cette vue devra l'être ici, à la fin. */
+       o.avec_sources
   from public.possessions p
   join public.ouvrages o on o.id = p.ouvrage_id
  where case

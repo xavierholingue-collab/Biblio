@@ -105,13 +105,32 @@ done
 # du paquet ferait echouer l'API AU DEMARRAGE, apres l'arret du service en
 # place — le controle final la verrait tomber, mais apres coup. Ici on refuse
 # avant d'avoir rien touche, et en nommant le fichier.
-modules=$(grep -oE 'from "\./[A-Za-z0-9_.-]+\.mjs"' "${TRAVAIL}/contenu/api/server.js" \
+# « -a » N'EST PAS UNE PRECAUTION DE STYLE — 19/08/2026.
+#
+# Ce controle a affiche « modules de l API presents (0 importes) » et a passe
+# au vert. server.js contenait deux caracteres de controle LITTERAUX dans une
+# regex — dont un octet nul — et grep traitait donc le fichier comme BINAIRE :
+# il repondait « fichiers binaires correspondent » au lieu des occurrences.
+#
+# La protection ecrite la veille n'a jamais rien protege, a cause de deux
+# octets ecrits ailleurs. Les caracteres sont corriges par ailleurs ; « -a »
+# reste, parce qu'un fichier source ne doit pas pouvoir rendre un controle
+# muet.
+#
+# ET SURTOUT : ZERO MODULE EST UNE ERREUR, PAS UN SUCCES. server.js importe
+# toujours au moins locataire.mjs. Une liste vide ne veut pas dire « rien a
+# verifier », elle veut dire « je n'ai pas su lire » — et c'est exactement ce
+# qui s'est produit. Un controle qui ne trouve rien doit refuser, pas passer.
+modules=$(grep -aoE 'from "\./[A-Za-z0-9_.-]+\.mjs"' "${TRAVAIL}/contenu/api/server.js" \
           | sed 's|.*"\./||; s|"$||' | sort -u)
+nb_modules=$(echo "${modules}" | grep -c . || true)
+[ "${nb_modules}" -ge 1 ] \
+  || { echo "  ECHEC aucun module importe trouve dans server.js — lecture impossible ?"; exit 1; }
 for m in ${modules}; do
   [ -f "${TRAVAIL}/contenu/api/${m}" ] \
     || { echo "  ECHEC server.js importe api/${m}, absent du paquet"; exit 1; }
 done
-echo "  modules de l API presents ($(echo "${modules}" | wc -w) importes)"
+echo "  modules de l API presents (${nb_modules} importes)"
 
 # LES MIGRATIONS NE SONT PLUS NOMMEES UNE PAR UNE, ET C'EST UNE CORRECTION.
 #
