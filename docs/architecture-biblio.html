@@ -815,9 +815,40 @@ sudo -u postgres psql -d biblio_repetition -f verifier-migration.sql</code></pre
     lire les sauvegardes.
   </p>
   <p>
-    Ce que cela ne protège pas, et qu'il faut savoir : les clichés partent
-    en clair vers OneDrive. Qui accède au poste lit la bibliothèque. Et une
-    absence de plus de quatorze jours laisse un trou définitif.
+    <strong>Chiffrés depuis le 21/08/2026.</strong> Ils partaient en clair
+    vers OneDrive — arbitrage défendable tant qu'il s'agissait des données de
+    celui qui les prenait, intenable dès que des inconnus s'inscrivent : ce
+    seraient leurs bibliothèques privées, dans le OneDrive de quelqu'un
+    d'autre. Un arbitrage qu'on fait pour soi ne se fait pas pour autrui.
+  </p>
+  <p>
+    Chiffrement à <strong>clef publique</strong> (<code>age</code>) : le
+    serveur ne détient que la clef publique. Il sait écrire une sauvegarde, il
+    ne sait pas relire les quatorze jours d'historique — une compromission du
+    serveur ne les expose donc plus, ce qui améliore aussi la situation
+    d'avant. Pas de repli en clair : sans clef publique, le script échoue.
+  </p>
+  <p>
+    Le poste ne détient pas la clef privée non plus. Il ne peut donc plus
+    vérifier ses téléchargements en relisant l'archive ; il compare les
+    <em>empreintes</em> annoncées par le serveur, ce qui est strictement
+    meilleur — l'ancien <code>gzip -t</code> attestait une archive valide, pas
+    une archive identique à celle du serveur.
+  </p>
+  <p>
+    Ce que cela coûte : <strong>la clef privée perdue, les sauvegardes sont
+    irrécupérables.</strong> Elle se génère sur le poste, jamais sur le
+    serveur, et vit dans un gestionnaire de mots de passe et sur papier.
+  </p>
+  <p>
+    Les clichés pris <em>avant une migration</em> restent en clair, et c'est
+    délibéré : ils servent au retour arrière immédiat, ils ne quittent jamais
+    le serveur, et exiger la clef privée pour reculer la mettrait précisément
+    là où l'on ne veut pas d'elle. Qui peut déployer peut déjà lire la base.
+  </p>
+  <p>
+    Ce que cela ne protège toujours pas : une absence de plus de quatorze
+    jours laisse un trou définitif.
   </p>
 </div>
 

@@ -62,7 +62,22 @@ echo "  ${annoncees} sauvegarde(s) sur le serveur"
 # --- Ce qui manque ici ----------------------------------------------------
 rapatriees=0; ignorees=0; echecs=0
 
-while read -r taille nom; do
+# LE POSTE NE DETIENT PAS LA CLEF PRIVEE, et c'est voulu.
+#
+# Il ne peut donc plus verifier ses telechargements en relisant l'archive :
+# « gzip -t » n'a rien a relire dans un fichier chiffre. Lui confier la clef
+# pour verifier reviendrait a remettre le dechiffrement sur la machine dont on
+# voulait justement qu'elle ne detienne que de l'opaque — et OneDrive
+# synchronise ce dossier.
+#
+# On compare donc les EMPREINTES annoncees par le serveur. C'est strictement
+# meilleur que ce qui existait : « gzip -t » attestait une archive valide, pas
+# une archive IDENTIQUE a celle du serveur. Un octet retourne en chemin
+# passait.
+#
+# La verification du DECHIFFREMENT, elle, se fait deliberement, avec la clef,
+# lors de l'essai de restauration — pas a chaque rapatriement.
+while read -r taille somme nom; do
   [ -n "${nom}" ] || continue
   local_fichier="${DESTINATION}/${nom}"
 
@@ -92,11 +107,11 @@ while read -r taille nom; do
     echo "      ECHEC transfert"; continue
   fi
 
-  # LE FICHIER EST-IL ENTIER ? « gzip -t » relit tout et verifie la somme
-  # de controle. Un transfert coupe echoue ici, pas dans six mois.
-  if ! gzip -t "${local_fichier}.partiel" 2>/dev/null; then
+  # LE FICHIER EST-IL CELUI DU SERVEUR ? Empreinte contre empreinte.
+  obtenue=$(sha256sum "${local_fichier}.partiel" | cut -d' ' -f1)
+  if [ "${obtenue}" != "${somme}" ]; then
     rm -f "${local_fichier}.partiel"; echecs=$((echecs + 1))
-    echo "      ECHEC archive incomplete, ecartee"; continue
+    echo "      ECHEC empreinte differente, ecartee"; continue
   fi
 
   # Le nom definitif n'est pose qu'une fois le fichier verifie : ce qui
@@ -109,9 +124,25 @@ done <<< "${liste}"
 #
 # Soixante jours ici, quatorze sur le serveur : le poste est la memoire
 # longue. On ne supprime jamais le dernier fichier.
-restants=$(find "${DESTINATION}" -name 'biblio-*.sql.gz' | wc -l)
+restants=$(find "${DESTINATION}" -name 'biblio-*.sql.gz*' | wc -l)
 if [ "${restants}" -gt 1 ]; then
-  find "${DESTINATION}" -name 'biblio-*.sql.gz' -mtime "+${RETENTION_JOURS}" -delete 2>/dev/null
+  find "${DESTINATION}" -name 'biblio-*.sql.gz*' -mtime "+${RETENTION_JOURS}" -delete 2>/dev/null
+fi
+
+# --- CE QUI RESTE EN CLAIR DANS CE DOSSIER -------------------------------
+#
+# Les sauvegardes d'avant le 21/08/2026 sont en clair, et OneDrive les a
+# synchronisees. Le chiffrement du serveur ne les efface pas retroactivement :
+# ce script le DIT plutot que de les supprimer sans le demander — effacer la
+# seule copie hors-serveur de quelqu'un sans son accord serait pire que le
+# defaut qu'on corrige.
+clairs=$(find "${DESTINATION}" -name 'biblio-*.sql.gz' -not -name '*.age' 2>/dev/null | wc -l)
+if [ "${clairs}" -gt 0 ]; then
+  echo
+  echo "  ATTENTION ${clairs} sauvegarde(s) EN CLAIR dans ce dossier, synchronisees"
+  echo "            par OneDrive. Elles datent d'avant le chiffrement."
+  echo "            A supprimer une fois une restauration chiffree eprouvee :"
+  echo "              find '${DESTINATION}' -name 'biblio-*.sql.gz' -not -name '*.age' -delete"
 fi
 
 echo

@@ -608,21 +608,62 @@ echo "== Deploiement ${ENVIRONNEMENT} termine =="
 #   3. « mv » et non « cp » : le remplacement est atomique, et le script en
 #      cours d'execution garde son propre fichier jusqu'a la fin.
 # =========================================================================
-NOUVEAU="${TRAVAIL}/contenu/deploiement/vps-deployer-biblio.sh"
-MOI=/usr/local/bin/deployer-biblio
+# -------------------------------------------------------------------------
+# ET LE SCRIPT DE SAUVEGARDE AVEC — 21/08/2026
+#
+# Ce bloc ne rafraichissait QUE le deployeur. Or /usr/local/bin/sauvegarde-
+# biblio est pose une fois a la main, et le minuteur systemd l'appelle chaque
+# nuit : une correction apportee a la sauvegarde ne l'atteignait JAMAIS.
+#
+# Constate en livrant le chiffrement des sauvegardes : le nouveau script etait
+# dans le paquet, sur le serveur, a jour — et la tache de 3h30 continuait
+# d'executer la version en clair. Le paquet et l'execution avaient diverge
+# sans que rien ne le signale, ce qui est mot pour mot ce que le commentaire
+# ci-dessus decrit pour un AUTRE fichier du meme dossier.
+#
+# On boucle donc, au lieu d'ajouter un second bloc qui aurait le meme sort au
+# troisieme fichier. Les trois precautions valent pour chacun : seulement
+# apres un deploiement reussi, jamais un script que « bash -n » refuse, et un
+# « mv » atomique pour que le script en cours garde son propre fichier.
+# -------------------------------------------------------------------------
+rafraichir_outil() {
+  local NOUVEAU="${TRAVAIL}/contenu/deploiement/$1"
+  local MOI="/usr/local/bin/$2"
+  local QUOI="$3"
 
-if [ -f "${NOUVEAU}" ] && [ -f "${MOI}" ]; then
-  if ! cmp -s "${NOUVEAU}" "${MOI}"; then
-    if bash -n "${NOUVEAU}" 2>/tmp/deployeur-syntaxe.log; then
-      cp -a "${MOI}" "${MOI}.precedent"
-      install -m 700 -o root -g root "${NOUVEAU}" "${MOI}.neuf" \
-        && mv -f "${MOI}.neuf" "${MOI}" \
-        && echo "  deployeur mis a jour (precedent conserve en ${MOI}.precedent)"
+  # « -f "${MOI}" » : on met a jour ce qui existe, on n'installe pas ce qui
+  # n'a jamais ete pose. Un outil apparu sans qu'on l'ait voulu est une
+  # surprise, et les surprises sur un serveur se paient la nuit.
+  [ -f "${NOUVEAU}" ] && [ -f "${MOI}" ] || return 0
+  cmp -s "${NOUVEAU}" "${MOI}" && return 0
+
+  if bash -n "${NOUVEAU}" 2>/tmp/outil-syntaxe.log; then
+    cp -a "${MOI}" "${MOI}.precedent"
+    # LE « SINON » MANQUAIT, et son absence etait silencieuse.
+    #
+    # La version d'origine enchainait « install && mv && echo ». Si « install »
+    # echouait — disque plein, droits, systeme de fichiers en lecture seule —
+    # la chaine s'arretait la : pas de remplacement, PAS DE MESSAGE, et un
+    # « .neuf » abandonne. Le compte rendu du deploiement restait vert.
+    #
+    # Trouve en eprouvant cette fonction hors de root, ou « install -o root »
+    # echoue. Le defaut n'etait pas dans la generalisation d'aujourd'hui : il
+    # etait la depuis le premier jour, et ne se voyait pas parce que le cas
+    # d'echec ne s'etait jamais produit.
+    if install -m 700 -o root -g root "${NOUVEAU}" "${MOI}.neuf" \
+       && mv -f "${MOI}.neuf" "${MOI}"; then
+      echo "  ${QUOI} mis a jour (precedent conserve en ${MOI}.precedent)"
     else
-      # On ne remplace PAS, et on le dit fort : le deploiement, lui, a
-      # reussi, et son compte rendu ne doit pas laisser croire l'inverse.
-      echo "  ATTENTION le nouveau deployeur ne passe pas « bash -n » : NON installe"
-      sed 's/^/           /' /tmp/deployeur-syntaxe.log
+      rm -f "${MOI}.neuf"
+      echo "  ATTENTION le ${QUOI} n'a PAS pu etre remplace — l'ancien reste en place" >&2
     fi
+  else
+    # On ne remplace PAS, et on le dit fort : le deploiement, lui, a
+    # reussi, et son compte rendu ne doit pas laisser croire l'inverse.
+    echo "  ATTENTION le nouveau ${QUOI} ne passe pas « bash -n » : NON installe"
+    sed 's/^/           /' /tmp/outil-syntaxe.log
   fi
-fi
+}
+
+rafraichir_outil vps-deployer-biblio.sh  deployer-biblio   "deployeur"
+rafraichir_outil vps-sauvegarde-biblio.sh sauvegarde-biblio "script de sauvegarde"
