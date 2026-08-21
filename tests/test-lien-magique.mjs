@@ -306,6 +306,113 @@ verifier("les demandes répétées finissent refusées", dernier === 429, `statu
 verifier("… au seuil annoncé : cinq par quart d'heure",
   acceptees === 5, `${acceptees} acceptée(s) avant le refus`);
 
+/* ---------------------------------------------------------------------
+   CHANGER D'IP NE DOIT PLUS ROUVRIR LE ROBINET — 21/08/2026
+
+   Le limiteur ne comptait que les IP. Son commentaire annonçait pourtant
+   protéger « quelqu'un dont on connaît l'adresse » du harcèlement — et
+   changer d'IP est à la portée de n'importe qui. La protection annoncée
+   n'existait pas, et rien ne le disait : le contrôle ci-dessus passait au
+   vert parce qu'il tirait toujours depuis la même IP.
+
+   C'est le défaut le plus tenace de cette base de code : UN CONTRÔLE QUI
+   MESURE UN SUBSTITUT. Ici, l'IP tenait lieu de personne.
+
+   Ce contrôle-ci tire depuis des IP TOUTES DIFFÉRENTES vers UNE SEULE
+   adresse. Sur l'ancien limiteur, les vingt passaient. */
+{
+  let passees = 0;
+  for (let i = 0; i < 20; i++) {
+    const r = await appel(frais.port, "/api/lien",
+      { courriel: "victime@exemple.fr" },
+      { "x-forwarded-for": `203.0.113.${i + 1}` });
+    if (r.statut === 200) passees += 1;
+  }
+  /* CINQ EXACTEMENT, pas « au plus quinze ». La borne large laissait passer
+     une version sans normalisation de la casse : deux seaux de cinq font
+     dix, et dix est inférieur à quinze. Un seuil qui n'exclut pas la version
+     fautive ne mesure rien. */
+  verifier("changer d'IP ne relance pas le compteur d'une adresse",
+    passees === 5, `${passees} courriels partis vers la même adresse`);
+}
+
+/* Et la réciproque : une IP partagée — un opérateur mobile en sert des
+   milliers — ne doit pas condamner les autres. Le plafond par adresse est
+   propre à chaque adresse, sinon le premier venu bloque tout son réseau. */
+{
+  const r = await appel(frais.port, "/api/lien",
+    { courriel: "quelquun-dautre@exemple.fr" },
+    { "x-forwarded-for": "203.0.113.7" });
+  verifier("une autre adresse depuis une IP déjà vue passe encore",
+    r.statut === 200, `statut ${r.statut}`);
+}
+
+/* La casse ne crée pas un second seau : sinon le plafond se contourne en
+   changeant une majuscule, ce qui n'est pas une attaque, c'est une faute
+   de frappe qui l'annule. */
+{
+  let passees = 0;
+  for (let i = 0; i < 20; i++) {
+    const r = await appel(frais.port, "/api/lien",
+      { courriel: i % 2 ? "Cible@Exemple.FR" : "cible@exemple.fr" },
+      { "x-forwarded-for": `198.51.100.${i + 1}` });
+    if (r.statut === 200) passees += 1;
+  }
+  verifier("… et changer la casse de l'adresse non plus",
+    passees === 5, `${passees} courriels partis vers la même boîte`);
+}
+
+/* ---------------------------------------------------------------------
+   LE PLAFOND JOURNALIER PAR ADRESSE MORD-IL VRAIMENT ?
+
+   Il ne pouvait pas être éprouvé, et je l'ai découvert en mutant : retirer
+   entièrement ce compteur ne faisait tomber AUCUNE vérification. La raison
+   n'est pas un oubli d'écriture, elle est structurelle — une fenêtre de
+   vingt-quatre heures ne se déclenche jamais dans un contrôle qui dure trois
+   secondes, puisque le plafond du quart d'heure arrête tout avant.
+
+   Un garde-fou hors de portée des contrôles est un garde-fou dont on croit
+   disposer. C'est exactement le motif du 15/08, où un garde-fou de migration
+   comptait depuis l'intérieur du cloisonnement qu'il devait surveiller.
+
+   D'où une instance dédiée qui RESSERRE le plafond journalier à deux : il
+   passe alors sous celui du quart d'heure, et devient celui qui mord. Ce que
+   ce contrôle prouve n'est pas la valeur — quinze est un choix — mais que le
+   compteur EXISTE, qu'il est consulté, et qu'il est propre à chaque adresse.
+   --------------------------------------------------------------------- */
+const journalier = await lancer("plafond-jour", {
+  DERRIERE_PROXY: "1",
+  ADRESSE_PUBLIQUE: "https://biblio.exemple.fr",
+  COURRIEL_SERVICE: "resend",
+  COURRIEL_CLEF: "cle-de-controle",
+  COURRIEL_EXPEDITEUR: "biblio@exemple.fr",
+  LIENS_PAR_JOUR_ADRESSE: "2",
+  /* PORT_BASE + 7 : les six premiers sont pris, et le neuvième est celui de
+     la fausse messagerie. Réutiliser un port déjà servi ne lève pas — la
+     seconde instance échoue en silence et les appels vont à la PREMIÈRE.
+     Constaté à l'instant : trois contrôles d'un autre chapitre se sont mis
+     à échouer, en accusant le code qu'ils testaient. */
+}, PORT_BASE + 7);
+
+{
+  let passees = 0;
+  for (let i = 0; i < 10; i++) {
+    const r = await appel(journalier.port, "/api/lien",
+      { courriel: "cible-jour@exemple.fr" },
+      { "x-forwarded-for": `192.0.2.${i + 1}` });
+    if (r.statut === 200) passees += 1;
+  }
+  verifier("le plafond journalier par adresse est bien consulté",
+    passees === 2, `${passees} acceptée(s) pour un plafond de 2`);
+
+  /* Et il n'est pas global : une seconde adresse a son propre compte. */
+  const autre = await appel(journalier.port, "/api/lien",
+    { courriel: "voisin-jour@exemple.fr" },
+    { "x-forwarded-for": "192.0.2.99" });
+  verifier("… et propre à chaque adresse, pas commun à toutes",
+    autre.statut === 200, `statut ${autre.statut}`);
+}
+
 /* =====================================================================
    5. BREVO : LE MÊME CODE, UN AUTRE SERVICE
 

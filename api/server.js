@@ -11,7 +11,7 @@ import pg from "pg";
 import { avecContexte, avecVisiteur } from "./locataire.mjs";
 import {
   demanderLien, consommerLien, purgerLiens,
-  courrielPlausible, DUREE_LIEN_MINUTES,
+  courrielPlausible, normaliserCourriel, DUREE_LIEN_MINUTES,
 } from "./authentification.mjs";
 import { envoyerCourriel, messageDeConnexion, etatCourriel } from "./courriel.mjs";
 import { chercherParIsbn, chercherParTexte, isbn13, etatCatalogues,
@@ -499,30 +499,137 @@ function adressePublique(req) {
    et ce serait sans effet ici, puisqu'une demande de lien « réussit »
    toujours du point de vue du demandeur.
 
-   Ce qu'on empêche : qu'un inconnu fasse envoyer cinquante courriels à
-   quelqu'un dont il connaît l'adresse. Le service n'y perdrait rien ; la
-   personne visée, si — et c'est elle qu'on protège.
+   ---------------------------------------------------------------------------
+   IL COMPTAIT LES IP EN CROYANT PROTÉGER DES ADRESSES — corrigé le 21/08/2026
 
-   Cinq par quart d'heure et par adresse. Une personne qui n'a pas reçu son
-   lien en redemande deux ou trois fois ; personne n'en demande cinq.
+   Son propre commentaire disait ce qu'il protège : « qu'un inconnu fasse
+   envoyer cinquante courriels à quelqu'un dont il connaît l'adresse ». Il
+   comptait pourtant les IP. Or L'ADRESSE VISÉE NE CHANGE PAS quand
+   l'attaquant change d'IP, et changer d'IP est à la portée de n'importe qui.
+   La protection annoncée n'existait pas.
+
+   L'inverse était vrai aussi, et gênait de vraies personnes : un opérateur
+   mobile partage une IP entre des milliers d'abonnés. Cinq demandes pour
+   tout un réseau, c'est un blocage de gens légitimes.
+
+   Un contrôle qui mesure un substitut de ce qu'il prétend protéger — la
+   famille de défaut la plus tenace de cette base de code. On compte donc
+   maintenant les DEUX, chacun pour ce qu'il protège vraiment :
+
+     par ADRESSE     protège la personne visée du harcèlement. DEUX
+                     fenêtres, et la seconde est celle qui compte : cinq par
+                     quart d'heure laisse encore passer quatre cent quatre-
+                     vingts courriels par jour. C'est le plafond JOURNALIER
+                     par adresse qui rend le harcèlement impossible ; celui
+                     du quart d'heure ne fait que lisser.
+     par IP          protège le service de l'énumération d'adresses.
+     par JOUR        protège la réputation de l'expéditeur. Un domaine qui
+                     envoie mille courriels non sollicités est classé
+                     indésirable, et les liens des VRAIS utilisateurs
+                     cessent d'arriver. Ce plafond-là ne protège pas contre
+                     un attaquant : il protège contre le succès d'un
+                     attaquant.
+
+   LES SEUILS DU QUART D'HEURE NE BOUGENT PAS — cinq, comme avant. Une
+   première version avait mis trois par adresse : le contrôle existant est
+   tombé, et il avait raison. Quelqu'un dont le lien part en indésirables
+   redemande, cherche, redemande. Resserrer l'usage courant pour gêner un
+   attaquant que le plafond journalier arrête déjà, c'est payer en gêne
+   quotidienne une protection qu'on a par ailleurs.
+
+   ---------------------------------------------------------------------------
+   EN MÉMOIRE, DONC PERDU AU REDÉMARRAGE. C'est assumé, et écrit pour ne pas
+   avoir à le redécouvrir : l'API est un processus unique sous systemd, un
+   redémarrage remet les compteurs à zéro. Le porter en base ajouterait une
+   écriture par demande pour couvrir un cas — le redémarrage provoqué — qu'un
+   inconnu ne peut pas déclencher. Si l'API passe un jour à deux processus,
+   ce choix devient faux : les compteurs ne seraient plus partagés.
    =========================================================================== */
-const LIENS_PAR_QUART_HEURE = 5;
-const demandesLien = new Map();
+const LIENS_PAR_QUART_HEURE_IP      = 5;
+const LIENS_PAR_QUART_HEURE_ADRESSE = 5;
+const LIENS_PAR_JOUR                = 300;
 
-function tropDeDemandesLien(ip) {
-  const maintenant = Date.now();
-  if (demandesLien.size > 5000) {
-    for (const [cle, v] of demandesLien)
-      if (maintenant - v.debut > 15 * 60 * 1000) demandesLien.delete(cle);
-    if (demandesLien.size > 5000 && !demandesLien.has(ip)) return true;  // fermé
-  }
-  const t = demandesLien.get(ip);
-  if (!t || maintenant - t.debut > 15 * 60 * 1000) {
-    demandesLien.set(ip, { debut: maintenant, nombre: 1 });
-    return false;
-  }
-  t.nombre += 1;
-  return t.nombre > LIENS_PAR_QUART_HEURE;
+/* LE PLAFOND JOURNALIER PAR ADRESSE SE RÈGLE, et ce n'est pas une commodité
+   de test — c'est ce qui le rend ÉPROUVABLE.
+
+   Il est le seul à protéger vraiment du harcèlement : cinq par quart d'heure
+   laissent encore passer quatre cent quatre-vingts courriels par jour. Or
+   une fenêtre de vingt-quatre heures ne peut pas se déclencher dans un
+   contrôle qui dure trois secondes — le plafond du quart d'heure arrête
+   tout avant lui. Retirer entièrement ce compteur ne faisait donc tomber
+   aucune vérification : je l'ai constaté en mutant, le 21/08/2026.
+
+   Un garde-fou qu'aucun contrôle ne peut atteindre est un garde-fou dont on
+   croit disposer. Les deux valeurs se lisent donc dans l'environnement, avec
+   les valeurs de production par défaut, et le contrôle les resserre pour
+   voir le compteur mordre.
+
+   Bénéfice d'exploitation au passage : si une adresse est prise pour cible,
+   le plafond se resserre par une variable et un redémarrage, sans livraison
+   — le même levier que « OUTIL_RECHERCHE » a rendu le 19/08. */
+const LIENS_PAR_JOUR_ADRESSE =
+  Number(process.env.LIENS_PAR_JOUR_ADRESSE ?? 15);
+const FENETRE_JOUR_MS =
+  Number(process.env.LIENS_FENETRE_JOUR_MS ?? 24 * 60 * 60 * 1000);
+
+/* Un seau nommé, plutôt que trois copies de la même boucle d'expiration.
+   La version précédente en tenait déjà deux — celle des tentatives et celle
+   des liens — et elles avaient divergé. */
+function seau(fenetreMs, plafond, tailleMax = 5000) {
+  const vus = new Map();
+  return function depasse(cle) {
+    const t0 = Date.now();
+    if (vus.size > tailleMax) {
+      for (const [k, v] of vus) if (t0 - v.debut > fenetreMs) vus.delete(k);
+      /* Toujours plein après le ménage : on ferme pour les clés inconnues
+         plutôt que de grossir sans fin. Un limiteur qui consomme toute la
+         mémoire devient l'attaque qu'il devait empêcher. */
+      if (vus.size > tailleMax && !vus.has(cle)) return true;
+    }
+    const t = vus.get(cle);
+    if (!t || t0 - t.debut > fenetreMs) { vus.set(cle, { debut: t0, nombre: 1 }); return false; }
+    t.nombre += 1;
+    return t.nombre > plafond;
+  };
+}
+
+const parIp      = seau(15 * 60 * 1000, LIENS_PAR_QUART_HEURE_IP);
+const parAdresse = seau(15 * 60 * 1000, LIENS_PAR_QUART_HEURE_ADRESSE, 20000);
+const parAdresseJour = seau(FENETRE_JOUR_MS, LIENS_PAR_JOUR_ADRESSE, 20000);
+const parJour    = seau(FENETRE_JOUR_MS, LIENS_PAR_JOUR, 4);
+
+/**
+ * Faut-il refuser cette demande de lien ?
+ *
+ * L'ADRESSE EST NORMALISÉE avant d'être comptée. Sans cela « X@Gmail.com »
+ * et « x@gmail.com » sont deux seaux pour une seule boîte, et le plafond
+ * se contourne en changeant une majuscule.
+ *
+ * Le refus NE DÉPEND PAS de l'existence du compte, et c'est essentiel :
+ * un 429 qui n'arriverait que sur les adresses connues révélerait qui est
+ * inscrit — précisément ce que le silence de « demanderLien » protège.
+ */
+function tropDeDemandesLien(ip, courrielBrut) {
+  const adresse = normaliserCourriel(courrielBrut);
+  /* Les trois sont évalués, sans court-circuit — mais PAS pour la raison que
+     j'avais d'abord écrite. J'avais noté « sinon un attaquant bloqué par l'un
+     repart à zéro dès qu'il change d'IP ». C'est faux, et la mutation l'a
+     montré : quand le compteur d'IP se ferme, celui de l'adresse a déjà
+     enregistré les cinq mêmes demandes. Changer d'IP ne rouvre rien.
+
+     La vraie raison est plus modeste : le compteur GLOBAL doit voir chaque
+     tentative, sinon le seuil journalier se déclenche trop tard et le signal
+     d'abus sous-estime ce qui se passe. C'est un choix de DIAGNOSTIC, pas une
+     protection — et aucun contrôle ne l'affirme, parce qu'il n'y a rien à
+     affirmer. Écrit ici plutôt que laissé à croire. */
+  const a = parAdresse(adresse) | parAdresseJour(adresse);
+  const b = parIp(ip);
+  const c = parJour("global");
+  if (c) console.error(
+    "PLAFOND JOURNALIER D'ENVOI ATTEINT — demandes refusées. "
+    + "Ce n'est pas un incident d'usage : personne n'a besoin de "
+    + `${LIENS_PAR_JOUR} liens en un jour.`);
+  return a || b || c;
 }
 
 /* --------------------------------------------------------------- Données */
@@ -1961,16 +2068,19 @@ const serveur = createServer(async (req, rep) => {
         return json(rep, { error: "La connexion par courriel est indisponible." }, 503);
       }
 
-      if (tropDeDemandesLien(ip)) {
-        return json(rep, { error: "Trop de demandes. Réessayez dans un quart d'heure." },
-                    429, { "Retry-After": "900" });
-      }
-
+      /* LE CORPS EST LU AVANT LE LIMITEUR, maintenant qu'il compte aussi les
+         adresses. L'ordre inverse laissait passer une demande par adresse
+         sans jamais l'avoir vue. */
       const { courriel } = await lireCorps(req);
       /* Le seul refus explicite : une adresse qui n'en est pas une. Il ne
          révèle rien — la forme d'une adresse n'est pas un secret. */
       if (!courrielPlausible(courriel)) {
         return json(rep, { error: "Cette adresse ne ressemble pas à un courriel." }, 400);
+      }
+
+      if (tropDeDemandesLien(ip, courriel)) {
+        return json(rep, { error: "Trop de demandes. Réessayez dans un quart d'heure." },
+                    429, { "Retry-After": "900" });
       }
 
       const demande = await avecVisiteur(bd, (c) => demanderLien(c, courriel));
