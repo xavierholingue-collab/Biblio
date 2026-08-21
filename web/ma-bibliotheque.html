@@ -467,9 +467,16 @@
 <dialog id="modaleConnexion">
   <div class="modale-corps">
     <h2>Espace personnel</h2>
+    <!-- UNE FORMULATION QUI RESTE VRAIE DANS LES DEUX CAS.
+         Le texte ne dit pas si un compte existe, ni si les inscriptions sont
+         ouvertes — c'est le courriel reçu qui le dira, à qui relève la boîte.
+         Distinguer ici obligerait à demander au serveur « connaissez-vous
+         cette adresse ? », c'est-à-dire à offrir un outil pour savoir qui est
+         inscrit. On préfère une phrase un peu plus large et rien à révéler. -->
     <p style="font-size:14px;color:var(--ink-soft);margin:0 0 16px">
-      Recevez un lien de connexion par courriel — il n'y a pas de mot de passe
-      à retenir. Ce qui est publié reste, lui, en accès libre.
+      Entrez votre adresse : vous recevrez un lien pour ouvrir votre
+      bibliothèque, ou y revenir. Pas de mot de passe à retenir.
+      Ce qui est publié reste, lui, en accès libre.
     </p>
     <form id="formLien">
       <div class="champ">
@@ -478,9 +485,13 @@
                placeholder="vous@exemple.fr">
       </div>
       <div class="actions">
-        <button class="btn" type="submit" id="btnLien">Recevoir un lien</button>
+        <button class="btn" type="submit" id="btnLien">Recevoir mon lien</button>
       </div>
     </form>
+    <p style="font-size:12px;color:var(--ink-soft);margin:10px 0 0">
+      Une nouvelle bibliothèque est <strong>privée</strong> : vous seul la
+      voyez, jusqu'à ce que vous en décidiez autrement.
+    </p>
 
     <p style="font-size:13px;color:var(--ink-soft);margin:18px 0 10px;
               border-top:1px solid var(--rule);padding-top:14px">
@@ -924,8 +935,12 @@ async function demanderLien(evt) {
   try {
     await api("/lien", { corps: { courriel } });
     etatEl.className = "etat";
-    etatEl.textContent = "Si cette adresse a un compte, le lien vient de partir. "
-      + "Il est valable un quart d'heure.";
+    /* « Si cette adresse a un compte » disait, en creux, que l'absence de
+       compte est un cas d'échec — et invitait à essayer des adresses pour
+       voir. Le message ne promet plus que ce qui est vrai dans tous les cas :
+       regardez votre boîte, la suite s'y trouve. */
+    etatEl.textContent = "C'est parti : regardez votre boîte. "
+      + "Le lien est valable un quart d'heure et ne sert qu'une fois.";
   } catch (e) {
     etatEl.className = "etat err";
     etatEl.textContent = e.message;

@@ -235,3 +235,44 @@ connecter sans ce lien.</p>`;
 
   return { sujet: "Votre lien de connexion", texte, html };
 }
+
+/**
+ * Le message d'une PREMIÈRE venue. Distinct de celui de connexion, et c'est
+ * délibéré.
+ *
+ * Envoyer « voici votre lien de connexion » à quelqu'un qui n'a jamais rien
+ * créé serait mentir sans raison : il chercherait un compte qu'il n'a pas.
+ * Et si l'adresse a été saisie par un tiers, ce message-ci le lui dit —
+ * « quelqu'un a demandé à ouvrir une bibliothèque avec cette adresse » — au
+ * lieu de lui laisser croire qu'un compte existait déjà à son nom.
+ *
+ * Ce que cela ne révèle PAS : la réponse HTTP est identique dans tous les
+ * cas. Seul celui qui relève la boîte voit la différence, et il y a droit.
+ */
+export function messageDInscription(lien, minutes) {
+  const texte =
+`Bienvenue. Ce lien ouvre votre bibliothèque :
+
+${lien}
+
+Il est valable ${minutes} minutes et ne fonctionne qu'une seule fois. Votre
+bibliothèque est créée quand vous l'ouvrez, et pas avant.
+
+Elle est PRIVÉE par défaut : vous seul la voyez, tant que vous n'en décidez
+pas autrement.
+
+Si vous n'avez rien demandé, ignorez ce message. Rien n'a été créé, et sans
+ce lien personne ne peut rien créer avec votre adresse.`;
+
+  const html =
+`<p>Bienvenue. Ce lien ouvre votre bibliothèque :</p>
+<p><a href="${lien}">Ouvrir ma bibliothèque</a></p>
+<p>Il est valable ${minutes} minutes et ne fonctionne qu'une seule fois. Votre
+bibliothèque est créée quand vous l'ouvrez, et pas avant.</p>
+<p>Elle est <strong>privée</strong> par défaut : vous seul la voyez, tant que
+vous n'en décidez pas autrement.</p>
+<p>Si vous n'avez rien demandé, ignorez ce message. Rien n'a été créé, et sans
+ce lien personne ne peut rien créer avec votre adresse.</p>`;
+
+  return { sujet: "Ouvrez votre bibliothèque", texte, html };
+}

@@ -822,6 +822,48 @@ sudo -u postgres psql -d biblio_repetition -f verifier-migration.sql</code></pre
 </div>
 
 <div class="note">
+  <span class="titre">S'inscrire soi-même — branché le 21/08/2026, porte fermée par défaut</span>
+  <p>
+    Une adresse inconnue peut désormais ouvrir sa propre bibliothèque. La
+    décision qui commande tout le reste : <strong>rien n'est créé avant que le
+    lien soit ouvert</strong>. L'adresse voyage dans le lien ; le locataire et
+    le compte naissent à la première utilisation.
+  </p>
+  <p>
+    Trois conséquences, dans l'ordre d'importance. Quelqu'un qui bombarde mille
+    adresses crée zéro locataire et zéro coût. Aucun état « non vérifié »
+    n'existe nulle part — ni dans les politiques, ni dans les quotas, ni dans
+    les vues — donc personne ne peut oublier de le tester. Et la règle
+    « aucun appel au modèle avant vérification » n'a pas besoin d'être écrite :
+    sans compte, il n'y a pas de session, donc pas d'appel. Une règle qu'on ne
+    peut pas contourner vaut mieux qu'une règle qu'on applique bien.
+  </p>
+  <p>
+    <code>04-reglages.sql</code> disait : « créer un locataire passe par une
+    migration, jamais par l'application ». On n'a pas abattu ce mur, on y a
+    ouvert une <em>porte nommée</em> : une politique d'insertion qui n'accepte
+    que si la transaction a explicitement déclaré qu'elle inscrivait quelqu'un,
+    et seulement pour un locataire <strong>privé</strong> au quota borné à
+    cinquante. Ce n'est pas un rempart contre du SQL arbitraire — celui-là
+    poserait le drapeau lui-même — mais contre l'accident, et c'est un
+    limiteur de dégâts : même par un chemin qu'on n'aurait pas vu, on ne peut
+    fabriquer ni bibliothèque publique ni quota généreux.
+  </p>
+  <p>
+    L'identifiant d'URL est <strong>tiré au sort</strong>, pas dérivé du
+    courriel. <code>/u/a3f9c2e1b7</code> n'est pas beau ; le dériver aurait
+    publié la partie locale d'une adresse le jour où la personne rend sa
+    bibliothèque publique — une donnée qu'elle n'a pas choisi de publier.
+  </p>
+  <p>
+    <code>INSCRIPTION_OUVERTE</code> vaut <code>0</code> par défaut. Les
+    mentions légales et la politique de confidentialité doivent exister avant
+    qu'on collecte la première adresse d'un inconnu : un défaut ouvert
+    livrerait la collecte avant l'information.
+  </p>
+</div>
+
+<div class="note">
   <span class="titre">La connexion par lien de courriel — branchée le 16/08/2026</span>
   <p>
     On demande un lien avec son adresse, on le reçoit, on clique. Pas de mot de

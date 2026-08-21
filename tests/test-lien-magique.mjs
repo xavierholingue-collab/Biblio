@@ -414,6 +414,157 @@ const journalier = await lancer("plafond-jour", {
 }
 
 /* =====================================================================
+   4 bis. S'INSCRIRE SOI-MÊME — ET NE RIEN CRÉER AVANT LA PREUVE
+
+   La règle « aucun appel au modèle avant vérification » n'est écrite nulle
+   part dans le code, et c'est voulu : sans compte il n'y a pas de session,
+   donc pas d'appel. Ce qu'il faut éprouver n'est donc pas la règle, c'est ce
+   qui la rend inutile — QUE RIEN N'EXISTE avant que le lien soit ouvert.
+   ===================================================================== */
+
+const compter = async () =>
+  (await q("select count(*)::int n from tenants"))[0].n;
+
+/* --- Porte fermée : le comportement d'avant ne bouge pas --------------- */
+const fermee = await lancer("porte-fermee", {
+  DERRIERE_PROXY: "1",
+  ADRESSE_PUBLIQUE: "https://biblio.exemple.fr",
+  COURRIEL_SERVICE: "resend",
+  COURRIEL_CLEF: "cle-de-controle",
+  COURRIEL_EXPEDITEUR: "biblio@exemple.fr",
+}, PORT_BASE + 8);
+
+{
+  const avant = recus.length, locatairesAvant = await compter();
+  const r = await appel(fermee.port, "/api/lien", { courriel: "inconnu@exemple.fr" });
+  verifier("porte fermée : une adresse inconnue ne reçoit rien",
+    recus.length === avant, `${recus.length - avant} envoi(s)`);
+  verifier("… et la réponse ne le dit pas", r.statut === 200, `statut ${r.statut}`);
+  verifier("… et aucun locataire n'est apparu",
+    (await compter()) === locatairesAvant, "des locataires ont été créés");
+}
+
+/* --- Porte ouverte ----------------------------------------------------- */
+const ouverte = await lancer("porte-ouverte", {
+  DERRIERE_PROXY: "1",
+  ADRESSE_PUBLIQUE: "https://biblio.exemple.fr",
+  COURRIEL_SERVICE: "resend",
+  COURRIEL_CLEF: "cle-de-controle",
+  COURRIEL_EXPEDITEUR: "biblio@exemple.fr",
+  INSCRIPTION_OUVERTE: "1",
+}, PORT_BASE + 10);
+
+const lienDuDernierCourriel = () => {
+  const corps = recus.at(-1)?.corps ?? {};
+  const m = String(corps.text ?? corps.textContent ?? corps.html ?? "")
+    .match(/jeton=([A-Za-z0-9_-]+)/);
+  return m?.[1] ?? null;
+};
+
+let jetonNeuf = null, locatairesAvantDemande = 0;
+{
+  locatairesAvantDemande = await compter();
+  const r = await appel(ouverte.port, "/api/lien",
+    { courriel: "nouvelle@exemple.fr" },
+    { "x-forwarded-for": "203.0.114.1" });
+  verifier("porte ouverte : une adresse inconnue reçoit un lien",
+    r.statut === 200 && !!lienDuDernierCourriel(), `statut ${r.statut}`);
+
+  /* LE CONTRÔLE QUI TIENT TOUTE LA CONCEPTION. Si un locataire naissait ici,
+     mille demandes vers mille adresses feraient mille bibliothèques vides,
+     mille identifiants d'URL réservés, et autant de lignes à nettoyer. */
+  verifier("… mais RIEN n'est créé avant qu'il soit ouvert",
+    (await compter()) === locatairesAvantDemande,
+    `${await compter()} locataires contre ${locatairesAvantDemande} avant`);
+
+  const message = JSON.stringify(recus.at(-1)?.corps ?? {});
+  verifier("… et le courriel dit une première venue, pas une connexion",
+    /[Bb]ienvenue/.test(message) && !/lien de connexion/.test(message),
+    message.slice(0, 120));
+
+  jetonNeuf = lienDuDernierCourriel();
+}
+
+/* --- La réponse HTTP ne distingue jamais les trois cas ------------------ */
+{
+  const connu = await appel(ouverte.port, "/api/lien",
+    { courriel: "xavier@exemple.fr" }, { "x-forwarded-for": "203.0.114.2" });
+  const inconnu = await appel(ouverte.port, "/api/lien",
+    { courriel: "personne@exemple.fr" }, { "x-forwarded-for": "203.0.114.3" });
+  const closPort = await appel(fermee.port, "/api/lien",
+    { courriel: "personne@exemple.fr" }, { "x-forwarded-for": "203.0.114.4" });
+
+  verifier("la réponse HTTP est la même, compte connu ou non",
+    connu.statut === inconnu.statut &&
+    JSON.stringify(connu.corps) === JSON.stringify(inconnu.corps),
+    JSON.stringify([connu.corps, inconnu.corps]));
+  verifier("… et la même encore, porte ouverte ou fermée",
+    inconnu.statut === closPort.statut &&
+    JSON.stringify(inconnu.corps) === JSON.stringify(closPort.corps),
+    JSON.stringify([inconnu.corps, closPort.corps]));
+}
+
+/* --- Ouvrir le lien : c'est là que la bibliothèque naît ----------------- */
+{
+  const r = await appel(ouverte.port, "/api/connexion-lien", { jeton: jetonNeuf });
+  verifier("ouvrir le lien ouvre une session", r.statut === 200,
+    `statut ${r.statut} — ${JSON.stringify(r.corps)}`);
+  verifier("… et crée le locataire à ce moment-là",
+    (await compter()) === locatairesAvantDemande + 1,
+    `${await compter()} locataires`);
+
+  const [neuf] = await q(
+    `select t.identifiant, t.visibilite, t.quota_ia_mois, t.nom
+       from tenants t join comptes c on c.tenant_id = t.id
+      where c.courriel = 'nouvelle@exemple.fr'`);
+  verifier("… privé par défaut", neuf?.visibilite === "privee", JSON.stringify(neuf));
+  verifier("… avec le quota d'un compte neuf, pas celui de personne d'autre",
+    neuf?.quota_ia_mois === 10, String(neuf?.quota_ia_mois));
+
+  /* L'IDENTIFIANT NE VIENT PAS DU COURRIEL. Le dériver aurait publié la
+     partie locale d'une adresse le jour où la bibliothèque devient publique
+     — une donnée que personne n'a choisi de publier. */
+  verifier("… et son adresse d'URL ne trahit pas son courriel",
+    !!neuf?.identifiant && !/nouvelle/.test(neuf.identifiant), String(neuf?.identifiant));
+
+  /* Un lien ne sert qu'une fois : le rejouer ne doit pas faire un second
+     locataire, ni rendre une session. */
+  const rejoue = await appel(ouverte.port, "/api/connexion-lien", { jeton: jetonNeuf });
+  verifier("rejouer le lien ne donne pas de session",
+    rejoue.statut !== 200, `statut ${rejoue.statut}`);
+  verifier("… et ne fabrique pas un second locataire",
+    (await compter()) === locatairesAvantDemande + 1, `${await compter()} locataires`);
+}
+
+/* --- Le nouveau venu est cloisonné comme les autres --------------------- */
+{
+  const [neuf] = await q(
+    `select t.id from tenants t join comptes c on c.tenant_id = t.id
+      where c.courriel = 'nouvelle@exemple.fr'`);
+
+  /* ÉCHOUER PAR UN NOM, PAS PAR UN PLANTAGE. Ce garde-fou est né d'une
+     mutation : rendre le nouveau locataire PUBLIC faisait refuser l'insertion
+     par la politique, donc aucun locataire, donc « neuf » indéfini, donc une
+     TypeError qui tuait le fichier AVANT l'affichage des verdicts. Le lot de
+     mutations affichait alors zéro échec — c'est-à-dire un succès.
+
+     Troisième fois que ce défaut se présente dans cette base de code. Un
+     contrôle qui plante ne dit pas ce qui ne va pas ; pire, il emporte avec
+     lui les contrôles qui, eux, avaient quelque chose à dire. */
+  if (!neuf) {
+    verifier("le locataire du parcours réel existe", false,
+      "aucun locataire pour nouvelle@exemple.fr — l'inscription n'a rien créé");
+  } else {
+    const [x] = await q("select id from tenants where identifiant = 'xavier'");
+    const vus = await banc.dans(neuf.id, "select count(*)::int n from livres");
+    const chezXavier = await q(
+      "select count(*)::int n from possessions where tenant_id = $1", [x.id]);
+    verifier("un locataire créé par le parcours réel ne voit rien des autres",
+      vus[0].n === 0, `${vus[0].n} ouvrage(s) vus, ${chezXavier[0].n} existent chez Xavier`);
+  }
+}
+
+/* =====================================================================
    5. BREVO : LE MÊME CODE, UN AUTRE SERVICE
 
    Éprouvé maintenant alors que la migration est seulement envisagée. Écrire

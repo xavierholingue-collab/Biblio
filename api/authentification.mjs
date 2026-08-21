@@ -55,14 +55,31 @@ export const courrielPlausible = (c) =>
 /* --------------------------------------------------------- Demande de lien */
 
 /**
- * Crée un lien de connexion pour ce courriel, s'il correspond à un compte.
+ * Crée un lien pour ce courriel — de connexion, ou d'inscription.
  *
- * Rend TOUJOURS la même forme, que le compte existe ou non :
- * { envoye: true, jeton: <string|null> }. L'appelant n'envoie un courriel
- * que si `jeton` est non nul, et répond au visiteur sans jamais distinguer
- * les deux cas.
+ * Rend TOUJOURS la même forme : { envoye: true, jeton, inscription }.
+ * L'appelant n'envoie un courriel que si `jeton` est non nul, et répond au
+ * visiteur sans jamais distinguer les cas.
+ *
+ * ---------------------------------------------------------------------------
+ * CE QUI SE RÉVÈLE, ET À QUI — la distinction qui compte
+ *
+ * La RÉPONSE HTTP est identique dans les trois cas : compte connu, compte
+ * inconnu avec inscription ouverte, compte inconnu avec inscription fermée.
+ * Quelqu'un qui ne contrôle pas l'adresse n'apprend donc rien.
+ *
+ * Le COURRIEL, lui, dit clairement s'il s'agit d'une connexion ou d'une
+ * première venue — les deux messages ne se ressemblent pas. Ce n'est pas une
+ * fuite : celui qui le lit contrôle la boîte, et il a le droit de savoir si
+ * un compte existe à son nom. Lui envoyer « voici votre lien de connexion »
+ * alors qu'il n'a jamais rien créé serait mentir pour rien.
+ *
+ * ---------------------------------------------------------------------------
+ * RIEN N'EST CRÉÉ ICI. Le lien d'inscription porte l'adresse, pas un compte.
+ * Mille demandes vers mille adresses laissent mille lignes dans
+ * « liens_connexion », que « purgerLiens » efface — et zéro locataire.
  */
-export async function demanderLien(client, courrielBrut) {
+export async function demanderLien(client, courrielBrut, { inscriptionOuverte = false } = {}) {
   const courriel = normaliserCourriel(courrielBrut);
   if (!courrielPlausible(courriel)) {
     const e = new Error("Adresse de courriel invalide.");
@@ -72,26 +89,47 @@ export async function demanderLien(client, courrielBrut) {
 
   const { rows } = await client.query(
     "select id from comptes where courriel = $1", [courriel]);
+  const connu = rows.length > 0;
 
-  // Compte inconnu : on s'arrête ici, mais silencieusement.
-  if (!rows.length) return { envoye: true, jeton: null };
+  // Inconnu et porte fermée : on s'arrête ici, mais silencieusement.
+  if (!connu && !inscriptionOuverte) return { envoye: true, jeton: null };
 
   const jeton = randomBytes(32).toString("base64url");
+  /* UNE COLONNE OU L'AUTRE, jamais les deux — la contrainte
+     « liens_une_seule_cible » le vérifie en base plutôt que de compter sur
+     cet appel-ci pour bien se tenir. */
   await client.query(
-    `insert into liens_connexion (empreinte, compte_id, expire_le)
-     values ($1, $2, now() + ($3 || ' minutes')::interval)`,
-    [empreinte(jeton), rows[0].id, String(DUREE_LIEN_MINUTES)]);
+    `insert into liens_connexion (empreinte, compte_id, courriel, expire_le)
+     values ($1, $2, $3, now() + ($4 || ' minutes')::interval)`,
+    [empreinte(jeton), connu ? rows[0].id : null, connu ? null : courriel,
+     String(DUREE_LIEN_MINUTES)]);
 
-  return { envoye: true, jeton, compte_id: rows[0].id };
+  return { envoye: true, jeton, inscription: !connu,
+           compte_id: connu ? rows[0].id : null };
 }
 
 /* ------------------------------------------------------ Usage du lien */
 
 /**
- * Consomme un lien. Rend { compte_id, tenant_id, courriel } ou null.
+ * Consomme un lien. Rend { compte_id, tenant_id, courriel, nouveau } ou null.
  *
  * L'UPDATE conditionnel est le cœur de l'affaire : la base garantit qu'un
  * jeton ne sert qu'une fois, même si deux requêtes arrivent ensemble.
+ *
+ * ---------------------------------------------------------------------------
+ * C'EST ICI QUE NAÎT LE LOCATAIRE, et nulle part ailleurs.
+ *
+ * Un lien qui porte un courriel plutôt qu'un compte est une inscription : la
+ * personne vient de prouver qu'elle relève cette boîte. La création se fait
+ * donc APRÈS l'UPDATE qui consomme le jeton, jamais avant — sinon deux clics
+ * simultanés sur le même lien créeraient deux locataires, et le second
+ * n'aurait plus d'adresse pour y entrer.
+ *
+ * L'APPELANT DOIT ENVELOPPER CET APPEL DANS UNE TRANSACTION. Sans elle, un
+ * échec entre la consommation du jeton et la création du compte laisserait un
+ * lien brûlé sans rien en face : la personne recommencerait et recevrait un
+ * nouveau lien, ce qui n'est pas grave — mais le locataire créé à moitié, lui,
+ * resterait. « avecVisiteur » fournit cette transaction.
  */
 export async function consommerLien(client, jeton) {
   if (!jeton || typeof jeton !== "string") return null;
@@ -102,19 +140,42 @@ export async function consommerLien(client, jeton) {
       where empreinte = $1
         and utilise_le is null
         and expire_le > now()
-      returning compte_id`,
+      returning compte_id, courriel`,
     [empreinte(jeton)]);
 
   if (!rows.length) return null;
 
+  let compteId = rows[0].compte_id;
+  let nouveau = false;
+
+  if (!compteId) {
+    /* Course possible et bénigne : deux personnes demandent un lien pour la
+       même adresse, toutes deux l'ouvrent. La première crée, la seconde tombe
+       sur l'index unique de « comptes.courriel ». On rattrape en lisant le
+       compte qui vient d'être créé — le résultat est le même, et il n'y a
+       qu'une bibliothèque. */
+    try {
+      const { rows: cree } = await client.query(
+        "select compte, locataire from public.creer_locataire($1)", [rows[0].courriel]);
+      compteId = cree[0].compte;
+      nouveau = true;
+    } catch (e) {
+      if (e.code !== "23505") throw e;
+      const { rows: deja } = await client.query(
+        "select id from comptes where courriel = $1", [rows[0].courriel]);
+      if (!deja.length) throw e;
+      compteId = deja[0].id;
+    }
+  }
+
   const { rows: comptes } = await client.query(
     `select c.id as compte_id, c.tenant_id, c.courriel, t.langue
        from comptes c join tenants t on t.id = c.tenant_id
-      where c.id = $1`, [rows[0].compte_id]);
+      where c.id = $1`, [compteId]);
 
   if (!comptes.length) return null;
-  await client.query("update comptes set vu_le = now() where id = $1", [rows[0].compte_id]);
-  return comptes[0];
+  await client.query("update comptes set vu_le = now() where id = $1", [compteId]);
+  return { ...comptes[0], nouveau };
 }
 
 /** Ménage : les liens périmés n'ont aucune raison de s'accumuler. */

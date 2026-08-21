@@ -13,7 +13,8 @@ import {
   demanderLien, consommerLien, purgerLiens,
   courrielPlausible, normaliserCourriel, DUREE_LIEN_MINUTES,
 } from "./authentification.mjs";
-import { envoyerCourriel, messageDeConnexion, etatCourriel } from "./courriel.mjs";
+import { envoyerCourriel, messageDeConnexion, messageDInscription,
+         etatCourriel } from "./courriel.mjs";
 import { chercherParIsbn, chercherParTexte, isbn13, etatCatalogues,
          couvertureDeSecours, chercherParDoi, chercherArticleParTexte,
          normaliserDoi, LIBELLES_SUPPORT } from "./bibliographie.mjs";
@@ -73,6 +74,22 @@ let ID_TENANT_DEFAUT = null;   // résolu au démarrage, voir attendreLaBase()
  * En local (docker compose), DERRIERE_PROXY est absent : le comportement
  * d'origine est conservé, et le cookie reste utilisable sur http://localhost. */
 const DERRIERE_PROXY = process.env.DERRIERE_PROXY === "1";
+
+/* ===========================================================================
+   LA PORTE D'INSCRIPTION EST FERMÉE PAR DÉFAUT
+
+   « === "1" », donc fermée tant que personne ne l'ouvre explicitement. Ce
+   n'est pas de la prudence de principe : les mentions légales et la
+   politique de confidentialité doivent EXISTER avant qu'on collecte la
+   première adresse d'un inconnu. Un défaut ouvert livrerait la collecte
+   avant l'information, et la remettre après ne réparerait rien.
+
+   L'interrupteur permet aussi ce que la recette sert à faire : ouvrir là-bas,
+   éprouver le parcours entier sur de vraies adresses, et laisser la
+   production fermée jusqu'à ce qu'on soit satisfait. Le même levier que
+   « OUTIL_RECHERCHE » : une variable, un redémarrage, aucune livraison.
+   =========================================================================== */
+const INSCRIPTION_OUVERTE = process.env.INSCRIPTION_OUVERTE === "1";
 
 /* QUEL ENVIRONNEMENT SERT CETTE PAGE.
  *
@@ -2083,12 +2100,17 @@ const serveur = createServer(async (req, rep) => {
                     429, { "Retry-After": "900" });
       }
 
-      const demande = await avecVisiteur(bd, (c) => demanderLien(c, courriel));
+      const demande = await avecVisiteur(bd, (c) =>
+        demanderLien(c, courriel, { inscriptionOuverte: INSCRIPTION_OUVERTE }));
 
       if (demande.jeton) {
         const lien = `${adressePublique(req)}/ma-bibliotheque.html`
                    + `?jeton=${encodeURIComponent(demande.jeton)}`;
-        const { sujet, texte, html } = messageDeConnexion(lien, DUREE_LIEN_MINUTES);
+        /* Deux messages, choisis par ce que la base a répondu — jamais par ce
+           que le visiteur a prétendu. */
+        const { sujet, texte, html } = demande.inscription
+          ? messageDInscription(lien, DUREE_LIEN_MINUTES)
+          : messageDeConnexion(lien, DUREE_LIEN_MINUTES);
         try {
           const envoi = await envoyerCourriel({ a: courriel, sujet, texte, html });
           /* UNE TRACE EN CAS DE SUCCÈS, ET PAS SEULEMENT D'ÉCHEC.
@@ -2099,7 +2121,8 @@ const serveur = createServer(async (req, rep) => {
              SANS L'ADRESSE DU DESTINATAIRE : elle répondrait à la question
              « qui utilise ce service ? », que personne n'a besoin de poser
              au journal d'un serveur. */
-          console.log(`lien de connexion envoyé (${envoi.mode})`);
+          console.log(`lien ${demande.inscription ? "d'inscription" : "de connexion"} `
+                      + `envoyé (${envoi.mode})`);
         } catch (e) {
           /* L'envoi a échoué : on le dit. Répondre « c'est parti » à qui
              n'aura jamais rien serait le laisser attendre indéfiniment.
