@@ -108,7 +108,13 @@ let plan = { bnf: "trouve", openlibrary: "absent", googlebooks: "absent" };
 const appelsCatalogue = [];
 
 const catalogues = createServer(async (req, rep) => {
-  const nom = new URL(req.url, "http://x").pathname.replace(/^\//, "").split("?")[0];
+  /* LE PREMIER SEGMENT, pas le chemin entier. Crossref s'interroge en mettant
+     le DOI DANS L'URL — « /crossref/10.1007%2F978-1-349-02701-9_2 » — là où
+     les trois autres catalogues passent tout en paramètres. Le découpage
+     d'origine rendait donc « crossref/10.1007%2F… », qui ne correspondait à
+     aucun plan : la fausse source répondait « je ne connais pas », et six
+     contrôles échouaient en accusant le code au lieu du gabarit. */
+  const nom = new URL(req.url, "http://x").pathname.replace(/^\//, "").split("/")[0];
   /* La recherche par TITRE est enregistrée sous un autre nom que la recherche
      par ISBN. Sans cette distinction, « aucun repli par titre n'a eu lieu »
      serait une assertion qui ne peut pas échouer : les deux appels portent le
@@ -144,6 +150,65 @@ const catalogues = createServer(async (req, rep) => {
             publish_date: "2021", number_of_pages: 223 } }
       : {}));
   }
+  if (nom === "crossref") {
+    /* « absent » doit rester jouable : Crossref rend 404 pour un DOI qu'il ne
+       connaît pas, et le code en fait « absente » — à distinguer d'un réseau
+       coupé. Une fausse source qui répond toujours efface cette distinction. */
+    if (cas !== "trouve") { rep.writeHead(404); return rep.end("{}"); }
+    /* CROSSREF N'ÉTAIT PAS ÉPROUVÉ ICI — trouvé le 21/08/2026 en cherchant où
+       ajouter un contrôle. Les soixante-douze vérifications de ce fichier
+       couvraient la BnF, Open Library et Google ; le module d'articles ne
+       l'était que par le faux serveur de la PAGE, qui ne teste pas la lecture
+       de la réponse. Le défaut du jour — « type » ignoré — était précisément
+       dans la partie non couverte.
+
+       Les gabarits sont recopiés de réponses RÉELLES, l'une prise sur
+       10.1257/jep.5.1.193, l'autre sur 10.1007/978-1-349-02701-9_2. Un
+       gabarit inventé ne prouve que la cohérence du test avec lui-même. */
+    const u = new URL(req.url, "http://x");
+    rep.writeHead(200, { "content-type": "application/json" });
+
+    if (u.searchParams.has("query.bibliographic")) {
+      return rep.end(JSON.stringify({ message: { items: [
+        { DOI: "10.1257/jep.5.1.193", title: ["Anomalies"], type: "journal-article",
+          author: [{ given: "Daniel", family: "Kahneman" }],
+          "container-title": ["Journal of Economic Perspectives"],
+          issued: { "date-parts": [[1991]] }, volume: "5", issue: "1",
+          "is-referenced-by-count": 3531 },
+        { DOI: "10.1007/978-1-349-02701-9_2", title: ["One More Time"],
+          type: "book-chapter",
+          author: [{ given: "Frederick", family: "Herzberg" }],
+          "container-title": ["Job Satisfaction — A Reader"],
+          issued: { "date-parts": [[1976]] }, "is-referenced-by-count": 92 },
+      ] } }));
+    }
+
+    if (/978-1-349-02701-9/.test(u.pathname)) {
+      /* Chapitre d'ouvrage : PAS d'abstract, container = un livre. C'est le
+         cas réel qui a produit le défaut, gabarit compris. */
+      return rep.end(JSON.stringify({ message: {
+        DOI: "10.1007/978-1-349-02701-9_2", type: "book-chapter",
+        title: ["One More Time: How Do You Motivate Employees?"],
+        author: [{ given: "Frederick", family: "Herzberg" }],
+        "container-title": ["Job Satisfaction — A Reader"],
+        publisher: "Palgrave Macmillan UK", page: "17-32",
+        issued: { "date-parts": [[1976]] }, "is-referenced-by-count": 92,
+        ISBN: ["9781349027033"] } }));
+    }
+
+    return rep.end(JSON.stringify({ message: {
+      DOI: "10.1257/jep.5.1.193", type: "journal-article",
+      title: ["Anomalies: The Endowment Effect, Loss Aversion, and Status Quo Bias"],
+      author: [{ given: "Daniel", family: "Kahneman" },
+               { given: "Jack L.", family: "Knetsch" },
+               { given: "Richard H.", family: "Thaler" }],
+      "container-title": ["Journal of Economic Perspectives"],
+      publisher: "American Economic Association",
+      volume: "5", issue: "1", page: "193-206",
+      issued: { "date-parts": [[1991]] }, "is-referenced-by-count": 3531,
+      abstract: "<jats:p>The standard assumptions of economic theory.</jats:p>" } }));
+  }
+
   rep.writeHead(200, { "content-type": "application/json" });
   if (cas === "couverture") {
     /* « http: » en dur : de vieilles notices Google le rendent encore, et la
@@ -739,6 +804,88 @@ const [cout] = await q(
     where route = '/api/recherche-livre-classement' group by route`);
 verifier("le classement est bien mesuré (jetons enregistrés)",
   cout?.e > 0 && cout?.n > 0, JSON.stringify(cout));
+
+/* =====================================================================
+   8. CE QUI CONTIENT L'ARTICLE N'EST PAS TOUJOURS UNE REVUE
+
+   Défaut trouvé en PRODUCTION le 21/08/2026, sur le premier article ajouté.
+   La fiche annonçait « Revue : Job Satisfaction — A Reader » : un recueil
+   Palgrave présenté comme un périodique. Crossref déclarait « book-chapter »
+   dans la même réponse — le champ était là, à côté de ceux que je lisais.
+
+   Le contrôle porte sur les DEUX chemins, et c'est délibéré : la fiche
+   complète, et la LISTE DE CANDIDATS d'une recherche par titre. C'est sur
+   cette liste qu'on choisit, et deux publications homonymes s'y distinguent
+   souvent par le seul support.
+   ===================================================================== */
+
+plan = { ...plan, crossref: "trouve" };
+
+const parDoi = async (doi) =>
+  (await fetch(`${BASE}/api/article?doi=${encodeURIComponent(doi)}`,
+    { headers: { cookie: session } })).json();
+
+const chapitre = await parDoi("10.1007/978-1-349-02701-9_2");
+verifier("un chapitre d'ouvrage n'est pas annoncé comme une revue",
+  chapitre.support === "ouvrage", JSON.stringify(chapitre.support));
+verifier("… et la plage de pages est conservée",
+  chapitre.pagination === "17-32", JSON.stringify(chapitre.pagination));
+
+/* « avec_sources » se déduisait de « type === journal-article ». Un chapitre
+   ne doit pas être déclaré sourcé d'office — ce serait affirmer, sans l'avoir
+   vérifié, qu'il porte notes et bibliographie. */
+verifier("un chapitre n'est pas déclaré « sourcé » d'office",
+  chapitre.avecSources === null || chapitre.avecSources === undefined,
+  JSON.stringify(chapitre.avecSources));
+
+const article = await parDoi("10.1257/jep.5.1.193");
+verifier("un article de revue est reconnu comme tel",
+  article.support === "revue", JSON.stringify(article.support));
+verifier("… et lui reste déclaré sourcé",
+  article.avecSources === true, JSON.stringify(article.avecSources));
+verifier("… avec le résumé des auteurs, dépouillé de son JATS",
+  article.resumeEditeur === "The standard assumptions of economic theory.",
+  JSON.stringify(article.resumeEditeur));
+
+const candidats = await (await fetch(`${BASE}/api/articles?q=motivate+employees`,
+  { headers: { cookie: session } })).json();
+verifier("la liste de candidats porte le support de chacun",
+  candidats.articles?.[0]?.support === "revue" &&
+  candidats.articles?.[1]?.support === "ouvrage",
+  JSON.stringify(candidats.articles?.map(a => a.support)));
+
+/* ---------------------------------------------------------------------
+   LE VOCABULAIRE EST RECOPIÉ DANS LA PAGE — CONTRÔLE DE DÉRIVE
+
+   « ma-bibliotheque.html » ne peut rien importer du serveur : elle tient sa
+   propre copie de LIBELLES_SUPPORT. Une liste recopiée dérive, et la dérive
+   ne se voit que sur la fiche d'un cas rare — un préprint affichant « depot »
+   en clair, six mois après que personne n'y pense plus.
+
+   On compare les jeux de CLEFS, pas les libellés : le serveur donne le mot au
+   modèle, la page l'affiche, et les deux usages peuvent légitimement diverger
+   dans le mot choisi. Ce qui ne peut pas diverger, c'est la liste des cas
+   couverts.
+   --------------------------------------------------------------------- */
+{
+  const clefs = (texte) => {
+    const bloc = texte.match(/LIBELLES_SUPPORT\s*=\s*\{([\s\S]*?)\}/);
+    return bloc ? [...bloc[1].matchAll(/^\s*"?([a-z]+)"?\s*:/gm)].map(m => m[1]).sort()
+                : null;
+  };
+  const WEB = ["web", path.join("..", "web")]
+    .find(c => fs.existsSync(path.join(c, "ma-bibliotheque.html")));
+  const cService = clefs(fs.readFileSync(path.join(API, "bibliographie.mjs"), "utf8"));
+  const cPage = WEB ? clefs(fs.readFileSync(path.join(WEB, "ma-bibliotheque.html"), "utf8"))
+                    : null;
+
+  verifier("le vocabulaire des supports est lisible des deux côtés",
+    cService?.length > 0 && cPage?.length > 0,
+    `service ${JSON.stringify(cService)} / page ${JSON.stringify(cPage)}`);
+  verifier("… et la page connaît exactement les mêmes supports que le service",
+    JSON.stringify(cService) === JSON.stringify(cPage),
+    `service ${JSON.stringify(cService)} / page ${JSON.stringify(cPage)}`);
+}
 
 /* ------------------------------------------------------------- Verdict */
 await fermer();

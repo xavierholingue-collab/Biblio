@@ -1024,6 +1024,7 @@ function versApp(r) {
     type: r.type || "livre", doi: r.doi ?? null, revue: r.revue ?? null,
     volume: r.volume ?? null, numero: r.numero ?? null,
     citations: r.citations ?? null, resumeEditeur: r.resume_editeur ?? null,
+    support: r.support ?? null, pagination: r.pagination ?? null,
     coverUrl: r.cover_url, coverStatut: r.cover_statut,
     resume: r.resume, resumePoints: r.resume_points, resumeThemes: r.resume_themes,
     resumeModele: r.resume_modele, resumeGenereLe: r.resume_genere_le,
@@ -1052,6 +1053,7 @@ function versBase(l) {
     volume: l.volume ?? null, numero: l.numero ?? null,
     citations: Number.isInteger(l.citations) ? l.citations : null,
     resume_editeur: l.resumeEditeur ?? null,
+    support: l.support ?? null, pagination: l.pagination ?? null,
     cover_url: l.coverUrl ?? null, cover_statut: l.coverStatut ?? "inconnu",
     resume: l.resume ?? null, resume_points: l.resumePoints ?? null,
     resume_themes: l.resumeThemes ?? null, resume_modele: l.resumeModele ?? null,
@@ -1518,10 +1520,41 @@ function jeton(texte, dimension, valeur) {
   return e;
 }
 
+/* ---------------------------------------------------------------------------
+   LE MÊME VOCABULAIRE QUE « api/bibliographie.mjs », ET C'EST UN RISQUE
+
+   Cette page ne peut rien importer du serveur. La liste est donc RECOPIÉE,
+   et une liste recopiée dérive : on ajoute un support côté serveur, la fiche
+   affiche « depot » en clair, et personne ne le voit avant de tomber sur un
+   préprint.
+
+   test-bibliographie.mjs lit les deux fichiers et compare les jeux de clefs.
+   Il échoue si l'un devance l'autre. C'est le seul contrôle qui rende cette
+   duplication acceptable — sans lui, elle serait une dette silencieuse.
+   --------------------------------------------------------------------------- */
+const LIBELLES_SUPPORT = {
+  revue:   "Revue",
+  actes:   "Actes de colloque",
+  ouvrage: "Ouvrage",
+  depot:   "Dépôt de préprint",
+  these:   "Thèse",
+  rapport: "Rapport",
+  autre:   "Publication",
+};
+
+/** Ce que le contenant EST, pour l'étiquette d'un champ ou d'une fiche. */
+function libelleSupport(support) {
+  return LIBELLES_SUPPORT[support] ?? "Publication";
+}
+
 const LIBELLES_FILTRE = {
   cat: "Catégorie", sous: "Rayon", statut: "Statut", sphere: "Sphère",
   auteur: "Auteur", editeur: "Éditeur", annee: "Année", theme: "Thème",
-  revue: "Revue",
+  /* PAS « Revue » : ce filtre regroupe tout ce dans quoi une publication a
+     paru — revue, recueil, actes, dépôt de préprint. Le jeton ne connaît que
+     la dimension et la valeur, jamais le support de la ligne cliquée ; lui
+     faire dire « Revue » serait faux dès le premier chapitre d'ouvrage. */
+  revue: "Publié dans",
   q: "Recherche",
 };
 
@@ -1616,7 +1649,14 @@ function ligneArticleTrouve(a) {
   t.textContent = a.titre;
   const d = document.createElement("div");
   d.style.cssText = "color:var(--ink-soft);font-size:13px";
-  d.textContent = [a.auteur, a.revue, a.annee,
+  /* Le support est affiché SUR LA LIGNE DE CHOIX, pas seulement dans la
+     fiche : c'est ici qu'on décide, et « Herzberg · Job Satisfaction — A
+     Reader » ne dit pas si l'on choisit un article ou un chapitre de livre.
+     Deux publications homonymes se distinguent souvent par cela seul. */
+  d.textContent = [a.auteur,
+    a.revue && a.support && a.support !== "revue"
+      ? libelleSupport(a.support) + " : " + a.revue : a.revue,
+    a.annee,
     Number.isInteger(a.citations) ? a.citations.toLocaleString("fr") + " citations" : null]
     .filter(Boolean).join(" · ");
   b.append(t, d);
@@ -1699,13 +1739,19 @@ async function chercherArticle() {
     const mettre = (id, v) => { if (v) document.getElementById(id).value = v; };
     mettre("fTitre", info.titre);
     mettre("fAuteur", info.auteur);
-    /* Le champ « Éditeur » devient « Revue » le temps d'un article. Crossref
-       rend les deux — « American Economic Association » et « Journal of
-       Economic Perspectives » — et c'est la seconde qui sert à retrouver un
-       article. On ne les confond pas : l'éditeur suit dans son propre champ,
-       invisible mais enregistré. */
+    /* Le champ « Éditeur » prend le nom du CONTENANT le temps d'un article.
+       Crossref rend les deux — « American Economic Association » et « Journal
+       of Economic Perspectives » — et c'est la seconde qui sert à retrouver
+       un article. On ne les confond pas : l'éditeur suit dans son propre
+       champ, invisible mais enregistré.
+
+       L'étiquette disait « Revue » sans condition. Le 21/08/2026, le premier
+       article ajouté en production était un chapitre de recueil : la fiche
+       annonçait « Revue : Job Satisfaction — A Reader », un livre présenté
+       comme un périodique. Crossref disait « book-chapter » dans la même
+       réponse. On lit désormais ce qu'il dit au lieu de le supposer. */
     const etiq = document.querySelector('label[for="fEditeur"]');
-    if (etiq) etiq.textContent = "Revue";
+    if (etiq) etiq.textContent = libelleSupport(info.support);
     mettre("fEditeur", info.revue);
     mettre("fAnnee", info.annee);
     if (SOUS_CATEGORIES[info.categorie]) {
@@ -1884,6 +1930,10 @@ async function ouvrirFiche(id) {
      /* « vol. 5, n° 1 » : ce qui permet de citer l'article, et qu'un livre
         n'a pas. Sans cela, une bibliographie recopiée est incomplète. */
      estArticle && l.volume ? "vol. " + l.volume + (l.numero ? ", n° " + l.numero : "") : null,
+     /* « p. 17-32 » : sans la plage de pages, on ne peut pas citer un
+        chapitre. La donnée était calculée par Crossref depuis le premier
+        jour et jetée à chaque appel, faute de colonne pour l'accueillir. */
+     estArticle && l.pagination ? "p. " + l.pagination : null,
      l.annee, l.sphere, l.statut, l.note ? l.note + " / 5" : null,
      estArticle && Number.isInteger(l.citations)
        ? l.citations.toLocaleString("fr") + " citations" : null,
@@ -2189,7 +2239,7 @@ function ouvrirModale(id) {
   const blocDoi = document.getElementById("blocDoi");
   if (blocDoi) blocDoi.hidden = true;
   const etiqEd = document.querySelector('label[for="fEditeur"]');
-  if (etiqEd) etiqEd.textContent = "Éditeur";
+  if (etiqEd) etiqEd.textContent = "Éditeur";   /* un livre a un éditeur */
   const l = id ? livres.find(x => x.id === id) : null;
 
   document.getElementById("modaleTitre").textContent = l ? "Modifier" : "Ajouter un livre";
@@ -2258,6 +2308,8 @@ async function enregistrer() {
       volume: articleEnCours.volume, numero: articleEnCours.numero,
       citations: articleEnCours.citations,
       resumeEditeur: articleEnCours.resumeEditeur,
+      support: articleEnCours.support ?? null,
+      pagination: articleEnCours.pagination ?? null,
     } : {}),
   };
 

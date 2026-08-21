@@ -482,7 +482,7 @@ begin
   select count(*) into orphelins
     from unnest(array['type', 'doi', 'revue', 'volume', 'numero',
                       'citations', 'citations_le', 'resume_editeur',
-                      'avec_sources']) as c(nom)
+                      'avec_sources', 'support', 'pagination']) as c(nom)
    where not exists (select 1 from information_schema.columns
                       where table_schema = 'public' and table_name = 'livres'
                         and column_name = c.nom);

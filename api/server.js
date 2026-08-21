@@ -16,7 +16,7 @@ import {
 import { envoyerCourriel, messageDeConnexion, etatCourriel } from "./courriel.mjs";
 import { chercherParIsbn, chercherParTexte, isbn13, etatCatalogues,
          couvertureDeSecours, chercherParDoi, chercherArticleParTexte,
-         normaliserDoi } from "./bibliographie.mjs";
+         normaliserDoi, LIBELLES_SUPPORT } from "./bibliographie.mjs";
 
 const PORT = Number(process.env.PORT ?? 3000);
 const MOT_DE_PASSE = process.env.MOT_DE_PASSE ?? "";
@@ -547,7 +547,8 @@ function tropDeDemandesLien(ip) {
 const CHAMPS_LIVRE = `b.id, b.ouvrage_id, b.isbn, b.titre, b.auteur, b.editeur,
   b.annee, b.pages, b.statut, b.note, b.categorie, b.sous_categorie, b.sphere,
   b.cover_url, b.cover_statut, b.visibilite, b.avec_sources,
-  b.type, b.doi, b.revue, b.volume, b.numero, b.citations, b.resume_editeur`;
+  b.type, b.doi, b.revue, b.volume, b.numero, b.citations, b.resume_editeur,
+  b.support, b.pagination`;
 
 const CHAMPS_RESUME = `r.resume, r.points as resume_points, r.themes as resume_themes,
   r.modele as resume_modele, r.fiabilite as resume_fiabilite,
@@ -805,6 +806,11 @@ async function enregistrerLivres(client, livres) {
       numero: l.numero || null,
       citations: Number.isInteger(l.citations) ? l.citations : null,
       resume_editeur: l.resume_editeur || l.resumeEditeur || null,
+      /* Le support dit CE QU'EST le contenant : une revue, un ouvrage, un
+       * dépôt de préprint. Sans lui, l'écran appelle « revue » le recueil
+       * dans lequel un chapitre a paru — constaté en production le 21/08. */
+      support: l.support || null,
+      pagination: l.pagination || null,
 
       /* VISIBILITÉ : NULL SIGNIFIE « JE NE ME PRONONCE PAS ».
        *
@@ -851,7 +857,7 @@ async function enregistrerLivres(client, livres) {
       categorie text, sous_categorie text, sphere text, visibilite text,
       source text, avec_sources boolean,
       type text, doi text, revue text, volume text, numero text,
-      citations int, resume_editeur text)`;
+      citations int, resume_editeur text, support text, pagination text)`;
 
   const MOI = `nullif(current_setting('app.tenant_id', true), '')::uuid`;
 
@@ -877,7 +883,7 @@ async function enregistrerLivres(client, livres) {
     `insert into ouvrages (cle, isbn, titre, auteur, editeur, annee, pages,
                            cover_url, cover_statut, source, source_le, avec_sources,
                            type, doi, revue, volume, numero, citations, citations_le,
-                           resume_editeur)
+                           resume_editeur, support, pagination)
      select distinct on (cle) * from (
        select ${CLE} as cle, e.isbn, e.titre, e.auteur, e.editeur, e.annee,
               e.pages, e.cover_url, coalesce(e.cover_statut, 'inconnu'),
@@ -885,7 +891,7 @@ async function enregistrerLivres(client, livres) {
               e.avec_sources,
               e.type, e.doi, e.revue, e.volume, e.numero, e.citations,
               case when e.citations is not null then now() end,
-              e.resume_editeur
+              e.resume_editeur, e.support, e.pagination
          from ${SOURCE}
          left join possessions p on p.tenant_id = ${MOI} and p.id = e.id
         where e.isbn is not null or p.id is null) t
@@ -996,6 +1002,8 @@ async function enregistrerLivres(client, livres) {
        volume = coalesce(nullif(e.volume, ''), o.volume),
        numero = coalesce(nullif(e.numero, ''), o.numero),
        resume_editeur = coalesce(nullif(e.resume_editeur, ''), o.resume_editeur),
+       support = coalesce(nullif(e.support, ''), o.support),
+       pagination = coalesce(nullif(e.pagination, ''), o.pagination),
        citations = coalesce(e.citations, o.citations),
        citations_le = case when e.citations is not null then now()
                            else o.citations_le end,
@@ -2178,11 +2186,15 @@ const serveur = createServer(async (req, rep) => {
        * dit bien plus sur le rayon que le nom de l'éditeur. */
       const RAYONS = await dans((c) => rayonsDisponibles(c));
       const a = trouve.article;
+      /* Le contexte donné au modèle doit dire CE QU'EST le contenant. Lui
+       * annoncer « Revue : Job Satisfaction — A Reader » pour un chapitre de
+       * recueil, c'est lui mentir sur la nature de la source avant de lui
+       * demander de la classer. */
       const fiche = await classerDepuisCatalogue(
         dans,
         { titre: a.titre, auteur: a.auteur, editeur: a.revue || null, annee: a.annee },
         "crossref", RAYONS,
-        a.revue ? `\nRevue : ${a.revue}` : "");
+        a.revue ? `\n${LIBELLES_SUPPORT[a.support] ?? "Publication"} : ${a.revue}` : "");
 
       /* Les données de Crossref écrasent ce que le modèle aurait pu dire :
          elles ne lui ont pas été demandées, elles ne peuvent pas venir de lui. */

@@ -537,6 +537,59 @@ export function normaliserDoi(brut) {
   return m[0].replace(/[.,;)\]]+$/, "");
 }
 
+/* ---------------------------------------------------------------------------
+   CE QUE CROSSREF APPELLE « type », ET CE QUE NOUS EN FAISONS
+
+   Découvert en production le 21/08/2026, sur le premier article ajouté :
+   10.1007/978-1-349-02701-9_2 est un « book-chapter », pas un article de
+   revue. Sa fiche annonçait « Revue : Job Satisfaction — A Reader » — un
+   livre présenté comme un périodique. Le champ « type » était pourtant dans
+   la même réponse, à côté de ceux que je lisais.
+
+   Crossref publie une trentaine de types et en ajoute. La liste ci-dessous
+   est donc OUVERTE PAR DÉFAUT : ce qui n'y figure pas devient « autre »,
+   affiché « Publication ». Un type inconnu ne doit ni faire échouer l'ajout
+   ni se faire passer pour une revue.
+
+   Le jeton reste court et sans accent — la base en vérifie la forme, pas le
+   contenu (09-support.sql), et c'est ici que le vocabulaire vit.
+   --------------------------------------------------------------------------- */
+const SUPPORTS = {
+  "journal-article":    "revue",
+  "proceedings-article": "actes",
+  "book-chapter":       "ouvrage",
+  "book-part":          "ouvrage",
+  "book-section":       "ouvrage",
+  "reference-entry":    "ouvrage",
+  "posted-content":     "depot",     // préprint : arXiv, SSRN, bioRxiv
+  "dissertation":       "these",
+  "report":             "rapport",
+  "report-component":   "rapport",
+};
+
+/* Le mot affiché, et celui donné au modèle en contexte. Il vit à côté de la
+   table de correspondance parce que les deux se lisent ensemble : ajouter un
+   support sans son libellé produirait une fiche qui affiche « depot ».
+
+   La page « ma-bibliotheque.html » tient la MÊME liste — elle ne peut rien
+   importer d'ici. test-bibliographie.mjs compare les deux jeux de clefs et
+   échoue si l'un devance l'autre : un vocabulaire dupliqué sans contrôle
+   dérive, et la dérive ne se voit que sur la fiche d'un cas rare. */
+export const LIBELLES_SUPPORT = {
+  revue:   "Revue",
+  actes:   "Actes de colloque",
+  ouvrage: "Ouvrage",
+  depot:   "Dépôt de préprint",
+  these:   "Thèse",
+  rapport: "Rapport",
+  autre:   "Publication",
+};
+
+/** Le support d'un DOI, ou « autre » si Crossref le nomme autrement. */
+export function supportDepuisCrossref(type) {
+  return SUPPORTS[String(type ?? "").toLowerCase()] ?? "autre";
+}
+
 /** L'abstract de Crossref est du JATS : « <jats:p>…</jats:p> ». On retire le
  *  balisage plutôt que de le laisser traverser jusqu'à une page — ce texte
  *  finit dans du HTML et dans l'invite du modèle. */
@@ -602,12 +655,13 @@ export async function chercherParDoi(brut) {
       numero: texte(m.issue) || null,
       pages: null,
       pagination: texte(m.page) || null,
+      support: supportDepuisCrossref(m.type),
       citations: Number.isInteger(m["is-referenced-by-count"])
         ? m["is-referenced-by-count"] : null,
       resumeEditeur: m.abstract ? texteAbstract(m.abstract) : null,
       /* Un article de revue porte, par construction, notes et bibliographie.
          C'est le seul cas où « avec_sources » se déduit sans jugement. */
-      avecSources: m.type === "journal-article" ? true : null,
+      avecSources: supportDepuisCrossref(m.type) === "revue" ? true : null,
       url: texte(m.URL) || `https://doi.org/${doi}`,
     },
   };
@@ -621,7 +675,9 @@ export async function chercherArticleParTexte(brut, maximum = 5) {
   if (q.length < 4) return [];
 
   const url = `${adresse("crossref")}?query.bibliographic=${encodeURIComponent(q)}`
-            + `&rows=${Math.min(10, maximum)}&select=DOI,title,author,container-title,issued,volume,issue,is-referenced-by-count`;
+            + `&rows=${Math.min(10, maximum)}`
+            + `&select=DOI,title,author,container-title,issued,volume,issue,`
+            + `is-referenced-by-count,type`;
   const r = await fetch(url, {
     signal: AbortSignal.timeout(DELAI),
     headers: { "user-agent": `biblio/1.0 (${COURRIEL_CONTACT || "sans contact"})` },
@@ -636,6 +692,9 @@ export async function chercherArticleParTexte(brut, maximum = 5) {
       .map((a) => [texte(a.family), texte(a.given)].filter(Boolean).join(" "))
       .filter(Boolean).join(" ; "),
     revue: texte(premier(m["container-title"])),
+    /* Sans lui, la liste de choix appelle « revue » ce qui n'en est pas une —
+       et c'est précisément sur cette liste qu'on décide. */
+    support: supportDepuisCrossref(m.type),
     annee: m.issued?.["date-parts"]?.[0]?.[0] ?? null,
     volume: texte(m.volume) || null,
     numero: texte(m.issue) || null,

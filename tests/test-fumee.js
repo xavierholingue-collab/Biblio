@@ -78,6 +78,24 @@ let table = [
     resume_themes: null, resume_modele: null, resume_fiabilite: null, resume_genere_le: null },
 ];
 
+/* Les candidats d'une recherche par titre, NOMMÉS pour que le contrôle
+   compte ce que la fausse source a rendu au lieu d'un nombre écrit à la main.
+
+   Trois cas, et le troisième est celui qui a produit le défaut du 21/08/2026 :
+   un CHAPITRE dont le contenant est un livre. Sans lui, la liste de choix
+   n'aurait jamais eu l'occasion d'appeler un recueil « revue ». */
+const CANDIDATS_ARTICLES = [
+  { doi: "10.1038/nature14539", titre: "Deep learning",
+    auteur: "LeCun Yann ; Bengio Yoshua ; Hinton Geoffrey",
+    revue: "Nature", annee: 2015, citations: 12345, support: "revue" },
+  { doi: "10.1016/j.neunet.2014.09.003", titre: "Deep learning in neural networks",
+    auteur: "Schmidhuber Jürgen", revue: "Neural Networks", annee: 2015,
+    citations: 9876, support: "revue" },
+  { doi: "10.1007/978-1-349-02701-9_2", titre: "One More Time",
+    auteur: "Herzberg Frederick", revue: "Job Satisfaction — A Reader",
+    annee: 1976, citations: 92, support: "ouvrage" },
+];
+
 function reponse(corps, statut = 200) {
   return Promise.resolve({
     ok: statut < 400, status: statut,
@@ -148,22 +166,43 @@ w.fetch = (url, options = {}) => {
     });
   }
   if (chemin.startsWith("/api/articles")) {
-    return reponse({ articles: [
-      { doi: "10.1038/nature14539", titre: "Deep learning",
-        auteur: "LeCun Yann ; Bengio Yoshua ; Hinton Geoffrey",
-        revue: "Nature", annee: 2015, citations: 12345 },
-      { doi: "10.1016/j.neunet.2014.09.003", titre: "Deep learning in neural networks",
-        auteur: "Schmidhuber Jürgen", revue: "Neural Networks", annee: 2015,
-        citations: 9876 },
-    ] });
+    return reponse({ articles: CANDIDATS_ARTICLES });
   }
   if (chemin.startsWith("/api/article")) {
+    /* LA RÉPONSE DÉPEND DU DOI DEMANDÉ, et ce n'est pas un raffinement.
+     *
+     * Troisième occurrence du même défaut de gabarit. Le 18/08, la fausse
+     * Open Library était clefée sur un ISBN constant : tout autre ISBN la
+     * faisait passer pour ignorante. Le 19/08, la fausse BnF rendait le même
+     * nom pour la recherche par ISBN et par titre, rendant vide l'assertion
+     * « aucun repli n'a eu lieu ». Ici, rendre toujours l'article de Nature
+     * faisait passer au vert une mutation qui réécrivait l'étiquette du champ
+     * en « Revue » sans condition — puisque Nature EST une revue.
+     *
+     * Une fausse source qui ne distingue pas ses cas invente un monde où le
+     * code ne peut pas échouer. */
+    const doi = decodeURIComponent(chemin.split("doi=")[1] ?? "");
+    if (doi.startsWith("10.1007/")) {
+      return reponse({
+        issue: "trouvee", type: "article", source: "crossref",
+        doi: "10.1007/978-1-349-02701-9_2",
+        titre: "One More Time: How Do You Motivate Employees?",
+        auteur: "Herzberg Frederick", revue: "Job Satisfaction — A Reader",
+        editeur: "Palgrave Macmillan UK", annee: 1976, citations: 92,
+        support: "ouvrage", pagination: "17-32",
+        /* PAS d'abstract : Crossref n'en a pas pour ce chapitre. C'est ce qui
+           a fait retomber l'ajout sur un résumé payant, à 0,060 €. */
+        resumeEditeur: null, avecSources: null,
+        categorie: "Savoirs", sousCategorie: "Management & leadership",
+      });
+    }
     return reponse({
       issue: "trouvee", type: "article", source: "crossref",
       doi: "10.1038/nature14539", titre: "Deep learning",
       auteur: "LeCun Yann ; Bengio Yoshua ; Hinton Geoffrey",
       revue: "Nature", annee: 2015, volume: "521", numero: "7553",
       citations: 12345, resumeEditeur: "Deep learning allows…",
+      support: "revue", pagination: "436-444",
       avecSources: true, categorie: "Savoirs", sousCategorie: "Numérique, IA & SI",
     });
   }
@@ -392,8 +431,17 @@ const attendre = ms => new Promise(r => setTimeout(r, ms));
   d.getElementById("btnChercherDoi").dispatchEvent(clic());
   await attendre(60);
   const propositions = [...d.querySelectorAll("#etatDoi button")];
+  /* ON COMPTE CE QUE LA FAUSSE SOURCE A RENDU, pas un nombre écrit à la main.
+     Le contrôle exigeait « === 2 ». Ajouter un troisième candidat au gabarit
+     — pour éprouver le cas du chapitre d'ouvrage — l'a fait échouer alors que
+     rien n'était cassé. Un contrôle qui s'oppose à l'enrichissement du jeu
+     d'essai finit par être desserré à la va-vite, et il emporte alors les cas
+     où il avait raison. Ce qu'il doit dire est : la page affiche TOUS les
+     candidats rendus, sans en perdre ni en inventer. */
   verifier("un titre rend une liste de candidats",
-    propositions.length === 2, propositions.length + " proposition(s)");
+    propositions.length === CANDIDATS_ARTICLES.length,
+    propositions.length + " proposition(s) pour "
+      + CANDIDATS_ARTICLES.length + " rendue(s)");
   verifier("… avec revue, année et citations pour choisir",
     /Nature/.test(propositions[0]?.textContent ?? "") &&
     /citations/.test(propositions[0]?.textContent ?? ""),
@@ -401,6 +449,18 @@ const attendre = ms => new Promise(r => setTimeout(r, ms));
 
   /* Choisir repasse par le DOI : la recherche ne rend qu'un résumé de notice,
      sans abstract ni rayon. */
+  /* CE QUE LA LIGNE DIT DU CONTENANT. Le 21/08/2026, la fiche du premier
+     article ajouté en production annonçait « Revue : Job Satisfaction — A
+     Reader » — un recueil Palgrave présenté comme un périodique. On vérifie
+     ici que la ligne de choix distingue les deux : c'est là qu'on décide. */
+  const textes = propositions.map(p => p.textContent);
+  verifier("un chapitre d'ouvrage s'annonce comme tel dans la liste",
+    textes.some(t => /Ouvrage\s*:\s*Job Satisfaction/.test(t)),
+    JSON.stringify(textes));
+  verifier("… et un article de revue ne porte pas d'étiquette inutile",
+    textes.some(t => /Nature/.test(t) && !/Revue\s*:/.test(t)),
+    JSON.stringify(textes));
+
   const avantChoix = appels.filter(a => a[1].startsWith("/api/article?")).length;
   propositions[0]?.dispatchEvent(clic());
   await attendre(60);
@@ -417,6 +477,34 @@ const attendre = ms => new Promise(r => setTimeout(r, ms));
     d.getElementById("fTitre").value === "Deep learning" &&
     d.getElementById("fSous").value === "Numérique, IA & SI",
     d.getElementById("fTitre").value + " / " + d.getElementById("fSous").value);
+
+  /* L'étiquette du champ suit le support au lieu d'affirmer « Revue ».
+
+     ÉPROUVÉ SUR LE CHAPITRE, pas sur l'article de Nature. Vérifier « Revue »
+     sur une revue ne prouve rien : une version qui écrit « Revue » sans
+     condition passe au vert. C'est le cas où le mot doit CHANGER qui a une
+     chance d'échouer. */
+  verifier("le champ prend le nom du contenant",
+    d.querySelector('label[for="fEditeur"]')?.textContent === "Revue",
+    d.querySelector('label[for="fEditeur"]')?.textContent);
+
+  d.getElementById("rechercheDoi").value = "10.1007/978-1-349-02701-9_2";
+  d.getElementById("btnChercherDoi").dispatchEvent(clic());
+  await attendre(60);
+  verifier("… et un chapitre d'ouvrage ne s'appelle pas « Revue »",
+    d.querySelector('label[for="fEditeur"]')?.textContent === "Ouvrage",
+    d.querySelector('label[for="fEditeur"]')?.textContent);
+  verifier("… le contenant reste rempli quel que soit son type",
+    d.getElementById("fEditeur").value === "Job Satisfaction — A Reader",
+    d.getElementById("fEditeur").value);
+
+  /* ON N'ENREGISTRE PAS CE CHAPITRE. Une première version le sauvait pour en
+     ouvrir la fiche : quatre contrôles de comptage en aval, qui attendent UN
+     article et trois documents, sont tombés. Même leçon que le 20/08, où
+     enrichir le jeu d'essai partagé avait cassé sept assertions étrangères.
+
+     Le jeu d'essai d'une page est un état partagé par tout ce qui suit. Ce
+     qu'on y ajoute au milieu, tout le reste le subit. */
 
   d.getElementById("rechercheDoi").value = "https://doi.org/10.1038/nature14539";
   d.getElementById("btnChercherDoi").dispatchEvent(clic());
@@ -438,6 +526,33 @@ const attendre = ms => new Promise(r => setTimeout(r, ms));
     JSON.stringify({ type: paquet?.type, doi: paquet?.doi }));
   verifier("… et sa revue, pas son éditeur",
     paquet?.revue === "Nature", String(paquet?.revue));
+  verifier("… et sa plage de pages, sans quoi on ne peut pas le citer",
+    paquet?.pagination === "436-444", String(paquet?.pagination));
+
+  /* ---- CE QUE LA FICHE AFFICHE VRAIMENT ----------------------------------
+     La fiche d'un ARTICLE n'était éprouvée nulle part : ni le volume, ni les
+     citations, ni le lien DOI, ni la pagination. J'avais ajouté ces quatre
+     affichages en les vérifiant à l'œil, ce qui n'est pas les vérifier.
+
+     Constaté en mutant le 21/08 : retirer la pagination de la fiche ne
+     faisait tomber aucun contrôle. Un affichage que rien ne regarde disparaît
+     sans bruit — et c'est justement ce qui manque pour citer. */
+  const art = lire("livres[livres.length - 1]");
+  await lire(`ouvrirFiche(${JSON.stringify(art.id)})`);
+  await attendre(60);
+  const meta = d.getElementById("ficheMeta")?.textContent ?? "";
+  verifier("la fiche d'un article montre sa plage de pages",
+    /p\. 436-444/.test(meta), meta);
+  verifier("… son volume et son numéro",
+    /vol\. 521, n° 7553/.test(meta), meta);
+  verifier("… son contenant, et non un éditeur",
+    /Nature/.test(meta), meta);
+  verifier("… et le DOI est un lien qu'on peut suivre",
+    d.getElementById("ficheDoi")?.querySelector("a")?.getAttribute("href")
+      === "https://doi.org/10.1038/nature14539",
+    String(d.getElementById("ficheDoi")?.querySelector("a")?.getAttribute("href")));
+  d.getElementById("fermerFiche")?.dispatchEvent(clic());
+  await attendre(30);
 
   verifier("la bibliothèque compte un document de plus",
     d.querySelectorAll("#liste .fiche").length === 3,
