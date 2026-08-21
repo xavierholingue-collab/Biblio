@@ -460,6 +460,62 @@ begin
   end if;
   raise notice '  renommage Savoirs : aucune trace d''« Académique »';
 
+  /* ------------------------------------------------------------------
+     LA VUE EXPOSE-T-ELLE ENCORE LES COLONNES D'ARTICLE ? — 21/08/2026
+
+     Ce contrôle existe parce que j'ai RETIRÉ une erreur en fiabilisant la
+     migration. « create or replace view » refusait de raccourcir une vue :
+     si 03 repassait après 08, PostgreSQL levait « cannot drop columns from
+     view » et la migration s'arrêtait. Bruyant, mais protecteur.
+
+     « drop view » puis « create view » n'a plus cette contrainte — c'est
+     précisément pourquoi je l'ai adopté. Le dernier fichier appliqué gagne,
+     en silence. L'ordre alphabétique fait aujourd'hui gagner 08 ; le jour où
+     une migration 09 recopiera la vue depuis 03 sans les colonnes d'article,
+     la migration passera au VERT et l'API tombera ensuite sur un « column
+     l.resume_editeur does not exist » qui ne dira pas d'où il vient.
+
+     Rendre un mécanisme robuste a donc déplacé le risque au lieu de le
+     supprimer. La propriété que l'erreur garantissait doit maintenant être
+     affirmée ici, explicitement.
+     ------------------------------------------------------------------ */
+  select count(*) into orphelins
+    from unnest(array['type', 'doi', 'revue', 'volume', 'numero',
+                      'citations', 'citations_le', 'resume_editeur',
+                      'avec_sources']) as c(nom)
+   where not exists (select 1 from information_schema.columns
+                      where table_schema = 'public' and table_name = 'livres'
+                        and column_name = c.nom);
+  if orphelins > 0 then
+    raise exception '% colonne(s) d''article absente(s) de la vue « livres » : '
+      'une migration ultérieure l''a recréée sans elles, et l''API échouera '
+      'APRÈS cette migration, pas pendant.', orphelins;
+  end if;
+  raise notice '  vue « livres » : colonnes d''article présentes';
+
+  /* Un ouvrage ne peut pas être à la fois un livre et un article. Aucune
+     contrainte ne l'interdit — un ISBN et un DOI sur la même ligne est
+     structurellement possible — mais ce serait le signe que la cascade des
+     catalogues a écrit dans le mauvais champ.
+
+     NON PROUVÉ PAR MUTATION, et il faut le dire. J'ai essayé trois fois de
+     fabriquer une telle ligne depuis une migration : les trois fois, un
+     autre garde-fou a levé avant celui-ci — l'index unique sur le DOI, ou
+     la règle qui exige une levée de politiques pour écrire. La propriété
+     est défendue en profondeur, ce qui est une bonne nouvelle, mais me
+     laisse sans démonstration que CE contrôle-ci fonctionne.
+
+     Il est gardé parce qu'il couvre un chemin qu'aucune migration ne peut
+     simuler : l'APPLICATION écrivant un DOI sur la ligne d'un livre. Le
+     jour où Crossref sera branché sur la recherche de livres, c'est le seul
+     endroit qui le verra. Mais il est à ce jour affirmé, pas éprouvé. */
+  select count(*) into orphelins
+    from public.ouvrages where isbn is not null and doi is not null;
+  if orphelins > 0 then
+    raise exception '% ouvrage(s) portent à la fois un ISBN et un DOI : '
+      'deux identifiants d''édition pour une seule notice.', orphelins;
+  end if;
+
   /* On annonce le compte des POSSESSIONS, pas celui de « books ». C'est la
      bibliothèque d'aujourd'hui, pas celle du 15/08 — et sur une base ayant
      vécu, les deux nombres diffèrent. */

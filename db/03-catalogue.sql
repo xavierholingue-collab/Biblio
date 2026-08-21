@@ -472,7 +472,34 @@ create policy resumes_ouvrages_maj on public.resumes_ouvrages for update
    ================================================== */
 alter table public.ouvrages add column if not exists avec_sources boolean;
 
-create or replace view public.livres
+/* ---------------------------------------------------------------------------
+   LA VUE EST REMPLACÉE D'UN BLOC, PAS MODIFIÉE PAR DIFFÉRENCE.
+
+   « create or replace view » impose que la nouvelle définition commence par
+   les mêmes colonnes, dans le même ordre. Il ne sait NI insérer au milieu, NI
+   retirer. Les deux défauts ont été rencontrés à un jour d'intervalle :
+
+     19/08, en recette : « ne peut pas modifier le nom de la colonne statut
+     en avec_sources » — une colonne insérée au milieu.
+
+     19/08, au banc d'essai : « cannot drop columns from view » — au deuxième
+     passage, 03 proposait une vue PLUS COURTE que celle laissée par 08.
+
+   Le second n'apparaît qu'au REJEU, et le premier que sur une base ayant déjà
+   vécu. Deux filets différents, deux défauts différents, même cause.
+
+   « drop » puis « create » n'a aucune de ces contraintes. Le bloc est enfermé
+   dans une transaction : le DDL est transactionnel sous PostgreSQL, donc
+   aucune autre session ne voit la vue disparaître — l'API continue de lire
+   pendant la migration.
+
+   Vérifié avant d'écrire : aucun objet de la base ne dépend de « livres ».
+   Seul server.js la lit. Un « drop » sans CASCADE échouerait franchement si
+   cela changeait un jour.
+   --------------------------------------------------------------------------- */
+begin;
+drop view if exists public.livres;
+create view public.livres
 with (security_invoker = true) as
 select p.tenant_id,
        p.id,
@@ -481,21 +508,6 @@ select p.tenant_id,
        o.cover_url, o.cover_statut,
        p.statut, p.note, p.categorie, p.sous_categorie, p.sphere, p.visibilite,
        p.ajoute_le, p.maj_le,
-       /* EN DERNIÈRE POSITION, ET CE N'EST PAS UN DÉTAIL DE STYLE.
-        *
-        * « create or replace view » ne sait qu'AJOUTER une colonne à la fin.
-        * Insérée au milieu, elle décale les suivantes et PostgreSQL refuse :
-        *
-        *   ERREUR : ne peut pas modifier le nom de la colonne « statut »
-        *            de la vue en « avec_sources »
-        *
-        * Constaté en recette le 19/08/2026, sur la base qui porte les vraies
-        * données. Une base neuve n'aurait rien dit : la vue y est CRÉÉE, pas
-        * remplacée, et l'ordre des colonnes n'y pose aucune question. Ce
-        * défaut n'existe que pour une base qui a déjà vécu — c'est-à-dire
-        * exactement celle qu'on ne peut pas se permettre de casser.
-        *
-        * Toute colonne ajoutée à cette vue devra l'être ici, à la fin. */
        o.avec_sources
   from public.possessions p
   join public.ouvrages o on o.id = p.ouvrage_id
@@ -504,6 +516,7 @@ select p.tenant_id,
            then public.possession_publique(p)
          else p.tenant_id = current_setting('app.tenant_id', true)::uuid
        end;
+commit;
 
 comment on view public.livres is
   'Assemblage lecture seule du catalogue partagé et des possessions. Les

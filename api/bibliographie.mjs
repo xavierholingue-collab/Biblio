@@ -119,6 +119,7 @@ const ADRESSES = {
   bnf: "https://catalogue.bnf.fr/api/SRU",
   openlibrary: "https://openlibrary.org/api/books",
   googlebooks: "https://www.googleapis.com/books/v1/volumes",
+  crossref: "https://api.crossref.org/works",
 };
 
 function adresse(nom) {
@@ -489,6 +490,158 @@ export async function couvertureDeSecours(brut) {
     console.warn("couverture de secours indisponible —", e.message);
     return null;
   }
+}
+
+/* =========================================================================
+   CROSSREF — LES ARTICLES DE RECHERCHE
+
+   Éprouvé le 19/08/2026 sur 10.1257/jep.5.1.193 : gratuit, sans clef, et plus
+   riche que tout ce dont on dispose pour les livres. Il rend le résumé des
+   auteurs, les noms déjà séparés en « given » / « family », et le nombre de
+   citations.
+
+   TROIS CONSÉQUENCES QUI CHANGENT LE COÛT :
+
+   ① Aucun appel au modèle pour identifier. Là où un livre demandait 0,075 €
+     avant la cascade, un article ne demande rien.
+   ② Aucune gymnastique sur l'ordre du nom. Pour les livres, le modèle doit
+     deviner où est le patronyme ; ici la question ne se pose pas.
+   ③ Le résumé est FOURNI, et c'est celui des auteurs. Pour un livre il coûte
+     0,059 € et vient du modèle.
+
+   ---------------------------------------------------------------------------
+   LE « POLITE POOL », ET POURQUOI ON S'Y MET
+
+   Crossref sert plus vite et plus régulièrement les appelants qui
+   s'identifient par une adresse de courriel dans l'en-tête. Ce n'est pas une
+   obligation, c'est une courtoisie qui se paie en fiabilité — et l'adresse
+   utilisée est celle du service, pas celle d'un utilisateur : on ne fait pas
+   voyager l'identité de quelqu'un vers un tiers pour améliorer un temps de
+   réponse.
+   ========================================================================= */
+const COURRIEL_CONTACT = process.env.COURRIEL_EXPEDITEUR ?? "";
+
+/** Un DOI propre, extrait de ce qu'on lui donne : « 10.1257/jep.5.1.193 »,
+ *  « https://doi.org/10.1257/jep.5.1.193 », « doi:10.1257/… », ou une URL
+ *  d'éditeur qui en contient un.
+ *
+ *  Le motif est celui que Crossref recommande. Il est LARGE à dessein : un
+ *  DOI peut contenir des parenthèses, des points-virgules, des deux-points.
+ *  Trop restreindre ferait échouer des identifiants parfaitement valides, et
+ *  l'échec ressemblerait à « article introuvable » plutôt qu'à « mal lu ». */
+export function normaliserDoi(brut) {
+  const m = String(brut ?? "").match(/\b10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+/);
+  if (!m) return null;
+  /* Une URL colle parfois une ponctuation finale au DOI. On retire ce qui ne
+     peut pas terminer un identifiant. */
+  return m[0].replace(/[.,;)\]]+$/, "");
+}
+
+/** L'abstract de Crossref est du JATS : « <jats:p>…</jats:p> ». On retire le
+ *  balisage plutôt que de le laisser traverser jusqu'à une page — ce texte
+ *  finit dans du HTML et dans l'invite du modèle. */
+function texteAbstract(brut) {
+  return String(brut ?? "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 4000);
+}
+
+export async function chercherParDoi(brut) {
+  const doi = normaliserDoi(brut);
+  if (!doi) return { issue: "absente", detail: "DOI invalide" };
+
+  const url = `${adresse("crossref")}/${encodeURIComponent(doi)}`;
+  let j;
+  try {
+    const r = await fetch(url, {
+      signal: AbortSignal.timeout(DELAI),
+      headers: { "user-agent": `biblio/1.0 (${COURRIEL_CONTACT || "sans contact"})` },
+    });
+    /* 404 est une RÉPONSE, pas une panne : Crossref ne connaît pas ce DOI.
+       La distinguer d'un réseau coupé décide de la suite — « absente » clôt
+       la question, « injoignable » laisse le doute. */
+    if (r.status === 404) return { issue: "absente", doi };
+    if (!r.ok) { const e = new Error(`HTTP ${r.status}`); e.http = r.status; throw e; }
+    j = await r.json();
+  } catch (e) {
+    console.warn("crossref injoignable —", e.message);
+    return { issue: "injoignable", doi };
+  }
+
+  const m = j?.message;
+  if (!m) return { issue: "absente", doi };
+
+  /* « given » et « family » séparés : le nom se compose, il ne se devine pas.
+     C'est la différence la plus nette avec les livres. */
+  const auteurs = [].concat(m.author ?? [])
+    .map((a) => [texte(a.family), texte(a.given)].filter(Boolean).join(" "))
+    .filter(Boolean);
+
+  /* La date de publication a plusieurs formes selon l'éditeur ; « issued » est
+     celle que Crossref garantit. */
+  const an = m.issued?.["date-parts"]?.[0]?.[0]
+          ?? m["published-print"]?.["date-parts"]?.[0]?.[0]
+          ?? m.published?.["date-parts"]?.[0]?.[0];
+
+  return {
+    issue: "trouvee",
+    source: "crossref",
+    article: {
+      doi,
+      titre: texte(premier(m.title)),
+      /* Tous les auteurs dans le champ, séparés par « ; » : une bibliographie
+         sans ses coauteurs est une bibliographie fausse. */
+      auteur: auteurs.join(" ; "),
+      revue: texte(premier(m["container-title"])),
+      editeur: texte(m.publisher),
+      annee: Number.isInteger(an) ? an : null,
+      volume: texte(m.volume) || null,
+      numero: texte(m.issue) || null,
+      pages: null,
+      pagination: texte(m.page) || null,
+      citations: Number.isInteger(m["is-referenced-by-count"])
+        ? m["is-referenced-by-count"] : null,
+      resumeEditeur: m.abstract ? texteAbstract(m.abstract) : null,
+      /* Un article de revue porte, par construction, notes et bibliographie.
+         C'est le seul cas où « avec_sources » se déduit sans jugement. */
+      avecSources: m.type === "journal-article" ? true : null,
+      url: texte(m.URL) || `https://doi.org/${doi}`,
+    },
+  };
+}
+
+/** Chercher un article sans son DOI, par titre et auteurs. Même rôle que la
+ *  recherche libre à la BnF pour les livres : la personne qui a l'article sous
+ *  les yeux en lit le titre, ce qu'aucune machine ne devine. */
+export async function chercherArticleParTexte(brut, maximum = 5) {
+  const q = String(brut ?? "").trim().slice(0, 200);
+  if (q.length < 4) return [];
+
+  const url = `${adresse("crossref")}?query.bibliographic=${encodeURIComponent(q)}`
+            + `&rows=${Math.min(10, maximum)}&select=DOI,title,author,container-title,issued,volume,issue,is-referenced-by-count`;
+  const r = await fetch(url, {
+    signal: AbortSignal.timeout(DELAI),
+    headers: { "user-agent": `biblio/1.0 (${COURRIEL_CONTACT || "sans contact"})` },
+  });
+  if (!r.ok) return [];
+  const items = (await r.json())?.message?.items ?? [];
+
+  return items.map((m) => ({
+    doi: texte(m.DOI),
+    titre: texte(premier(m.title)),
+    auteur: [].concat(m.author ?? [])
+      .map((a) => [texte(a.family), texte(a.given)].filter(Boolean).join(" "))
+      .filter(Boolean).join(" ; "),
+    revue: texte(premier(m["container-title"])),
+    annee: m.issued?.["date-parts"]?.[0]?.[0] ?? null,
+    volume: texte(m.volume) || null,
+    numero: texte(m.issue) || null,
+    citations: Number.isInteger(m["is-referenced-by-count"])
+      ? m["is-referenced-by-count"] : null,
+  })).filter((a) => a.titre && a.doi);
 }
 
 /** L'état des catalogues au démarrage, pour le dire une fois plutôt qu'à

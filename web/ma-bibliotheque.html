@@ -198,6 +198,34 @@
   .barre { width: 4px; height: 100%; min-height: 34px; border-radius: 2px; }
   .titre { font-family: var(--serif); font-size: 17px; line-height: 1.25; }
   .meta { font-size: 13px; color: var(--ink-soft); margin-top: 2px; }
+
+  /* ---------- Tout ce qui est affiché filtre ----------
+     Discret au repos, net au survol. Un texte qui se souligne au passage se
+     comprend sans légende ; un texte coloré en permanence transforme la liste
+     en sapin de Noël et personne ne sait plus ce qui compte. */
+  .filtrable { cursor: pointer; border-radius: 3px; }
+  .filtrable:hover { text-decoration: underline; color: var(--ink); }
+  .filtrable:focus-visible { outline: 2px solid var(--acad); outline-offset: 2px; }
+
+  #filtresActifs {
+    display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+    margin: 0 0 12px;
+  }
+  .puce-filtre {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--fond-2); border: 1px solid var(--bord);
+    border-radius: 999px; padding: 4px 10px 4px 12px;
+    font-size: 13px; color: var(--ink); cursor: pointer;
+    font-family: var(--sans);
+  }
+  .puce-filtre b { font-weight: 600; }
+  .puce-filtre span { color: var(--ink-soft); font-size: 15px; line-height: 1; }
+  .puce-filtre:hover span { color: var(--roman); }
+  .tout-effacer {
+    background: none; border: none; color: var(--ink-soft);
+    font-size: 13px; cursor: pointer; text-decoration: underline;
+    font-family: var(--sans);
+  }
   .droite { text-align: right; font-family: var(--mono); font-size: 11px; color: var(--ink-soft); white-space: nowrap; }
   .note { color: var(--ink); font-size: 13px; }
   .vide { padding: 50px 0; text-align: center; color: var(--ink-soft); }
@@ -515,12 +543,26 @@
       <option value="note">Trier par note</option>
       <option value="annee">Trier par année</option>
     </select>
+    <!-- LA ZONE EST UN FILTRE, PAS UN SECOND ÉCRAN.
+         « Tout » permet de voir livres et articles côte à côte sur un même
+         rayon — c'est l'intérêt principal d'avoir mis les deux dans le même
+         catalogue, et un écran séparé l'aurait rendu impossible. -->
+    <div class="puces" id="zones">
+      <button class="puce" id="zoneTout" aria-pressed="true">Tout</button>
+      <button class="puce" id="zoneLivres" aria-pressed="false">Livres</button>
+      <button class="puce" id="zoneArticles" aria-pressed="false">Articles</button>
+    </div>
     <div class="puces">
       <button class="puce" id="vueListe" aria-pressed="true">Liste</button>
       <button class="puce" id="vueGrille" aria-pressed="false">Couvertures</button>
     </div>
     <button class="btn" id="ajouter">+ Ajouter un livre</button>
+    <button class="btn" id="ajouterArticle">+ Ajouter un article</button>
   </div>
+
+  <!-- Les filtres en cours, chacun retirable. Vide, la barre disparaît :
+       une zone toujours présente mais souvent vide fatigue l'œil pour rien. -->
+  <div id="filtresActifs" hidden></div>
 
   <div id="liste"></div>
   <div class="grille" id="grille" hidden></div>
@@ -545,7 +587,18 @@
         <div class="sous" id="ficheAuteur"></div>
         <div class="sous" id="ficheMeta"></div>
         <span class="rayon" id="ficheRayon"></span>
+        <div class="sous" id="ficheDoi" hidden></div>
       </div>
+    </div>
+
+    <!-- L'ABSTRACT DES AUTEURS, ET IL PASSE AVANT.
+         C'est la source ; le résumé du modèle est une reformulation. Les
+         mettre dans cet ordre évite qu'on lise la seconde en croyant lire la
+         première — et le titre le dit, plutôt qu'une nuance de gris. -->
+    <div class="resume-bloc" id="blocAbstract" hidden>
+      <h3>Résumé des auteurs</h3>
+      <div id="ficheAbstract"></div>
+      <div class="signature">Publié avec l'article · source Crossref</div>
     </div>
 
     <div class="resume-bloc">
@@ -568,6 +621,18 @@
 <dialog id="modale">
   <div class="modale-corps">
     <h2 id="modaleTitre">Ajouter un livre</h2>
+
+    <!-- Le pendant du bloc ISBN, pour les articles. Masqué par défaut :
+         il n'apparaît que par « + Ajouter un article ». -->
+    <div class="recherche-isbn" id="blocDoi" hidden>
+      <p>Collez un DOI, l'adresse de l'article, ou tapez son titre : tout est retrouvé chez Crossref.</p>
+      <div class="ligne-isbn">
+        <input type="text" id="rechercheDoi"
+               placeholder="10.1257/jep.5.1.193, une adresse, ou un titre">
+        <button class="btn" id="btnChercherDoi" type="button">Retrouver</button>
+      </div>
+      <div class="etat" id="etatDoi"></div>
+    </div>
 
     <div class="recherche-isbn" id="blocIsbn">
       <p>Saisissez un ISBN ou un titre : les informations sont retrouvées et classées automatiquement.</p>
@@ -699,7 +764,9 @@ const EXEMPLES_QUETE = [
    ========================================================================= */
 
 let livres = [];
-let etat = { q: "", cat: "", sous: "", statut: "", sphere: "", tri: "auteur", vue: "liste" };
+let etat = { q: "", cat: "", sous: "", statut: "", sphere: "", tri: "auteur", vue: "liste",
+             auteur: "", editeur: "", annee: "", theme: "", revue: "",
+             zone: "" };
 let idEnCours = null;
 
 /* D'où vient la fiche que le formulaire affiche, quand elle vient d'une
@@ -954,6 +1021,9 @@ function versApp(r) {
     visibilite: r.visibilite,
 
     avecSources: r.avec_sources ?? null,
+    type: r.type || "livre", doi: r.doi ?? null, revue: r.revue ?? null,
+    volume: r.volume ?? null, numero: r.numero ?? null,
+    citations: r.citations ?? null, resumeEditeur: r.resume_editeur ?? null,
     coverUrl: r.cover_url, coverStatut: r.cover_statut,
     resume: r.resume, resumePoints: r.resume_points, resumeThemes: r.resume_themes,
     resumeModele: r.resume_modele, resumeGenereLe: r.resume_genere_le,
@@ -975,6 +1045,13 @@ function versBase(l) {
     /* « null » traverse tel quel : c'est une valeur, pas une absence. Le
        serveur ne l'écrasera pas sur ce qu'il savait déjà. */
     avec_sources: typeof l.avecSources === "boolean" ? l.avecSources : null,
+    /* Le convoyeur, encore lui : un champ ajouté sans passer ici meurt
+       entre le formulaire et l'API. C'est le défaut de « visibilite » du
+       15/08, puis de « source » du 18/08. */
+    type: l.type || "livre", doi: l.doi ?? null, revue: l.revue ?? null,
+    volume: l.volume ?? null, numero: l.numero ?? null,
+    citations: Number.isInteger(l.citations) ? l.citations : null,
+    resume_editeur: l.resumeEditeur ?? null,
     cover_url: l.coverUrl ?? null, cover_statut: l.coverStatut ?? "inconnu",
     resume: l.resume ?? null, resume_points: l.resumePoints ?? null,
     resume_themes: l.resumeThemes ?? null, resume_modele: l.resumeModele ?? null,
@@ -1183,9 +1260,23 @@ function filtrer() {
     if (etat.sous && l.sousCategorie !== etat.sous) return false;
     if (etat.statut && l.statut !== etat.statut) return false;
     if (etat.sphere && l.sphere !== etat.sphere) return false;
+    if (etat.auteur && l.auteur !== etat.auteur) return false;
+    if (etat.editeur && (l.editeur || "") !== etat.editeur) return false;
+    /* L'année vient d'un clic, donc d'un affichage, donc d'une chaîne.
+       Comparer en chaîne évite un « 2011 » qui ne trouve pas 2011. */
+    if (etat.annee && String(l.annee ?? "") !== String(etat.annee)) return false;
+    if (etat.theme && !(l.resumeThemes || []).includes(etat.theme)) return false;
+    if (etat.revue && (l.revue || "") !== etat.revue) return false;
+    /* La zone n'est pas un filtre comme les autres : elle ne figure pas
+       dans la barre des filtres actifs, parce qu'elle a ses propres
+       boutons, toujours visibles. Deux façons de retirer la même chose
+       se contredisent tôt ou tard. */
+    if (etat.zone && (l.type || "livre") !== etat.zone) return false;
     if (!q) return true;
     const themes = (l.resumeThemes || []).join(" ");
-    return (l.titre + " " + l.auteur + " " + (l.editeur || "") + " " + themes).toLowerCase().includes(q);
+    return (l.titre + " " + l.auteur + " " + (l.editeur || "") + " "
+            + (l.revue || "") + " " + (l.doi || "") + " " + themes)
+           .toLowerCase().includes(q);
   });
 }
 
@@ -1370,26 +1461,333 @@ function dessinerListe() {
   Object.keys(groupes).sort((a, b) => a.localeCompare(b, "fr")).forEach(g => {
     const t = document.createElement("div");
     t.className = "groupe-titre";
-    t.innerHTML = `<span>${echapper(g)}</span><span>${groupes[g].length}</span>`;
+    t.append(jeton(g, "sous", g));
+    const n = document.createElement("span");
+    n.textContent = groupes[g].length;
+    t.append(n);
     el.appendChild(t);
     groupes[g].forEach(l => el.appendChild(fiche(l)));
   });
+}
+
+/* =========================================================================
+   TOUT CE QUI EST AFFICHÉ FILTRE — 19/08/2026
+
+   Le principe vient du dossier de design de Lisia : « tout élément affiché est
+   navigable ». Un auteur, un rayon, une année, un éditeur, un thème ne sont
+   pas des étiquettes mortes — ce sont des chemins.
+
+   TROIS RÈGLES QUI ÉVITENT LES PIÈGES HABITUELS.
+
+   ① BASCULE, pas empilement. Cliquer deux fois sur le même auteur retire le
+     filtre. Sans cela, on ne sait plus comment revenir en arrière autrement
+     qu'en rechargeant la page — et l'on recharge.
+
+   ② « stopPropagation », sinon le clic ouvre AUSSI la fiche. La ligne entière
+     est cliquable depuis toujours ; un jeton posé dedans hérite du clic du
+     parent, et l'utilisateur obtient les deux à la fois.
+
+   ③ UNE DIMENSION À LA FOIS SE REMPLACE. Cliquer un second auteur remplace le
+     premier plutôt que de chercher les deux — un « et » sur la même dimension
+     ne rend jamais rien, et c'est déroutant.
+
+   Les jetons sont construits en DOM, pas en chaîne HTML : un titre contenant
+   « < » ou une apostrophe traverserait un gabarit sans qu'on le voie.
+   ========================================================================= */
+function appliquerFiltre(dimension, valeur) {
+  const v = String(valeur ?? "");
+  if (!v) return;
+  etat[dimension] = etat[dimension] === v ? "" : v;
+  /* Filtrer par rayon sans vider la catégorie afficherait « 0 résultat » dès
+     que les deux se contredisent — un rayon appartient à une catégorie. */
+  if (dimension === "sous") etat.cat = "";
+  rafraichir();
+}
+
+function jeton(texte, dimension, valeur) {
+  const e = document.createElement("span");
+  e.className = "filtrable";
+  e.textContent = texte;
+  e.tabIndex = 0;
+  e.setAttribute("role", "button");
+  e.title = "Filtrer sur « " + texte + " »";
+  const agir = (ev) => { ev.stopPropagation(); ev.preventDefault();
+                         appliquerFiltre(dimension, valeur); };
+  e.onclick = agir;
+  e.onkeydown = (ev) => { if (ev.key === "Enter" || ev.key === " ") agir(ev); };
+  return e;
+}
+
+const LIBELLES_FILTRE = {
+  cat: "Catégorie", sous: "Rayon", statut: "Statut", sphere: "Sphère",
+  auteur: "Auteur", editeur: "Éditeur", annee: "Année", theme: "Thème",
+  revue: "Revue",
+  q: "Recherche",
+};
+
+function dessinerFiltres() {
+  const el = document.getElementById("filtresActifs");
+  el.replaceChildren();
+
+  const actifs = Object.keys(LIBELLES_FILTRE)
+    .filter(k => String(etat[k] ?? "").trim() !== "");
+
+  el.hidden = actifs.length === 0;
+  if (!actifs.length) return;
+
+  for (const k of actifs) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "puce-filtre";
+    b.title = "Retirer ce filtre";
+    const t = document.createElement("b");
+    t.textContent = LIBELLES_FILTRE[k] + " : " + etat[k];
+    const x = document.createElement("span");
+    x.textContent = "×";
+    b.append(t, x);
+    b.onclick = () => {
+      etat[k] = "";
+      /* Le champ de recherche est un élément de l'interface, pas seulement
+         une valeur : le vider dans l'état sans le vider à l'écran laisserait
+         un texte qui ne filtre plus rien. */
+      if (k === "q") document.getElementById("q").value = "";
+      if (k === "sous") document.getElementById("sousCat").value = "";
+      rafraichir();
+    };
+    el.appendChild(b);
+  }
+
+  if (actifs.length > 1) {
+    const tout = document.createElement("button");
+    tout.type = "button";
+    tout.className = "tout-effacer";
+    tout.textContent = "Tout effacer";
+    tout.onclick = () => {
+      for (const k of Object.keys(LIBELLES_FILTRE)) etat[k] = "";
+      document.getElementById("q").value = "";
+      document.getElementById("sousCat").value = "";
+      rafraichir();
+    };
+    el.appendChild(tout);
+  }
+}
+
+/* =========================================================================
+   AJOUTER UN ARTICLE — UN DOI SUFFIT
+
+   Aucun appel au modèle pour l'identifier : Crossref rend le titre, tous les
+   auteurs déjà dans le bon ordre, la revue, l'année, la pagination, le résumé
+   des auteurs et le nombre de citations. Seul le rayon demande un jugement,
+   et il coûte quelques millimes.
+
+   ON ACCEPTE UNE URL AUTANT QU'UN DOI. Personne ne recopie « 10.1257/… » à la
+   main : on colle l'adresse de la page où l'on a lu l'article, et le DOI s'y
+   trouve presque toujours. Refuser l'URL, c'est demander à l'utilisateur de
+   faire un travail que la machine fait mieux.
+   ========================================================================= */
+let articleEnCours = null;
+
+async function ouvrirAjoutArticle() {
+  ouvrirModale(null);
+  articleEnCours = null;
+  document.getElementById("modaleTitre").textContent = "Ajouter un article";
+  /* Ce qu'un article n'a pas ne doit pas figurer dans son formulaire : ni
+     ISBN, ni scanner, ni couverture. Un champ vide qu'on ne peut pas remplir
+     est une question sans réponse. */
+  document.getElementById("blocIsbn").hidden = true;
+  document.getElementById("blocDoi").hidden = false;
+  document.getElementById("rechercheDoi").value = "";
+  document.getElementById("etatDoi").textContent = "";
+  setTimeout(() => document.getElementById("rechercheDoi").focus(), 0);
+}
+
+/* Un article trouvé par sa recherche : on remplit la fiche comme si on
+   avait collé son DOI, en repassant par le même chemin. Refaire l'appel
+   plutôt que d'utiliser les champs de la liste n'est pas un gâchis : la
+   recherche ne rend qu'un résumé de notice — pas l'abstract, pas la
+   pagination — et le classement par rayon n'a pas encore eu lieu. */
+function ligneArticleTrouve(a) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "btn";
+  b.style.cssText = "display:block;width:100%;text-align:left;margin-bottom:6px";
+
+  const t = document.createElement("div");
+  t.textContent = a.titre;
+  const d = document.createElement("div");
+  d.style.cssText = "color:var(--ink-soft);font-size:13px";
+  d.textContent = [a.auteur, a.revue, a.annee,
+    Number.isInteger(a.citations) ? a.citations.toLocaleString("fr") + " citations" : null]
+    .filter(Boolean).join(" · ");
+  b.append(t, d);
+
+  b.onclick = () => {
+    document.getElementById("rechercheDoi").value = a.doi;
+    chercherArticle();
+  };
+  return b;
+}
+
+async function chercherArticle() {
+  const brut = document.getElementById("rechercheDoi").value.trim();
+  const etatEl = document.getElementById("etatDoi");
+  const btn = document.getElementById("btnChercherDoi");
+  if (!brut) return;
+
+  btn.disabled = true;
+  etatEl.className = "etat";
+  etatEl.replaceChildren();
+  etatEl.textContent = "Recherche chez Crossref…";
+
+  /* LA FORME DE CE QU'ON TAPE DÉCIDE DU CHEMIN, pas un second bouton.
+   *
+   * Un DOI se reconnaît sans ambiguïté — « 10.xxxx/… », même noyé dans une
+   * URL. Tout le reste est un titre. Deux boutons obligeraient à choisir
+   * avant de savoir, et l'on se tromperait la moitié du temps. */
+  if (!(window.articleOutils?.estDoi?.(brut) ?? /\b10\.\d{4,9}\//.test(brut))) {
+    try {
+      const r = await api("/articles?q=" + encodeURIComponent(brut));
+      const trouves = r?.articles ?? [];
+      etatEl.replaceChildren();
+      if (!trouves.length) {
+        etatEl.className = "etat";
+        etatEl.textContent = "Aucun article sous ce titre. Essayez d'autres mots, "
+                           + "ou collez le DOI.";
+        return;
+      }
+      const intro = document.createElement("div");
+      intro.textContent = trouves.length + " résultat(s) — choisissez :";
+      etatEl.appendChild(intro);
+      const liste = document.createElement("div");
+      liste.style.marginTop = "8px";
+      for (const a of trouves) liste.appendChild(ligneArticleTrouve(a));
+      etatEl.appendChild(liste);
+      return;
+    } catch (e) {
+      etatEl.className = "etat err";
+      etatEl.textContent = "Recherche impossible : " + e.message;
+      return;
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  try {
+    const info = await api("/article?doi=" + encodeURIComponent(brut));
+
+    if (info.deja) {
+      etatEl.replaceChildren();
+      const p = document.createElement("div");
+      p.textContent = "Vous avez déjà « " + info.deja.titre + " ».";
+      const o = document.createElement("button");
+      o.type = "button"; o.className = "btn"; o.style.marginTop = "8px";
+      o.textContent = "Ouvrir sa fiche";
+      o.onclick = () => { document.getElementById("modale").close(); ouvrirFiche(info.deja.id); };
+      etatEl.append(p, o);
+      return;
+    }
+
+    if (info.issue && info.issue !== "trouvee") {
+      etatEl.className = "etat err";
+      etatEl.textContent = info.issue === "injoignable"
+        ? "Crossref ne répond pas. Réessayez dans un instant."
+        : "Aucun article ne porte ce DOI. Vérifiez-le, ou complétez à la main.";
+      return;
+    }
+
+    articleEnCours = info;
+    const mettre = (id, v) => { if (v) document.getElementById(id).value = v; };
+    mettre("fTitre", info.titre);
+    mettre("fAuteur", info.auteur);
+    /* Le champ « Éditeur » devient « Revue » le temps d'un article. Crossref
+       rend les deux — « American Economic Association » et « Journal of
+       Economic Perspectives » — et c'est la seconde qui sert à retrouver un
+       article. On ne les confond pas : l'éditeur suit dans son propre champ,
+       invisible mais enregistré. */
+    const etiq = document.querySelector('label[for="fEditeur"]');
+    if (etiq) etiq.textContent = "Revue";
+    mettre("fEditeur", info.revue);
+    mettre("fAnnee", info.annee);
+    if (SOUS_CATEGORIES[info.categorie]) {
+      document.getElementById("fCat").value = info.categorie;
+      majSousDuFormulaire();
+      if (SOUS_CATEGORIES[info.categorie].includes(info.sousCategorie))
+        document.getElementById("fSous").value = info.sousCategorie;
+    }
+    /* Un article de revue porte notes et bibliographie par construction :
+       c'est le seul cas où « sourcé » se déduit sans jugement. */
+    if (info.avecSources === true) document.getElementById("fSources").value = "oui";
+
+    etatEl.className = "etat";
+    etatEl.textContent = [info.revue, info.annee,
+      Number.isInteger(info.citations) ? info.citations.toLocaleString("fr") + " citations" : null]
+      .filter(Boolean).join(" · ") + " — vérifiez puis enregistrez.";
+  } catch (e) {
+    etatEl.className = "etat err";
+    etatEl.textContent = "Recherche impossible : " + e.message;
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 function fiche(l) {
   const d = document.createElement("div");
   d.className = "fiche";
   d.onclick = () => ouvrirFiche(l.id);
-  d.innerHTML = `
-    <div class="barre" style="background:${COULEURS[l.categorie]}"></div>
-    <div>
-      <div class="titre">${echapper(l.titre)}</div>
-      <div class="meta">${echapper(l.auteur)}${l.editeur ? " · " + echapper(l.editeur) : ""}${l.annee ? " · " + l.annee : ""}${l.resume ? " · résumé" : ""}</div>
-    </div>
-    <div class="droite">
-      ${l.note ? `<div class="note">${l.note.toFixed(1).replace(".0", "")} / 5</div>` : ""}
-      <div>${l.statut}</div>
-    </div>`;
+
+  const barre = document.createElement("div");
+  barre.className = "barre";
+  barre.style.background = COULEURS[l.categorie];
+
+  const centre = document.createElement("div");
+  const titre = document.createElement("div");
+  titre.className = "titre";
+  titre.textContent = l.titre;
+
+  const meta = document.createElement("div");
+  meta.className = "meta";
+  /* Chaque valeur est un chemin. Le séparateur, lui, ne l'est pas — il reste
+     du texte inerte entre deux jetons, sinon la zone cliquable déborde et
+     l'on filtre en visant un point. */
+  const sep = () => document.createTextNode(" · ");
+  meta.appendChild(jeton(l.auteur, "auteur", l.auteur));
+
+  /* UN ARTICLE NE MONTRE PAS SON ÉDITEUR MAIS SA REVUE. Afficher les deux
+     alignerait « American Economic Association · Journal of Economic
+     Perspectives » — l'un des deux ne sert à personne pour retrouver un
+     article, et c'est celui qu'on connaît le moins. */
+  const article = (l.type || "livre") === "article";
+  if (article && l.revue) {
+    meta.appendChild(sep()); meta.appendChild(jeton(l.revue, "revue", l.revue));
+  } else if (!article && l.editeur) {
+    meta.appendChild(sep()); meta.appendChild(jeton(l.editeur, "editeur", l.editeur));
+  }
+
+  if (l.annee)   { meta.appendChild(sep()); meta.appendChild(jeton(String(l.annee), "annee", l.annee)); }
+
+  /* Le nombre de citations est un FAIT, pas un jugement — le seul signal de
+     portée qu'un livre ne porte jamais. Il n'est pas cliquable : filtrer sur
+     « exactement 3 531 citations » ne rendrait qu'un article. */
+  if (article && Number.isInteger(l.citations)) {
+    meta.appendChild(sep());
+    meta.appendChild(document.createTextNode(l.citations.toLocaleString("fr") + " citations"));
+  }
+
+  if (l.resume)  { meta.appendChild(sep()); meta.appendChild(document.createTextNode("résumé")); }
+
+  centre.append(titre, meta);
+
+  const droite = document.createElement("div");
+  droite.className = "droite";
+  if (l.note) {
+    const n = document.createElement("div");
+    n.className = "note";
+    n.textContent = l.note.toFixed(1).replace(".0", "") + " / 5";
+    droite.appendChild(n);
+  }
+  droite.appendChild(jeton(l.statut, "statut", l.statut));
+
+  d.append(barre, centre, droite);
   return d;
 }
 
@@ -1417,6 +1815,7 @@ function echapper(s) {
 }
 
 function rafraichir() {
+  dessinerFiltres();
   dessinerMosaique();
   dessinerLegende();
   document.getElementById("liste").hidden  = etat.vue !== "liste";
@@ -1479,8 +1878,37 @@ async function ouvrirFiche(id) {
   document.getElementById("ficheCouv").replaceChildren(elementCouverture(l, false));
   document.getElementById("ficheTitre").textContent  = l.titre;
   document.getElementById("ficheAuteur").textContent = l.auteur;
+  const estArticle = (l.type || "livre") === "article";
   document.getElementById("ficheMeta").textContent =
-    [l.editeur, l.annee, l.sphere, l.statut, l.note ? l.note + " / 5" : null].filter(Boolean).join(" · ");
+    [estArticle ? l.revue : l.editeur,
+     /* « vol. 5, n° 1 » : ce qui permet de citer l'article, et qu'un livre
+        n'a pas. Sans cela, une bibliographie recopiée est incomplète. */
+     estArticle && l.volume ? "vol. " + l.volume + (l.numero ? ", n° " + l.numero : "") : null,
+     l.annee, l.sphere, l.statut, l.note ? l.note + " / 5" : null,
+     estArticle && Number.isInteger(l.citations)
+       ? l.citations.toLocaleString("fr") + " citations" : null,
+    ].filter(Boolean).join(" · ");
+
+  /* Le DOI est un LIEN, pas un texte. C'est le seul moyen d'atteindre
+     l'article lui-même depuis sa fiche, et le recopier à la main serait
+     absurde pour un identifiant fait pour être résolu. */
+  const dDoi = document.getElementById("ficheDoi");
+  dDoi.replaceChildren();
+  dDoi.hidden = !l.doi;
+  if (l.doi) {
+    const a = document.createElement("a");
+    a.href = "https://doi.org/" + l.doi;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    a.textContent = l.doi;
+    dDoi.append(document.createTextNode("DOI "), a);
+  }
+
+  /* L'abstract des auteurs. Affiché tel quel, jamais reformulé — et masqué
+     quand il n'y en a pas, plutôt qu'un cadre vide qui promet un texte. */
+  const abs = document.getElementById("ficheAbstract");
+  document.getElementById("blocAbstract").hidden = !l.resumeEditeur;
+  abs.textContent = l.resumeEditeur || "";
 
   const r = document.getElementById("ficheRayon");
   r.textContent = l.categorie + " · " + l.sousCategorie;
@@ -1495,8 +1923,24 @@ async function ouvrirFiche(id) {
   // Résumé absent : on le demande au modèle, une seule fois, puis il est en cache.
   // Un visiteur non connecté ne déclenche aucun appel payant.
   if (!l.resume) {
-    if (connecte || iaPublique) await genererResume(id, false);
-    else {
+    /* UN ARTICLE QUI A SON ABSTRACT NE DÉCLENCHE RIEN.
+     *
+     * Ouvrir une fiche de livre sans résumé en demande un au modèle : c'est
+     * le bon réflexe, le texte n'existe nulle part ailleurs. Pour un article,
+     * le résumé des auteurs est DÉJÀ là, gratuit et autorisé — en générer un
+     * second automatiquement dépenserait pour reformuler ce qu'on affiche
+     * juste au-dessus.
+     *
+     * Le bouton reste, parce que traduire un abstract anglais en français a
+     * une vraie valeur. Mais c'est un geste, pas un réflexe. */
+    if (l.resumeEditeur) {
+      document.getElementById("etatResume").textContent =
+        "Le résumé des auteurs est affiché ci-dessus. « Générer » en produira "
+        + "un en français, à votre demande.";
+      document.getElementById("btnRegenerer").hidden = !connecte;
+    } else if (connecte || iaPublique) {
+      await genererResume(id, false);
+    } else {
       document.getElementById("etatResume").textContent =
         "Aucun résumé enregistré pour cet ouvrage.";
     }
@@ -1738,6 +2182,14 @@ function majSousDuFormulaire() {
 function ouvrirModale(id) {
   idEnCours = id;
   sourceTrouvee = null;          // la provenance ne se transmet pas d'un livre à l'autre
+  articleEnCours = null;
+  /* Le formulaire revient toujours en mode LIVRE. Sans cette remise à
+     zéro, ouvrir un livre après avoir ajouté un article laisserait le
+     bloc DOI ouvert — et l'on chercherait un DOI pour un roman. */
+  const blocDoi = document.getElementById("blocDoi");
+  if (blocDoi) blocDoi.hidden = true;
+  const etiqEd = document.querySelector('label[for="fEditeur"]');
+  if (etiqEd) etiqEd.textContent = "Éditeur";
   const l = id ? livres.find(x => x.id === id) : null;
 
   document.getElementById("modaleTitre").textContent = l ? "Modifier" : "Ajouter un livre";
@@ -1799,6 +2251,14 @@ async function enregistrer() {
        pas de provenance, et lui en inventer une rendrait le diagnostic faux
        précisément là où il servirait. */
     ...(sourceTrouvee ? { source: sourceTrouvee } : {}),
+    ...(articleEnCours ? {
+      type: "article", doi: articleEnCours.doi,
+      revue: document.getElementById("fEditeur").value.trim() || articleEnCours.revue,
+      editeur: articleEnCours.editeur ?? null,
+      volume: articleEnCours.volume, numero: articleEnCours.numero,
+      citations: articleEnCours.citations,
+      resumeEditeur: articleEnCours.resumeEditeur,
+    } : {}),
   };
 
   let livre;
@@ -2240,6 +2700,22 @@ document.getElementById("btnModifier").onclick    = () => {
 
 document.getElementById("fCat").onchange          = majSousDuFormulaire;
 document.getElementById("btnChercher").onclick    = chercherLivre;
+document.getElementById("btnChercherDoi").onclick = chercherArticle;
+document.getElementById("ajouterArticle").onclick = ouvrirAjoutArticle;
+document.getElementById("rechercheDoi").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); chercherArticle(); }
+});
+/* Les trois zones. « aria-pressed » porte l'état pour les lecteurs
+   d'écran ; sans lui, trois boutons identiques ne disent rien. */
+for (const [id, zone] of [["zoneTout", ""], ["zoneLivres", "livre"],
+                          ["zoneArticles", "article"]]) {
+  document.getElementById(id).onclick = () => {
+    etat.zone = zone;
+    for (const b of document.querySelectorAll("#zones .puce"))
+      b.setAttribute("aria-pressed", String(b.id === id));
+    rafraichir();
+  };
+}
 document.getElementById("btnEnregistrer").onclick = enregistrer;
 document.getElementById("btnSupprimer").onclick   = supprimer;
 document.getElementById("btnAnnuler").onclick     = () => document.getElementById("modale").close();

@@ -250,6 +250,76 @@ if (passages.length === 3) {
     ouvertes.length === 0, JSON.stringify(ouvertes.map(r => r.relname)));
 }
 
+/* ===========================================================================
+   LE FICHIER DE CONTRÔLE DE MIGRATION S'EXÉCUTE-T-IL ? — 21/08/2026
+
+   verifier-migration.sql ne tournait NULLE PART avant le VPS. Il n'y est
+   lancé qu'une fois, sur une copie de la production, juste avant de toucher
+   aux vraies données — et s'il contient une faute de syntaxe, psql sort en
+   erreur et le déployeur annonce :
+
+     « ECHEC la repetition NE CONCORDE PAS — la migration abimerait vos
+       donnees. »
+
+   Ce message est faux. Rien n'abîmerait rien : c'est le CONTRÔLE qui est
+   cassé, pas la migration. Et il envoie chercher le défaut dans les
+   migrations, là où il n'est pas. Un contrôle qui accuse la mauvaise chose
+   coûte plus cher qu'un contrôle absent.
+
+   POURQUOI ICI ET PAS DANS UNE ÉTAPE À PART. J'avais d'abord écrit une
+   étape de chaîne de livraison qui appliquait les migrations sur une base
+   neuve puis lançait le fichier. Elle aurait échoué au premier passage :
+   ligne 128, le fichier lève si « books » est vide — à raison, car une
+   répétition sur une base vide ne porte sur rien. Une base neuve ne peut
+   donc PAS l'exécuter.
+
+   Ce fichier-ci, lui, a semé dans « books » avant 02 et rejoué toute la
+   bascule : c'est la seule base d'essai qui ressemble à une base ayant
+   vécu. Le contrôle appartient donc ici.
+
+   CE QU'IL PROUVE, ET CE QU'IL NE PROUVE PAS. Il ne prouve rien sur VOS
+   données — dix ouvrages semés ne sont pas 347. Il prouve la seule chose
+   que le VPS ne doit pas avoir à découvrir : que le fichier s'exécute, que
+   ses requêtes portent sur des colonnes qui existent, et qu'il ne lève pas
+   sur une base saine.
+
+   L'ŒIL, PAS L'APPLICATION. Le fichier exige un compte qui voit hors du
+   cloisonnement — c'est écrit en tête, et c'est ce qui a manqué le
+   15/08/2026 quand un garde-fou aveugle a laissé passer la disparition de
+   toute une sphère. Le lancer avec « appli » reproduirait exactement ce
+   défaut, et le contrôle passerait au vert.
+   =========================================================================== */
+
+{
+  /* Trois dispositions coexistent, et une expression unique se trompe dans au
+     moins l'une d'elles :
+       dépôt assemblé   tests/ db/ deploiement/  frères, lancé de la racine
+       source OneDrive  docker/db/ et deploiement/ frères D'UN CRAN PLUS HAUT
+       banc d'essai     une copie de docker/ seule — deploiement/ absent
+     On cherche donc, au lieu de calculer. Le même choix que la ligne 41. */
+  const VERIF = ["deploiement", path.join("..", "deploiement"),
+                 path.join("..", "..", "deploiement")]
+    .map(c => path.join(c, "verifier-migration.sql")).find(f => fs.existsSync(f));
+
+  if (!VERIF) {
+    /* Absent au banc d'essai, qui ne recopie que docker/. On le DIT — un
+       contrôle qui se tait quand il n'a rien fait passe pour réussi. */
+    console.log("  (verifier-migration.sql absent de cette disposition — non exécuté)");
+  } else {
+    /* « \set » et « \timing » sont des commandes de psql, pas de PostgreSQL :
+       le pilote les rejetterait. On ne garde que le SQL. */
+    const sql = fs.readFileSync(VERIF, "utf8")
+      .split("\n").filter(l => !/^\s*\\/.test(l)).join("\n");
+    try {
+      await oeil.query(sql);
+      verifier("verifier-migration.sql s'exécute sur une base migrée", true);
+    } catch (e) {
+      verifier("verifier-migration.sql s'exécute sur une base migrée", false,
+        e.message + (e.hint ? " — " + e.hint : ""));
+    }
+  }
+}
+
 /* --------------------------------------------------------------- Bilan */
 
 await appli.end(); await oeil.end();

@@ -147,6 +147,26 @@ w.fetch = (url, options = {}) => {
                                pourquoi: "Comble la lacune." }],
     });
   }
+  if (chemin.startsWith("/api/articles")) {
+    return reponse({ articles: [
+      { doi: "10.1038/nature14539", titre: "Deep learning",
+        auteur: "LeCun Yann ; Bengio Yoshua ; Hinton Geoffrey",
+        revue: "Nature", annee: 2015, citations: 12345 },
+      { doi: "10.1016/j.neunet.2014.09.003", titre: "Deep learning in neural networks",
+        auteur: "Schmidhuber Jürgen", revue: "Neural Networks", annee: 2015,
+        citations: 9876 },
+    ] });
+  }
+  if (chemin.startsWith("/api/article")) {
+    return reponse({
+      issue: "trouvee", type: "article", source: "crossref",
+      doi: "10.1038/nature14539", titre: "Deep learning",
+      auteur: "LeCun Yann ; Bengio Yoshua ; Hinton Geoffrey",
+      revue: "Nature", annee: 2015, volume: "521", numero: "7553",
+      citations: 12345, resumeEditeur: "Deep learning allows…",
+      avecSources: true, categorie: "Savoirs", sousCategorie: "Numérique, IA & SI",
+    });
+  }
   if (chemin === "/api/recherche-livre") {
     return reponse({ titre: "Nexus", auteur: "Harari Yuval Noah", editeur: "Albin Michel",
                      annee: 2024, isbn: "9782226476494", categorie: "Savoirs",
@@ -299,6 +319,174 @@ const attendre = ms => new Promise(r => setTimeout(r, ms));
   verifier("filtre Perso", d.querySelectorAll("#liste .fiche").length === 1);
   d.getElementById("sphere").value = "";
   d.getElementById("sphere").dispatchEvent(new w.Event("change"));
+
+  /* ------------------- Tout ce qui est affiché filtre -------------------
+     Le principe ramené du dossier Lisia : auteur, éditeur, année, rayon,
+     statut ne sont pas des étiquettes mortes, ce sont des chemins.
+
+     LE PIÈGE ÉPROUVÉ ICI EST LE TROISIÈME CONTRÔLE. La ligne entière est
+     cliquable depuis toujours ; un jeton posé dedans hérite du clic du
+     parent. Sans « stopPropagation », cliquer un auteur filtre ET ouvre la
+     fiche du livre — les deux à la fois, ce qui donne l'impression que
+     l'application fait n'importe quoi. */
+  const clic = () => new w.MouseEvent("click", { bubbles: true, cancelable: true });
+
+  const auteurs = [...d.querySelectorAll("#liste .fiche .meta .filtrable")];
+  verifier("les valeurs affichées sont cliquables",
+    auteurs.length >= 2, auteurs.length + " jeton(s)");
+
+  if (auteurs.length) {
+    const nom = auteurs[0].textContent;
+    auteurs[0].dispatchEvent(clic());
+    await attendre(30);
+
+    verifier("cliquer un auteur filtre la liste",
+      d.querySelectorAll("#liste .fiche").length === 1,
+      d.querySelectorAll("#liste .fiche").length + " fiche(s) pour " + nom);
+
+    verifier("… et le clic n'ouvre PAS la fiche du livre",
+      !d.getElementById("fiche").open,
+      "la modale de fiche s'est ouverte en même temps");
+
+    verifier("… le filtre actif est affiché",
+      d.querySelectorAll("#filtresActifs .puce-filtre").length === 1,
+      d.getElementById("filtresActifs").hidden ? "barre masquée" : "aucune puce");
+
+    /* Bascule : le même clic retire ce qu'il a posé. Sans elle, on ne sait
+       plus revenir en arrière autrement qu'en rechargeant la page. */
+    [...d.querySelectorAll("#liste .fiche .meta .filtrable")][0].dispatchEvent(clic());
+    await attendre(30);
+    verifier("recliquer le même auteur retire le filtre",
+      d.querySelectorAll("#liste .fiche").length === 2 &&
+      d.getElementById("filtresActifs").hidden);
+
+    /* Et la puce sait retirer, elle aussi. */
+    [...d.querySelectorAll("#liste .fiche .meta .filtrable")][0].dispatchEvent(clic());
+    await attendre(30);
+    const puce = d.querySelector("#filtresActifs .puce-filtre");
+    verifier("la puce du filtre porte son libellé",
+      puce && /Auteur\s*:/.test(puce.textContent), puce ? puce.textContent : "absente");
+    if (puce) {
+      puce.dispatchEvent(clic());
+      await attendre(30);
+      verifier("cliquer la puce retire le filtre",
+        d.querySelectorAll("#liste .fiche").length === 2);
+    }
+  }
+
+  /* ---------------------- La zone Articles ----------------------
+     L'article est ajouté PAR LE FORMULAIRE, pas posé dans le jeu d'essai.
+     Deux raisons : cela n'écrase aucun compte des contrôles précédents — une
+     première version l'avait ajouté au jeu initial et en a cassé sept d'un
+     coup — et surtout cela éprouve le chemin réel, du DOI collé jusqu'à la
+     ligne affichée. */
+  d.getElementById("ajouterArticle").dispatchEvent(clic());
+  await attendre(30);
+  verifier("le formulaire d'article demande un DOI, pas un ISBN",
+    !d.getElementById("blocDoi").hidden && d.getElementById("blocIsbn").hidden);
+
+  /* ---- La recherche par TITRE, celle qu'on utilisera le plus ----
+     Le même champ accepte les deux : la forme de ce qu'on tape décide. Un
+     DOI se reconnaît sans ambiguïté ; tout le reste est un titre. */
+  d.getElementById("rechercheDoi").value = "deep learning";
+  d.getElementById("btnChercherDoi").dispatchEvent(clic());
+  await attendre(60);
+  const propositions = [...d.querySelectorAll("#etatDoi button")];
+  verifier("un titre rend une liste de candidats",
+    propositions.length === 2, propositions.length + " proposition(s)");
+  verifier("… avec revue, année et citations pour choisir",
+    /Nature/.test(propositions[0]?.textContent ?? "") &&
+    /citations/.test(propositions[0]?.textContent ?? ""),
+    propositions[0]?.textContent);
+
+  /* Choisir repasse par le DOI : la recherche ne rend qu'un résumé de notice,
+     sans abstract ni rayon. */
+  const avantChoix = appels.filter(a => a[1].startsWith("/api/article?")).length;
+  propositions[0]?.dispatchEvent(clic());
+  await attendre(60);
+
+  /* CE QUI COMPTE N'EST PAS QUE LE TITRE SOIT REMPLI — une version fautive
+     qui recopierait simplement les champs de la liste le remplirait aussi, et
+     mon premier contrôle passait au vert sur cette mutation.
+     Ce qui compte est que le choix REPASSE PAR LE DOI : la recherche ne rend
+     qu'un résumé de notice, sans abstract, sans pagination, sans rayon. */
+  verifier("choisir un candidat relance la recherche par DOI",
+    appels.filter(a => a[1].startsWith("/api/article?")).length === avantChoix + 1,
+    "aucun appel /api/article après le choix");
+  verifier("… et la fiche en ressort classée",
+    d.getElementById("fTitre").value === "Deep learning" &&
+    d.getElementById("fSous").value === "Numérique, IA & SI",
+    d.getElementById("fTitre").value + " / " + d.getElementById("fSous").value);
+
+  d.getElementById("rechercheDoi").value = "https://doi.org/10.1038/nature14539";
+  d.getElementById("btnChercherDoi").dispatchEvent(clic());
+  await attendre(60);
+  verifier("Crossref remplit le formulaire",
+    d.getElementById("fTitre").value === "Deep learning" &&
+    d.getElementById("fEditeur").value === "Nature",
+    d.getElementById("fTitre").value + " / " + d.getElementById("fEditeur").value);
+  verifier("… et un article de revue est marqué sourcé sans qu'on le demande",
+    d.getElementById("fSources").value === "oui", d.getElementById("fSources").value);
+
+  d.getElementById("btnEnregistrer").dispatchEvent(clic());
+  await attendre(80);
+
+  const envoye = appels.filter(a => a[0] === "PUT" && a[1] === "/api/livres").pop();
+  const paquet = [].concat(envoye?.[2] ?? [])[0];
+  verifier("l'article est enregistré AVEC son type et son DOI",
+    paquet?.type === "article" && paquet?.doi === "10.1038/nature14539",
+    JSON.stringify({ type: paquet?.type, doi: paquet?.doi }));
+  verifier("… et sa revue, pas son éditeur",
+    paquet?.revue === "Nature", String(paquet?.revue));
+
+  verifier("la bibliothèque compte un document de plus",
+    d.querySelectorAll("#liste .fiche").length === 3,
+    d.querySelectorAll("#liste .fiche").length + " fiche(s)");
+
+  /* La zone filtre. « Articles » n'en montre qu'un, « Livres » les deux
+     autres — c'est ce qui fait de la zone un filtre et non un écran. */
+  d.getElementById("zoneArticles").dispatchEvent(clic());
+  await attendre(30);
+  verifier("la zone Articles n'affiche que les articles",
+    d.querySelectorAll("#liste .fiche").length === 1,
+    d.querySelectorAll("#liste .fiche").length + " fiche(s)");
+
+  /* « ?. » et non « . » : quand la zone ne rend rien — ce qui est précisément
+     le défaut qu'on cherche —, querySelector rend null et le contrôle PLANTE
+     au lieu d'échouer. Un plantage n'affiche aucune ligne KO : la mutation
+     paraît survivre. Troisième fois que je fais l'erreur ; c'est visiblement
+     mon angle mort. */
+  const ligneArticle = d.querySelector("#liste .fiche .meta")?.textContent ?? "";
+  verifier("une ligne d'article montre sa revue et ses citations",
+    /Nature/.test(ligneArticle) && /citations/.test(ligneArticle),
+    ligneArticle || "aucune ligne affichée");
+
+  /* L'éditeur d'un article n'est PAS sa revue : Crossref rend « American
+     Economic Association » et « Journal of Economic Perspectives ». Afficher
+     le premier n'aide personne à retrouver un article. */
+  verifier("… et pas son éditeur",
+    !/American Economic Association/.test(ligneArticle), ligneArticle);
+
+  d.getElementById("zoneLivres").dispatchEvent(clic());
+  await attendre(30);
+  verifier("la zone Livres écarte les articles",
+    d.querySelectorAll("#liste .fiche").length === 2,
+    d.querySelectorAll("#liste .fiche").length + " fiche(s)");
+
+  d.getElementById("zoneTout").dispatchEvent(clic());
+  await attendre(30);
+  verifier("« Tout » remet livres et articles côte à côte",
+    d.querySelectorAll("#liste .fiche").length === 3);
+
+  /* Rouvrir le formulaire d'un LIVRE après un article doit refermer le bloc
+     DOI. Sans cela, on chercherait un DOI pour un roman — et le champ resté
+     ouvert donne l'impression que l'application a gardé un état d'avant. */
+  d.getElementById("ajouter").dispatchEvent(clic());
+  await attendre(30);
+  verifier("le formulaire revient en mode livre après un article",
+    d.getElementById("blocDoi").hidden && !d.getElementById("blocIsbn").hidden,
+    "bloc DOI encore ouvert");
+  d.getElementById("modale").close();
 
   /* Vue couvertures */
   d.getElementById("vueGrille").dispatchEvent(new w.Event("click"));

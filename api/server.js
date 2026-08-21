@@ -15,7 +15,8 @@ import {
 } from "./authentification.mjs";
 import { envoyerCourriel, messageDeConnexion, etatCourriel } from "./courriel.mjs";
 import { chercherParIsbn, chercherParTexte, isbn13, etatCatalogues,
-         couvertureDeSecours } from "./bibliographie.mjs";
+         couvertureDeSecours, chercherParDoi, chercherArticleParTexte,
+         normaliserDoi } from "./bibliographie.mjs";
 
 const PORT = Number(process.env.PORT ?? 3000);
 const MOT_DE_PASSE = process.env.MOT_DE_PASSE ?? "";
@@ -545,7 +546,8 @@ function tropDeDemandesLien(ip) {
    personne ne s'en apercevrait avant de lire une réponse JSON. */
 const CHAMPS_LIVRE = `b.id, b.ouvrage_id, b.isbn, b.titre, b.auteur, b.editeur,
   b.annee, b.pages, b.statut, b.note, b.categorie, b.sous_categorie, b.sphere,
-  b.cover_url, b.cover_statut, b.visibilite, b.avec_sources`;
+  b.cover_url, b.cover_statut, b.visibilite, b.avec_sources,
+  b.type, b.doi, b.revue, b.volume, b.numero, b.citations, b.resume_editeur`;
 
 const CHAMPS_RESUME = `r.resume, r.points as resume_points, r.themes as resume_themes,
   r.modele as resume_modele, r.fiabilite as resume_fiabilite,
@@ -787,6 +789,23 @@ async function enregistrerLivres(client, livres) {
          de « je ne sais pas ». On n'accepte donc que de vrais booléens. */
       avec_sources: typeof l.avec_sources === "boolean" ? l.avec_sources : null,
 
+      /* CE QU'UN ARTICLE PORTE ET QU'UN LIVRE N'A PAS.
+       *
+       * Nuls pour un livre, et c'est voulu : une seule table, donc une seule
+       * mécanique de partage, de cloisonnement et de quota. Ce sont les
+       * ÉCRANS qui séparent les deux mondes, pas le schéma.
+       *
+       * « type » est borné en base ; ici on refuse simplement tout ce qui
+       * n'est pas « article », plutôt que de faire confiance au client sur
+       * une valeur qui décide de la clé de mutualisation. */
+      type: l.type === "article" ? "article" : "livre",
+      doi: normaliserDoi(l.doi),
+      revue: l.revue || null,
+      volume: l.volume || null,
+      numero: l.numero || null,
+      citations: Number.isInteger(l.citations) ? l.citations : null,
+      resume_editeur: l.resume_editeur || l.resumeEditeur || null,
+
       /* VISIBILITÉ : NULL SIGNIFIE « JE NE ME PRONONCE PAS ».
        *
        * Le piège que j'avais signalé le 15/08 en écrivant ce fichier, et qui
@@ -818,14 +837,21 @@ async function enregistrerLivres(client, livres) {
      d'un champ envoyé par le client. Un ouvrage sans ISBN valide reçoit une
      identité locale : mieux vaut ne rien mutualiser que mutualiser sur une
      clé fausse. */
-  const CLE = `case when e.isbn is not null then 'isbn:' || e.isbn
+  /* LE DOI PASSE DEVANT L'ISBN, et l'ordre n'est pas indifférent : un article
+     n'a pas d'ISBN, un livre n'a pas de DOI, mais un chapitre d'ouvrage
+     pourrait un jour porter les deux. Le DOI désigne alors la partie, l'ISBN
+     le volume — et c'est la partie qu'on catalogue. */
+  const CLE = `case when e.doi is not null then 'doi:' || e.doi
+                    when e.isbn is not null then 'isbn:' || e.isbn
                     else 'local:' || current_setting('app.tenant_id', true) || ':' || e.id end`;
 
   const SOURCE = `jsonb_to_recordset($1::jsonb) as e(
       id text, isbn text, titre text, auteur text, editeur text, annee int,
       pages int, cover_url text, cover_statut text, statut text, note numeric,
       categorie text, sous_categorie text, sphere text, visibilite text,
-      source text, avec_sources boolean)`;
+      source text, avec_sources boolean,
+      type text, doi text, revue text, volume text, numero text,
+      citations int, resume_editeur text)`;
 
   const MOI = `nullif(current_setting('app.tenant_id', true), '')::uuid`;
 
@@ -849,12 +875,17 @@ async function enregistrerLivres(client, livres) {
   //    jamais un ouvrage déjà connu — la correction est un geste séparé.
   await client.query(
     `insert into ouvrages (cle, isbn, titre, auteur, editeur, annee, pages,
-                           cover_url, cover_statut, source, source_le, avec_sources)
+                           cover_url, cover_statut, source, source_le, avec_sources,
+                           type, doi, revue, volume, numero, citations, citations_le,
+                           resume_editeur)
      select distinct on (cle) * from (
        select ${CLE} as cle, e.isbn, e.titre, e.auteur, e.editeur, e.annee,
               e.pages, e.cover_url, coalesce(e.cover_statut, 'inconnu'),
               e.source, case when e.source is not null then now() end,
-              e.avec_sources
+              e.avec_sources,
+              e.type, e.doi, e.revue, e.volume, e.numero, e.citations,
+              case when e.citations is not null then now() end,
+              e.resume_editeur
          from ${SOURCE}
          left join possessions p on p.tenant_id = ${MOI} and p.id = e.id
         where e.isbn is not null or p.id is null) t
@@ -884,7 +915,7 @@ async function enregistrerLivres(client, livres) {
     `insert into possessions (tenant_id, id, ouvrage_id, statut, note,
                               categorie, sous_categorie, sphere, visibilite, maj_le)
      select ${MOI}, e.id,
-            case when e.isbn is not null then o.id
+            case when e.doi is not null or e.isbn is not null then o.id
                  else coalesce(p.ouvrage_id, o.id) end,
             coalesce(e.statut, 'A lire'), e.note,
             e.categorie, e.sous_categorie, e.sphere,
@@ -958,6 +989,16 @@ async function enregistrerLivres(client, livres) {
           pas un jugement déjà porté. « null » veut dire « je ne sais pas », et
           « je ne sais pas » n'écrase pas « je sais ». */
        avec_sources = coalesce(e.avec_sources, o.avec_sources),
+       /* Même règle : ce qui se tait n'efface pas. « citations » fait
+          exception dans un sens — un compte plus récent remplace l'ancien,
+          avec sa date, parce que c'est un instantané et non un fait stable. */
+       revue = coalesce(nullif(e.revue, ''), o.revue),
+       volume = coalesce(nullif(e.volume, ''), o.volume),
+       numero = coalesce(nullif(e.numero, ''), o.numero),
+       resume_editeur = coalesce(nullif(e.resume_editeur, ''), o.resume_editeur),
+       citations = coalesce(e.citations, o.citations),
+       citations_le = case when e.citations is not null then now()
+                           else o.citations_le end,
        pages = coalesce(e.pages, o.pages),
        cover_url = coalesce(e.cover_url, o.cover_url),
        cover_statut = case when e.cover_url is not null
@@ -1722,14 +1763,14 @@ Si en revanche un rayon convient, laisse "rayonSuggere" et "motif" vides.`;
      dans « cout_ia_par_mois » et l'on ne pourrait pas prouver le gain. Une
      optimisation qu'on ne peut pas mesurer est une opinion.
    ========================================================================== */
-async function classerDepuisCatalogue(dans, livre, source, RAYONS) {
+async function classerDepuisCatalogue(dans, livre, source, RAYONS, contexte = "") {
   const consigne = `Un catalogue de bibliothèque a identifié cet ouvrage. Les données ci-dessous
 font foi : ne les corrige pas, ne les complète pas, ne cherche rien.
 
 Titre : ${livre.titre}
 Auteur (tel que catalogué) : ${livre.auteur || "inconnu"}
 Éditeur : ${livre.editeur || "inconnu"}
-Année : ${livre.annee ?? "inconnue"}
+Année : ${livre.annee ?? "inconnue"}${contexte}
 
 Tu as DEUX choses à faire, et rien d'autre.
 
@@ -2091,6 +2132,69 @@ const serveur = createServer(async (req, rep) => {
      * d'ajout. Et elle appelle un service extérieur en notre nom. */
     if (chemin === "/api/catalogue" && req.method === "GET") {
       return json(rep, { notices: await chercherParTexte(url.searchParams.get("q")) });
+    }
+
+    /* ==================================================================
+       LES ARTICLES — IDENTIFIÉS SANS LE MODÈLE
+
+       Crossref rend le titre, les auteurs déjà séparés en nom et prénom, la
+       revue, l'année, la pagination, le nombre de citations ET le résumé des
+       auteurs. Il n'y a rien à deviner, donc rien à demander au modèle :
+       un article coûte ZÉRO à cataloguer, là où un livre coûtait 0,075 €
+       avant la cascade et coûte encore 0,002 € pour son seul classement.
+
+       Le rayon, lui, reste un jugement — mais il se demandera au même appel
+       de classement que pour un livre, avec la même taxonomie. C'était la
+       décision : mêmes rayons, pour voir livres et articles côte à côte sur
+       un sujet.
+
+       DOUBLON D'ABORD, comme pour les livres. Un DOI déjà possédé ne repart
+       pas chercher : on répond « vous l'avez ».
+       ================================================================== */
+    if (chemin === "/api/article" && req.method === "GET") {
+      const doi = normaliserDoi(url.searchParams.get("doi"));
+      if (!doi) return json(rep, { error: "DOI illisible." }, 400);
+
+      const [deja] = await dans((c) => c.query(
+        `select p.id, o.titre, o.auteur
+           from possessions p
+           join ouvrages o on o.id = p.ouvrage_id
+          where p.tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid
+            and o.doi = $1
+          limit 1`, [doi]).then(r => r.rows));
+      if (deja) return json(rep, { deja, doi });
+
+      const trouve = await chercherParDoi(doi);
+      if (trouve.issue !== "trouvee") return json(rep, trouve);
+
+      /* ON CLASSE ICI, pas côté navigateur.
+       *
+       * Crossref donne tout SAUF le rayon — et le rayon est un jugement sur
+       * VOTRE classification, pas une propriété de l'article. C'est le même
+       * appel que pour un livre identifié par un catalogue : sans recherche
+       * web, quelques centaines de jetons, environ 0,002 €.
+       *
+       * La revue est passée en contexte : « Journal of Economic Perspectives »
+       * dit bien plus sur le rayon que le nom de l'éditeur. */
+      const RAYONS = await dans((c) => rayonsDisponibles(c));
+      const a = trouve.article;
+      const fiche = await classerDepuisCatalogue(
+        dans,
+        { titre: a.titre, auteur: a.auteur, editeur: a.revue || null, annee: a.annee },
+        "crossref", RAYONS,
+        a.revue ? `\nRevue : ${a.revue}` : "");
+
+      /* Les données de Crossref écrasent ce que le modèle aurait pu dire :
+         elles ne lui ont pas été demandées, elles ne peuvent pas venir de lui. */
+      return json(rep, { ...fiche, ...a, type: "article", source: "crossref",
+                         identification: "catalogue" });
+    }
+
+    /* La recherche par titre, quand le DOI n'est pas sous la main. Même rôle
+       que la recherche libre à la BnF : celui qui a l'article devant lui en
+       lit le titre, ce qu'aucune machine ne devine à partir de rien. */
+    if (chemin === "/api/articles" && req.method === "GET") {
+      return json(rep, { articles: await chercherArticleParTexte(url.searchParams.get("q")) });
     }
 
     if (chemin === "/api/livres" && req.method === "PUT") {
