@@ -48,8 +48,25 @@ const ok = [], ko = [];
 const verifier = (nom, cond, detail) =>
   (cond ? ok : ko).push(nom + (cond ? "" : " — " + (detail ?? "")));
 
+/* TOUTES LES MIGRATIONS, DANS L'ORDRE DES NOMS — pas une liste écrite à la
+   main.
+
+   Elle portait « 01-schema.sql » et « 02-multi-locataire.sql ». Le 21/08/2026,
+   10-inscription.sql a ajouté une colonne « courriel » à « liens_connexion » :
+   ce fichier a continué de bâtir un schéma d'il y a six migrations, et la
+   chaîne de livraison a échoué sur « column courriel does not exist » — dans
+   un test d'authentification qui n'avait rien à voir avec l'inscription.
+
+   C'est le défaut que vps-deployer-biblio.sh documente déjà pour lui-même :
+   « cette liste portait 02 et 03 ; le 16/08, 04-reglages.sql est arrivé sans y
+   être ajouté ». Deux endroits, deux listes manuelles, le même piège — et la
+   seconde a mordu cinq jours après qu'on eut corrigé la première.
+
+   Une liste qu'il faut penser à tenir à jour n'est pas tenue à jour. On lit
+   donc le répertoire, comme le banc d'essai et le déployeur le font
+   désormais tous les deux. */
 const db = await PGlite.create();
-for (const f of ["01-schema.sql", "02-multi-locataire.sql"]) {
+for (const f of fs.readdirSync(DB).filter(f => f.endsWith(".sql")).sort()) {
   await db.exec(fs.readFileSync(path.join(DB, f), "utf8"));
 }
 

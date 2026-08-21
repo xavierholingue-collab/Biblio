@@ -70,15 +70,37 @@ ok "tests : $(ls -1 "${DEPOT}/tests" 2>/dev/null | wc -l) fichiers"
 # verifications sur la frontiere Pro/Perso echouent faute de donnees.
 [ -f "${DEPOT}/tests/amorce-controle.json" ] || echec "tests/amorce-controle.json absent"
 
-# La chaine de livraison appelle ces fichiers par leur nom. S'ils manquent,
-# elle s'arrete sur un ENOENT qui ne dit pas ce qui n'a pas ete recopie.
-for t in test-fumee.js test-accueil.js parcours.spec.mjs playwright.config.mjs \
-         test-cloisonnement.mjs test-contexte.mjs test-authentification.mjs \
-         test-http-cloisonnement.mjs test-resumes-langues.mjs \
-         test-catalogue.mjs test-environnement.mjs test-rejeu.mjs \
-         test-reglages.mjs test-durcissement.mjs test-lien-magique.mjs \
-         test-usage-ia.mjs test-bibliographie.mjs banc-postgres.mjs; do
-  [ -f "${DEPOT}/tests/${t}" ] || echec "tests/${t} absent — la CI l'appelle pourtant"
+# LA LISTE VIENT DES DEUX REPERTOIRES, PLUS DE MA MEMOIRE — 21/08/2026
+#
+# Ce bloc portait dix-huit noms ecrits a la main. C'etait la QUATRIEME liste
+# manuelle du depot, et les trois autres avaient deja morde :
+#
+#   16/08  vps-deployer-biblio.sh verifiait « 02 » et « 03 » ; 04 est arrive
+#          sans y etre ajoute.
+#   21/08  test-authentification.mjs appliquait « 01 » et « 02 » ; six
+#          migrations plus tard il batissait un schema perime, et la chaine a
+#          echoue sur une colonne absente dans un test sans rapport.
+#   21/08  moi : douze suites lancees sur quinze, annoncees « douze vertes ».
+#
+# Une liste manuelle ne signale jamais ce qui lui manque. On compare donc ce
+# qui est ARRIVE a ce qui EXISTE a la source : tout fichier d'essai present
+# la-bas doit se retrouver ici, quel que soit son nom.
+manquants=""
+for src in "${SOURCE}/docker/tests/"* "${SOURCE}/docker/web/test/"*; do
+  [ -f "${src}" ] || continue
+  n=$(basename "${src}")
+  [ -f "${DEPOT}/tests/${n}" ] || manquants="${manquants} ${n}"
+done
+[ -z "${manquants}" ] || echec "non recopie(s) :${manquants}"
+
+# Et le contraire : un fichier qui traine dans le depot sans exister a la
+# source est un reste d'un renommage. Il serait lance, et personne ne saurait
+# d'ou il vient.
+for dst in "${DEPOT}/tests/"*; do
+  [ -f "${dst}" ] || continue
+  n=$(basename "${dst}")
+  [ -f "${SOURCE}/docker/tests/${n}" ] || [ -f "${SOURCE}/docker/web/test/${n}" ] \
+    || echec "tests/${n} n'existe plus a la source — reste d'un renommage"
 done
 
 # --- Deploiement, documentation, workflows -------------------------------

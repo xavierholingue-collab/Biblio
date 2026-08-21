@@ -201,6 +201,24 @@ jobs:
       # ne se voit pas dans un test de justesse. C'est ecrit en tete du
       # fichier de test plutot que masque.
       # ------------------------------------------------------------------
+      # ------------------------------------------------------------------
+      # LE CONTROLE QUI VERIFIE LES CONTROLES
+      #
+      # Trois listes manuelles ont mordu dans ce depot : celle du deployeur
+      # (16/08), celle de test-authentification.mjs (21/08), et la mienne —
+      # douze suites lancees sur quinze, annoncees « douze suites vertes ».
+      #
+      # Une liste manuelle ne signale jamais ce qui lui manque : elle passe au
+      # vert sur ce qu'elle contient, et son silence sur le reste ressemble a
+      # un succes. Celui-ci compare le repertoire au workflow, dans les deux
+      # sens, et refuse un fichier d'essai que personne ne lance.
+      #
+      # EN PREMIER, avant les suites elles-memes : savoir qu'il en manque une
+      # est plus urgent que le resultat de celles qui tournent.
+      # ------------------------------------------------------------------
+      - name: Chaque fichier d essai est bien lance
+        run: node tests/test-couverture.mjs
+
       - name: Authentification par lien magique
         run: |
           npm install @electric-sql/pglite --no-audit --no-fund --silent
