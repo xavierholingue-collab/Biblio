@@ -410,8 +410,33 @@ verifier("une fois les lignes fautives retirées, le contrôle repasse au vert",
    ===================================================================== */
 
 const DB = ["db", path.join("..", "db")].find(d => fs.existsSync(path.join(d, "05-usage-ia.sql")));
-const rejouer05 = () =>
-  banc.dans(null, fs.readFileSync(path.join(DB, "05-usage-ia.sql"), "utf8"));
+
+/* REJOUER 05 SEUL ANNULAIT CE QUI VIENT APRÈS — corrigé le 22/08/2026.
+
+   Ce rejeu sert à vérifier que le remplissage rétroactif de « issue » ne
+   marque pas les appels en cours. Il ne rejouait QUE 05-usage-ia.sql.
+
+   Or 11-plafond-depense.sql redéfinit « consommer_appel_ia » pour y ajouter
+   le plafond de dépense. Rejouer 05 restaurait donc l'ANCIENNE fonction, sans
+   plafond — et deux contrôles tout neufs échouaient en accusant le plafond
+   d'être inopérant, alors qu'il avait été effacé quelques lignes plus haut.
+
+   J'ai perdu un moment à chercher le défaut dans la fonction. Il était dans
+   l'ordre : une migration rejouée isolément défait celles qui la suivent.
+
+   Sixième liste écrite à la main de la semaine, après le déployeur,
+   test-authentification.mjs, l'assembleur, le domaine, et la mienne. On lit
+   donc le répertoire, à partir de 05 — les quatre premières ne touchent rien
+   de ce que ce rejeu doit rétablir, et les rejouer coûterait du temps sans
+   rien prouver. */
+const rejouer05 = async () => {
+  const apres05 = fs.readdirSync(DB)
+    .filter(f => /^\d\d-.*\.sql$/.test(f) && f >= "05")
+    .sort();
+  for (const f of apres05) {
+    await banc.dans(null, fs.readFileSync(path.join(DB, f), "utf8"));
+  }
+};
 
 const [ancienne] = await q(
   `insert into appels_ia (tenant_id, route, cree_le)
@@ -477,6 +502,112 @@ const appelsAuModele = corpsRecus.length;
 await resumer("u-1");
 verifier("un appel refusé pour quota n'atteint pas le modèle",
   corpsRecus.length === appelsAuModele, `${appelsAuModele} puis ${corpsRecus.length}`);
+
+/* =====================================================================
+   LE PLAFOND DE DÉPENSE, ET LE GARDE-FOU QUI L'EMPÊCHE DE SE RELEVER
+
+   Le quota comptait les APPELS. Vos mesures du 19/08 : 0,086 $ l'appel sur
+   /api/recherche-livre, 0,0025 $ sur le classement — un facteur TRENTE-QUATRE.
+   Un compteur d'appels mesure donc l'activité, pas la dépense, alors que
+   c'est la dépense qui sort de la poche.
+
+   Les deux plafonds coexistent parce qu'ils protègent de deux pannes que
+   l'autre ne voit pas : la boucle folle (beaucoup d'appels dérisoires) et le
+   portefeuille (peu d'appels chers).
+   ===================================================================== */
+
+const dansT = (t, sql, params) => banc.dans(t, sql, params);
+
+{
+  /* --- Le garde-fou : on ne relève pas son propre plafond ------------- */
+  let refuse = false;
+  try { await dansT(xavier.id, "update tenants set quota_ia_mois = 99999"); }
+  catch { refuse = true; }
+  verifier("un locataire ne relève pas son propre quota", refuse,
+    "l'update a été accepté");
+
+  refuse = false;
+  try { await dansT(xavier.id, "update tenants set plafond_usd = 999"); }
+  catch { refuse = true; }
+  verifier("… ni son propre plafond de dépense", refuse, "l'update a été accepté");
+
+  /* CE QUI DOIT RESTER POSSIBLE. Un garde-fou qui bloque tout est un garde-fou
+     qu'on retire. La langue et la visibilité sont des réglages ordinaires. */
+  let passe = true;
+  try { await dansT(xavier.id, "update tenants set langue = 'en'"); }
+  catch { passe = false; }
+  verifier("… mais la langue reste modifiable", passe,
+    "le garde-fou bloque aussi ce qu'il ne devrait pas");
+
+  /* --- La porte nommée --------------------------------------------- */
+  const regle = await dansT(xavier.id,
+    "select * from regler_tarification($1, 40, 0.200)", [xavier.id]);
+  verifier("la porte nommée relève le plafond",
+    regle[0]?.quota === 40 && Number(regle[0]?.plafond) === 0.2,
+    JSON.stringify(regle[0]));
+
+  refuse = false;
+  try { await dansT(xavier.id, "select * from regler_tarification($1, 40, 5000)", [xavier.id]); }
+  catch { refuse = true; }
+  verifier("… et refuse un plafond absurde", refuse, "5000 $ a été accepté");
+}
+
+{
+  /* --- Le plafond mord sur l'ARGENT, pas sur le nombre ---------------- */
+  await q("delete from appels_ia where tenant_id = $1", [xavier.id]);
+
+  /* Un seul appel, cent mille jetons de sortie : 1,00 $. Le quota d'appels
+     (40) est loin d'être atteint — c'est bien la dépense qui doit arrêter. */
+  await q(`insert into appels_ia (tenant_id, route, modele, issue,
+                                  jetons_entree, jetons_sortie, recherches_web)
+           values ($1, '/api/essai', 'claude-sonnet-5', 'ok', 0, 100000, 0)`,
+          [xavier.id]);
+
+  const [d] = await dansT(xavier.id, "select round(depense_ia_du_mois(), 3) d");
+  verifier("la dépense du mois est comptée en argent",
+    Number(d.d) === 1, `${d.d} $`);
+
+  let refuse = false, message = "";
+  try { await dansT(xavier.id,
+    "select * from consommer_appel_ia('/api/essai','claude-sonnet-5')"); }
+  catch (e) { refuse = true; message = e.message; }
+  verifier("un appel est refusé sur la DÉPENSE, quota d'appels non atteint",
+    refuse, "l'appel est passé malgré 1,00 $ sur un plafond de 0,20 $");
+  verifier("… et le refus dit des dollars, pas des appels",
+    /\$/.test(message) && /plafond de dépense/i.test(message), message.slice(0, 80));
+}
+
+{
+  /* --- UN APPEL NON MESURÉ EST PRÉSUMÉ CHER ---------------------------
+     Sans cette présomption, une instrumentation en panne OUVRIRAIT le
+     plafond : plus la mesure tombe, plus on peut dépenser. La pression doit
+     être dans l'autre sens. */
+  await q("delete from appels_ia where tenant_id = $1", [xavier.id]);
+  await q(`insert into appels_ia (tenant_id, route, modele, issue)
+           values ($1, '/api/x', null, 'sans_mesure')`, [xavier.id]);
+  const [d] = await dansT(xavier.id, "select round(depense_ia_du_mois(), 3) d");
+  verifier("un appel non mesuré est présumé cher, pas gratuit",
+    Number(d.d) === 0.1, `${d.d} $ — une instrumentation en panne ouvrirait le plafond`);
+
+  /* Et les lignes d'AVANT l'instrument ne comptent pas : elles ne portent
+     aucun jeton, et les présumer chères ferait sauter le plafond pour des
+     appels vieux d'une semaine. */
+  await q("delete from appels_ia where tenant_id = $1", [xavier.id]);
+  await q(`insert into appels_ia (tenant_id, route, modele, issue)
+           values ($1, '/api/x', null, 'avant_mesure')`, [xavier.id]);
+  const [d2] = await dansT(xavier.id, "select round(depense_ia_du_mois(), 3) d");
+  verifier("… mais les lignes d'avant l'instrument valent zéro",
+    Number(d2.d) === 0, `${d2.d} $`);
+}
+
+{
+  /* --- ÉCHOUER FERMÉ ------------------------------------------------- */
+  let refuse = false;
+  try { await dansT(null, "select depense_ia_du_mois()"); }
+  catch { refuse = true; }
+  verifier("sans locataire posé, la dépense refuse au lieu de rendre zéro",
+    refuse, "zéro rendu — c'est-à-dire un plafond jamais atteint");
+}
 
 /* ------------------------------------------------------------- Verdict */
 await fermer();

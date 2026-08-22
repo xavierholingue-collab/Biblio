@@ -121,6 +121,31 @@ create policy tenants_inscription on public.tenants for insert
     and quota_ia_mois between 0 and 50
   );
 
+/* LE PLAFOND DE DÉPENSE EST BORNÉ ICI AUSSI — ajouté par 11, remis ici pour
+   que la politique reste la description complète de ce qu'une inscription a
+   le droit de créer.
+
+   Une politique qui ne borne QUE ce qui existait le jour où on l'a écrite
+   devient une passoire à chaque colonne ajoutée. C'est pourquoi ce bloc est
+   rejoué : 11-plafond-depense.sql arrive après 10, et la politique se refait
+   avec la borne en plus. Sans cela, un chemin d'inscription fautif pourrait
+   créer un locataire au plafond de mille dollars. */
+do $$
+begin
+  if exists (select 1 from information_schema.columns
+              where table_schema = 'public' and table_name = 'tenants'
+                and column_name = 'plafond_usd') then
+    drop policy if exists tenants_inscription on public.tenants;
+    create policy tenants_inscription on public.tenants for insert
+      with check (
+        coalesce(nullif(current_setting('app.inscription', true), ''), '') = 'en cours'
+        and visibilite = 'privee'
+        and quota_ia_mois between 0 and 50
+        and plafond_usd between 0 and 2
+      );
+  end if;
+end $$;
+
 /* ---------------------------------------------------------------------------
    CRÉER UN LOCATAIRE : UN SEUL ENDROIT, ET IL EST NOMMÉ
 

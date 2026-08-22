@@ -516,6 +516,33 @@ begin
       'deux identifiants d''édition pour une seule notice.', orphelins;
   end if;
 
+  /* ------------------------------------------------------------------
+     AUCUN LOCATAIRE N'A UN PLAFOND ABSURDE — 22/08/2026
+
+     Le plafond de dépense se change par « regler_tarification », qui borne à
+     mille dollars, et par une migration. Les deux sont des gestes délibérés.
+
+     Ce contrôle existe pour le cas où ils ne l'auraient pas été : une valeur
+     aberrante en production ne se verrait nulle part avant la facture. Deux
+     dollars par compte est déjà quatre fois le défaut ; au-delà, c'est une
+     décision, et une décision doit avoir été prise.
+
+     Le locataire d'origine est écarté : c'est le vôtre, il n'a pas de raison
+     d'être bridé comme un inscrit.
+     ------------------------------------------------------------------ */
+  if exists (select 1 from information_schema.columns
+              where table_schema = 'public' and table_name = 'tenants'
+                and column_name = 'plafond_usd') then
+    select count(*) into orphelins
+      from public.tenants
+     where identifiant <> 'xavier' and plafond_usd > 2;
+    if orphelins > 0 then
+      raise exception '% locataire(s) au plafond de dépense supérieur à 2 $ : '
+        'une valeur aberrante ne se verrait qu''à la facture.', orphelins;
+    end if;
+    raise notice '  plafonds de dépense : aucun au-dessus de 2 $';
+  end if;
+
   /* On annonce le compte des POSSESSIONS, pas celui de « books ». C'est la
      bibliothèque d'aujourd'hui, pas celle du 15/08 — et sur une base ayant
      vécu, les deux nombres diffèrent. */
