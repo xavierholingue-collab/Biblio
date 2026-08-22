@@ -137,22 +137,36 @@ sed -e "s/@@SITE@@/${SITE}/g" -e "s/@@ANCIEN@@/${ANCIEN}/g" >> "${CADDYFILE}" <<
 		respond 404
 	}
 
-	# --- LA MESURE D'AUDIENCE, QUI N'A JAMAIS FONCTIONNE ---------------
+	# --- LA MESURE D'AUDIENCE, QUE CE SCRIPT AVAIT EFFACEE -------------
 	#
-	# Constate le 22/08/2026 en verifiant tout autre chose. Les trois pages
-	# chargent /stats/s.js depuis le 12/08 ; ce relais n'existait QUE dans le
-	# bloc de recette. En production, le script rendait 404.
+	# CE QUI S'EST REELLEMENT PASSE, apres une premiere version de ce
+	# commentaire qui racontait le contraire — 22/08/2026.
 	#
-	# Et le commentaire des pages disait : « data-domains limite l'envoi a la
-	# production : la recette ne pollue pas ». Les deux moities se
-	# contredisaient. La production ne pouvait pas CHARGER le script, faute de
-	# relais ; la recette le chargeait mais se faisait FILTRER, portant un
-	# autre nom d'hote. Aucune mesure n'a donc jamais ete enregistree.
+	# Le relais /stats avait ete ajoute A LA MAIN dans le Caddyfile, quelque
+	# part entre le 14 et le 22 aout. Il fonctionnait : 371 evenements
+	# collectes, le dernier a 10h43 ce jour-la.
 	#
-	# Chaque moitie avait l'air correcte isolement. C'est ce qui rend ce
-	# defaut instructif : rien n'etait faux, et l'ensemble ne marchait pas.
-	# Un dispositif qui echoue en silence ressemble a un dispositif sans
-	# visiteurs — et l'on conclut sur l'audience au lieu de la configuration.
+	# A 11h49, ce script a ete relance pour le demenagement de domaine. Il
+	# reecrit son bloc EN ENTIER a chaque passage — c'est ce qui le rend
+	# reproductible, et c'est ce qui detruit tout ce qu'on y a ajoute a cote.
+	# Le relais a disparu. La mesure s'est arretee vingt-trois minutes, le
+	# temps qu'on s'en apercoive et qu'on le remette ici.
+	#
+	# LA LECON, ET ELLE VAUT AU-DELA DE LA MESURE : ce qui doit survivre a ce
+	# script doit VIVRE DANS CE SCRIPT. Une configuration posee a la main dans
+	# un bloc genere est une configuration en sursis — elle tient jusqu'au
+	# prochain lancement, et sa disparition ne produit aucune erreur.
+	#
+	# C'est exactement le defaut corrige le matin meme pour le script de
+	# sauvegarde, ou le paquet et l'execution avaient diverge sans que rien ne
+	# le signale. Meme famille, deux fois dans la meme journee.
+	#
+	# ET UN AVERTISSEMENT SUR LA METHODE. J'ai d'abord conclu « la mesure n'a
+	# jamais fonctionne » en constatant l'absence de /stats dans le Caddyfile
+	# — un Caddyfile que je venais moi-meme de faire reecrire. Deduire le
+	# passe d'un etat qu'on a modifie soi-meme est une faute de raisonnement,
+	# pas d'observation. Les sauvegardes horodatees du Caddyfile ont tranche
+	# en une commande : 3 occurrences avant, 0 le 14 aout.
 	#
 	# UMAMI EST SUR 3010, pas 3000 : celui-la est l'application de supperf.io.
 	# Le prefixe /stats evite la collision avec handle /api/*, qui capterait
@@ -289,8 +303,9 @@ done
 echo
 echo "-- La mesure d'audience se charge-t-elle ? --"
 #
-# Ce controle manquait, et son absence a coute dix jours de mesure vide. Une
-# page qui repond 200 ne dit rien de ce qu'elle sait charger.
+# Ce controle manquait, et son absence a laisse ce script effacer un relais
+# sans que personne ne le voie. Une page qui repond 200 ne dit rien de ce
+# qu'elle sait charger.
 code_stats=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 \
              "https://${SITE}/stats/s.js" 2>/dev/null)
 case "${code_stats}" in
