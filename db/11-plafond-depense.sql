@@ -321,8 +321,31 @@ revoke all on function public.regler_tarification(uuid, integer, numeric) from p
      sudo -u postgres psql -d biblio -c 'select * from cout_ia_par_locataire'
 
    Sans elle, la seule façon de connaître la facture serait de la recevoir.
+
+   ---------------------------------------------------------------------------
+   « security_invoker » EST INDISPENSABLE, ET JE L'AVAIS OUBLIÉ — 22/08/2026
+
+   Livrée sans cette option, la vue rendait ZÉRO LIGNE, même interrogée en
+   superutilisateur. Une vue s'exécute par défaut avec les droits de son
+   PROPRIÉTAIRE — ici le compte applicatif, qui est aussi le propriétaire des
+   tables, et que « force row level security » soumet aux politiques comme
+   tout le monde. Sans locataire posé, la politique ne rend rien.
+
+   « security_invoker » la fait s'exécuter avec les droits de CELUI QUI
+   INTERROGE : postgres, qui contourne les politiques et voit tout.
+
+   L'ironie est que cette explication était déjà écrite, mot pour mot, dans
+   05-usage-ia.sql — le fichier que j'étendais, à propos de la vue voisine.
+   Je l'avais lue le matin même. Connaître un piège ne suffit pas ; il faut se
+   demander à chaque vue si on vient d'y tomber.
+
+   Le symptôme est le pire qui soit : pas d'erreur, pas de refus, un tableau
+   vide qui ressemble à « aucun appel ce mois-ci ». On conclut sur l'usage au
+   lieu de la configuration — exactement comme pour la mesure d'audience,
+   quelques heures plus tôt.
    -------------------------------------------------------------------------- */
-create or replace view public.cout_ia_par_locataire as
+create or replace view public.cout_ia_par_locataire
+with (security_invoker = true) as
   select t.identifiant,
          t.plafond_usd,
          count(*)::int                                       as appels,

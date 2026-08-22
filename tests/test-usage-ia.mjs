@@ -609,6 +609,40 @@ const dansT = (t, sql, params) => banc.dans(t, sql, params);
     refuse, "zéro rendu — c'est-à-dire un plafond jamais atteint");
 }
 
+{
+  /* --- LA VUE DE COÛT VOIT-ELLE QUELQUE CHOSE ? ----------------------
+     Livrée sans « security_invoker », elle rendait ZÉRO LIGNE même en
+     superutilisateur : une vue s'exécute par défaut avec les droits de son
+     PROPRIÉTAIRE — le compte applicatif, que « force row level security »
+     soumet aux politiques. Sans locataire posé, rien.
+
+     Le symptôme est le pire qui soit : pas d'erreur, un tableau vide qui
+     ressemble à « aucun appel ce mois-ci ». On conclut sur l'usage au lieu de
+     la configuration.
+
+     L'explication était déjà écrite dans 05-usage-ia.sql, à propos de la vue
+     voisine. Connaître un piège ne suffit pas. */
+  await q("delete from appels_ia where tenant_id = $1", [xavier.id]);
+  await q(`insert into appels_ia (tenant_id, route, modele, issue,
+                                  jetons_entree, jetons_sortie, recherches_web)
+           values ($1, '/api/essai', 'claude-sonnet-5', 'ok', 1000, 500, 0)`,
+          [xavier.id]);
+
+  const vue = await q("select * from cout_ia_par_locataire");
+  verifier("l'œil privilégié voit ce que chaque locataire a coûté",
+    vue.length > 0 && Number(vue[0].dollars) > 0,
+    `${vue.length} ligne(s) — sans security_invoker, la vue est muette`);
+
+  /* ET LE CLOISONNEMENT TIENT TOUJOURS. « security_invoker » pourrait passer
+     pour une ouverture ; il n'en est pas une. La vue s'exécute avec les
+     droits de CELUI QUI INTERROGE — donc l'application reste soumise aux
+     politiques, et ne voit que ce qui la regarde. */
+  const parLApplication = await banc.dans(null, "select * from cout_ia_par_locataire");
+  verifier("… et l'application, elle, n'y voit rien",
+    parLApplication.length === 0,
+    `${parLApplication.length} ligne(s) visibles sans locataire posé`);
+}
+
 /* ------------------------------------------------------------- Verdict */
 await fermer();
 

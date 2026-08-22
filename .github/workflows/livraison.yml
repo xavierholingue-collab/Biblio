@@ -225,6 +225,12 @@ jobs:
       - name: Un seul domaine, declare une seule fois
         run: node tests/test-domaine.mjs
 
+      # Google en OIDC. Aucun accès réseau : un faux fournisseur d'identité
+      # local, avec sa propre paire de clés, permet de fabriquer les jetons
+      # qu'un attaquant fabriquerait — ce qu'on ne peut pas demander à Google.
+      - name: Google en OIDC, chaque verification retiree une a une
+        run: node tests/test-oidc.mjs
+
       - name: Authentification par lien magique
         run: |
           npm install @electric-sql/pglite --no-audit --no-fund --silent
