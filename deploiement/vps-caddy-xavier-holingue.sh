@@ -137,6 +137,60 @@ sed -e "s/@@SITE@@/${SITE}/g" -e "s/@@ANCIEN@@/${ANCIEN}/g" >> "${CADDYFILE}" <<
 		respond 404
 	}
 
+	# --- LA MESURE D'AUDIENCE, QUI N'A JAMAIS FONCTIONNE ---------------
+	#
+	# Constate le 22/08/2026 en verifiant tout autre chose. Les trois pages
+	# chargent /stats/s.js depuis le 12/08 ; ce relais n'existait QUE dans le
+	# bloc de recette. En production, le script rendait 404.
+	#
+	# Et le commentaire des pages disait : « data-domains limite l'envoi a la
+	# production : la recette ne pollue pas ». Les deux moities se
+	# contredisaient. La production ne pouvait pas CHARGER le script, faute de
+	# relais ; la recette le chargeait mais se faisait FILTRER, portant un
+	# autre nom d'hote. Aucune mesure n'a donc jamais ete enregistree.
+	#
+	# Chaque moitie avait l'air correcte isolement. C'est ce qui rend ce
+	# defaut instructif : rien n'etait faux, et l'ensemble ne marchait pas.
+	# Un dispositif qui echoue en silence ressemble a un dispositif sans
+	# visiteurs — et l'on conclut sur l'audience au lieu de la configuration.
+	#
+	# UMAMI EST SUR 3010, pas 3000 : celui-la est l'application de supperf.io.
+	# Le prefixe /stats evite la collision avec handle /api/*, qui capterait
+	# sinon la collecte (Umami poste sur /api/send).
+	#
+	# La politique de contenu n'a pas a changer : script-src 'self' couvre
+	# /stats/s.js et connect-src 'self' couvre la collecte, puisque tout est
+	# servi par ce domaine.
+	# DEUX CHEMINS, PAS TOUTE L'APPLICATION.
+	#
+	# Le bloc de recette relaie « /stats/* » en entier. Cela expose aussi
+	# l'ECRAN DE CONNEXION d'Umami — un service tiers, avec ses propres
+	# comptes et son propre historique de failles — sur un site qui va
+	# accepter des inconnus.
+	#
+	# Les pages n'ont besoin que de deux choses : le script de mesure, et le
+	# point ou il depose ses evenements. Tout le reste d'Umami n'a aucune
+	# raison d'etre joignable depuis Internet.
+	#
+	# CE QUE CELA COUTE : le tableau de bord n'est plus accessible par le
+	# navigateur depuis l'exterieur. On l'atteint par un tunnel :
+	#   ssh -L 3010:127.0.0.1:3010 root@195.110.35.206
+	#   puis http://localhost:3010
+	# C'est deux commandes de plus quelques fois par mois, contre une surface
+	# d'attaque permanente. L'echange est franchement favorable.
+	@mesure path /stats/s.js /stats/api/send
+	handle @mesure {
+		uri strip_prefix /stats
+		reverse_proxy 127.0.0.1:3010
+	}
+
+	# Le reste d'Umami est fermé, explicitement plutot que par omission : un
+	# 404 pose ici se lit comme une decision ; une absence de regle se lit
+	# comme un oubli, et finit par etre « corrigee ».
+	handle /stats/* {
+		respond 404
+	}
+
 	handle {
 		root * /var/www/biblio
 		file_server
@@ -232,6 +286,21 @@ for n in xavier-holingue.eu "${SITE}" "${ANCIEN}" blog.xavier-holingue.eu; do
     *)   echo "  A VOIR   ${n} : ${c}" ;;
   esac
 done
+echo
+echo "-- La mesure d'audience se charge-t-elle ? --"
+#
+# Ce controle manquait, et son absence a coute dix jours de mesure vide. Une
+# page qui repond 200 ne dit rien de ce qu'elle sait charger.
+code_stats=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 \
+             "https://${SITE}/stats/s.js" 2>/dev/null)
+case "${code_stats}" in
+  200) ok "${SITE}/stats/s.js : 200" ;;
+  404) echo "  ECHEC ${SITE}/stats/s.js : 404 — le relais /stats manque,"
+       echo "        ou Umami n'ecoute pas sur 127.0.0.1:3010."
+       echo "        Verifiez : ss -tlnp | grep 3010" ;;
+  *)   echo "  A VOIR ${SITE}/stats/s.js : ${code_stats}" ;;
+esac
+
 echo
 echo "-- La politique de contenu est-elle SERVIE ? --"
 #
