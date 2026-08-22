@@ -1,5 +1,5 @@
 # =========================================================================
-# Contrôles, puis livraison de Biblio sur biblio.xavier-holingue.eu
+# Contrôles, puis livraison de Biblio sur lisia.y-factor.fr
 #
 # CE QUE CHAQUE ÉTAGE PROUVE
 #
@@ -219,6 +219,12 @@ jobs:
       - name: Chaque fichier d essai est bien lance
         run: node tests/test-couverture.mjs
 
+      # Un seul domaine, declare une seule fois. Il etait ecrit en toutes
+      # lettres dans douze fichiers ; le vingtieme oubli aurait ete celui qui
+      # casse les liens magiques.
+      - name: Un seul domaine, declare une seule fois
+        run: node tests/test-domaine.mjs
+
       - name: Authentification par lien magique
         run: |
           npm install @electric-sql/pglite --no-audit --no-fund --silent
@@ -378,7 +384,7 @@ jobs:
       # La production, elle, ne doit SURTOUT PAS se declarer en recette.
       - name: La production ne se deguise pas
         run: |
-          env=$(curl -s --max-time 25 https://biblio.xavier-holingue.eu/api/session \
+          env=$(curl -s --max-time 25 https://lisia.y-factor.fr/api/session \
                 | grep -o '"environnement":"[a-z]*"' | cut -d'"' -f4)
           echo "  environnement annonce : ${env:-absent}"
           [ "${env}" != "recette" ] || {
@@ -387,15 +393,15 @@ jobs:
       # LE contrôle qui compte : le même test, contre l instance réelle.
       - name: Vérifications de l API contre l instance déployée
         env:
-          BASE: https://biblio.xavier-holingue.eu
+          BASE: https://lisia.y-factor.fr
           MOT_DE_PASSE: ${{ secrets.MOT_DE_PASSE_BIBLIO }}
         timeout-minutes: 10
         run: node api/test-api.mjs
 
       - name: La page répond
         run: |
-          c=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 https://biblio.xavier-holingue.eu)
-          printf '  biblio.xavier-holingue.eu : %s\n' "${c}"
+          c=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 https://lisia.y-factor.fr)
+          printf '  lisia.y-factor.fr : %s\n' "${c}"
           [ "${c}" = "200" ] || exit 1
 
       # ------------------------------------------------------------------
@@ -450,7 +456,7 @@ jobs:
 
       - name: Parcours en navigateur réel
         env:
-          BASE: https://biblio.xavier-holingue.eu
+          BASE: https://lisia.y-factor.fr
           # Le formulaire d'ajout n'existe que pour une session ouverte :
           # sans mot de passe, la vérification d'affichage du bouton
           # « Scanner » est ignorée plutôt que faussement réussie.

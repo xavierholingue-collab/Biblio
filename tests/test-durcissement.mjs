@@ -11,7 +11,7 @@
    1. L'ORIGINE DES ÉCRITURES.
       SameSite=Strict protège des sites tiers. Mais « site » se compte au
       domaine enregistrable : blog.xavier-holingue.eu est le MÊME site que
-      biblio.xavier-holingue.eu pour le navigateur, qui joint donc le cookie
+      lisia.y-factor.fr pour le navigateur, qui joint donc le cookie
       de session. Un POST de formulaire depuis un voisin part sans
       vérification préalable et s'exécute.
 

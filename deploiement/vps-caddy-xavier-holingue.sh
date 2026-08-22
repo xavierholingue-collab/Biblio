@@ -16,6 +16,27 @@
 
 set -uo pipefail
 
+# =========================================================================
+# LE DOMAINE EST DECLARE ICI, ET NULLE PART AILLEURS — 21/08/2026
+#
+# « biblio.xavier-holingue.eu » etait ecrit en toutes lettres dans douze
+# fichiers : ce script, la chaine de livraison, l'installateur de recette, la
+# configuration Playwright, les trois pages, des commentaires. Douze endroits
+# a penser le jour d'un demenagement — la cinquieme liste manuelle de la
+# semaine, apres celles du deployeur, de test-authentification.mjs, de
+# l'assembleur et la mienne.
+#
+# Ce fichier est la source de verite parce qu'il est ce qui DECIDE : c'est lui
+# qui dit a Caddy quels noms servir. tests/test-domaine.mjs lit ces deux
+# lignes et refuse que l'ancien nom subsiste ailleurs que dans la redirection.
+#
+# L'ANCIEN NOM REDIRIGE, il ne disparait pas. Des signets existent, des liens
+# ont ete partages, et un lien magique deja parti pointe encore vers lui. Le
+# couper ferait echouer des connexions sans rien dire de pourquoi.
+# =========================================================================
+SITE=${SITE:-lisia.y-factor.fr}
+ANCIEN=${ANCIEN:-biblio.xavier-holingue.eu}
+
 CADDYFILE=/etc/caddy/Caddyfile
 MARQUE_DEBUT='# >>> xavier-holingue : gere par vps-caddy-xavier-holingue.sh'
 MARQUE_FIN='# <<< xavier-holingue'
@@ -70,11 +91,31 @@ if grep -qF "${MARQUE_DEBUT}" "${CADDYFILE}"; then
   ok "bloc precedent retire"
 fi
 
-cat >> "${CADDYFILE}" <<'BLOC'
+# LE HEREDOC RESTE LITTERAL, et seuls deux marqueurs sont remplaces.
+#
+# Un heredoc non protege developperait tout ce qui ressemble a « $ » — or la
+# configuration de Caddy en contient. On garde donc les apostrophes autour de
+# BLOC, et l'on substitue APRES coup, sur des marqueurs qui ne peuvent pas
+# apparaitre par hasard.
+sed -e "s/@@SITE@@/${SITE}/g" -e "s/@@ANCIEN@@/${ANCIEN}/g" >> "${CADDYFILE}" <<'BLOC'
 # >>> xavier-holingue : gere par vps-caddy-xavier-holingue.sh
 
+# L'ANCIEN NOM, redirige en permanence.
+#
+# « 308 » ECRIT EN CHIFFRES, et non « permanent ». J'avais d'abord ecrit
+# « permanent » en commentant que 308 preserve la methode et le corps — sauf
+# que dans Caddy, « permanent » vaut 301, qui transforme un POST en GET. Le
+# commentaire affirmait ce que le code ne faisait pas.
+#
+# La consequence n'aurait rien de theorique : /api/lien et /api/connexion-lien
+# sont des POST. Une requete arrivee sur l'ancien nom serait devenue un GET
+# sans corps, donc un echec sans cause visible.
+@@ANCIEN@@ {
+	redir https://@@SITE@@{uri} 308
+}
+
 # La bibliotheque.
-biblio.xavier-holingue.eu {
+@@SITE@@ {
 	encode zstd gzip
 
 	# L'API. Le delai est LONG et c'est indispensable : une generation de
@@ -183,7 +224,7 @@ done
 
 echo
 echo "-- Nouveaux noms (certificat : compter une minute) --"
-for n in xavier-holingue.eu biblio.xavier-holingue.eu blog.xavier-holingue.eu; do
+for n in xavier-holingue.eu "${SITE}" "${ANCIEN}" blog.xavier-holingue.eu; do
   c=$(curl -s -o /dev/null -w '%{http_code}' --max-time 25 "https://${n}" 2>/dev/null)
   case "${c}" in
     200) ok "${n} : 200" ;;
@@ -198,7 +239,42 @@ echo "-- La politique de contenu est-elle SERVIE ? --"
 # l'import avait ete pose dans le bloc header { } : Caddy l'a pris pour un
 # nom d'en-tete, la politique a disparu, et le script a conclu « 200, tout
 # va bien ». Verifier qu'une page repond ne dit rien de ce qu'elle repond.
-entetes=$(curl -sI --max-time 20 https://biblio.xavier-holingue.eu/ 2>/dev/null)
+# ATTENDRE LE CERTIFICAT AVANT DE CONCLURE — corrigé le 22/08/2026
+#
+# Ce contrôle interrogeait un nom qui avait toujours son certificat. Le jour
+# du déménagement, il a interrogé un nom émis à la ligne précédente : sans
+# TLS, « curl -I » ne rend AUCUN en-tête, donc aucune politique de contenu,
+# donc « ECHEC aucune politique servie ».
+#
+# Le diagnostic proposé — « l'import est-il dans le bloc header ? » — envoyait
+# chercher un défaut de configuration là où il n'y en avait pas. C'est la
+# famille de défaut la plus tenace ici : un contrôle qui accuse la mauvaise
+# chose coûte plus cher qu'un contrôle absent, parce qu'on va vérifier ce qui
+# marche pendant que le vrai problème attend.
+#
+# On distingue donc deux états qui n'ont rien à voir : « pas encore de TLS »
+# et « TLS mais pas de politique ». Le premier s'attend, le second s'annonce.
+entetes=""
+for essai in 1 2 3 4 5 6 7 8 9 10; do
+  entetes=$(curl -sI --max-time 20 "https://${SITE}/" 2>/dev/null)
+  [ -n "${entetes}" ] && break
+  [ "${essai}" = 1 ] && printf '  certificat pas encore emis, on attend'
+  printf '.'
+  sleep 10
+done
+[ "${essai}" = 1 ] || echo
+
+if [ -z "${entetes}" ]; then
+  echo "  ECHEC ${SITE} ne repond toujours pas en HTTPS apres 100 secondes."
+  echo "        Ce n'est PAS un probleme de politique de contenu : aucun"
+  echo "        en-tete n'a ete recu du tout. Regardez l'emission du"
+  echo "        certificat :"
+  echo "          journalctl -u caddy -n 40 --no-pager | grep -i 'certificate\|acme\|error'"
+  echo "        Causes habituelles : le nom ne resout pas encore vers cette"
+  echo "        machine, ou Let's Encrypt limite apres des echecs repetes."
+  exit 1
+fi
+
 csp=$(printf '%s' "${entetes}" | grep -i '^content-security-policy:' | head -1)
 
 if [ -z "${csp}" ]; then

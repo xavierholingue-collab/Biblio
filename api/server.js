@@ -318,7 +318,7 @@ function verifier(jeton) {
    fait respecter. Un cookie ainsi nommé n'est accepté que s'il est Secure,
    de chemin « / », et SANS attribut Domain.
 
-   Ce que cela empêche concrètement : biblio.xavier-holingue.eu partage son
+   Ce que cela empêche concrètement : lisia.y-factor.fr partage son
    domaine parent avec blog.xavier-holingue.eu et le site principal. N'importe
    lequel de ces voisins peut poser un cookie « session » valable pour
    « .xavier-holingue.eu », qui serait alors envoyé à la bibliothèque en même
@@ -370,7 +370,7 @@ function lireSession(req) {
 
    SameSite=Strict protège des sites TIERS, et c'est déjà beaucoup. Mais
    « site » se compte au domaine enregistrable : blog.xavier-holingue.eu est
-   le MÊME site que biblio.xavier-holingue.eu du point de vue du navigateur.
+   le MÊME site que lisia.y-factor.fr du point de vue du navigateur.
    Une page servie par un voisin peut donc envoyer une requête avec votre
    cookie de session attaché.
 
@@ -2475,7 +2475,7 @@ await attendreLaBase();
   }
   if (DERRIERE_PROXY && !/^https?:\/\/[^\s/]+$/.test(process.env.ADRESSE_PUBLIQUE ?? "")) {
     console.warn("ADRESSE_PUBLIQUE absente : les liens de connexion seront refusés. "
-      + "Posez-la dans le fichier d'environnement (ex. https://biblio.xavier-holingue.eu).");
+      + "Posez-la dans le fichier d'environnement (ex. https://lisia.y-factor.fr).");
   }
 
   /* L'ÉTAT DES CATALOGUES, DIT UNE FOIS PLUTÔT QU'À CHAQUE SCAN.

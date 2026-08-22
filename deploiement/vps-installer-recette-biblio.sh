@@ -84,7 +84,7 @@ ok "aucun chemin de production dans la cible"
 # --- 0 bis. L'etat d'avant, pour pouvoir le comparer apres ---------------
 avant_prod=$(systemctl is-active biblio-api 2>/dev/null)
 avant_page=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
-             https://biblio.xavier-holingue.eu 2>/dev/null)
+             https://lisia.y-factor.fr 2>/dev/null)
 echo "  avant : biblio-api ${avant_prod}, page ${avant_page}"
 
 # --- 1. La base ----------------------------------------------------------
@@ -302,18 +302,18 @@ echo
 echo "-- Ce qui tournait avant tourne-t-il encore ? --"
 apres_prod=$(systemctl is-active biblio-api 2>/dev/null)
 apres_page=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 \
-             https://biblio.xavier-holingue.eu 2>/dev/null)
+             https://lisia.y-factor.fr 2>/dev/null)
 
 [ "${apres_prod}" = "${avant_prod}" ] \
   && ok "biblio-api : ${apres_prod}, inchange" \
   || echec "biblio-api : ${avant_prod} -> ${apres_prod}"
 
 [ "${apres_page}" = "${avant_page}" ] \
-  && ok "biblio.xavier-holingue.eu : ${apres_page}, inchange" \
-  || echo "  A VOIR  biblio.xavier-holingue.eu : ${avant_page} -> ${apres_page}"
+  && ok "lisia.y-factor.fr : ${apres_page}, inchange" \
+  || echo "  A VOIR  lisia.y-factor.fr : ${avant_page} -> ${apres_page}"
 
 # La politique de contenu de la PRODUCTION doit toujours etre servie.
-csp=$(curl -sI --max-time 20 https://biblio.xavier-holingue.eu/ 2>/dev/null \
+csp=$(curl -sI --max-time 20 https://lisia.y-factor.fr/ 2>/dev/null \
       | grep -ic '^content-security-policy:')
 [ "${csp}" -ge 1 ] \
   && ok "politique de contenu toujours servie en production" \

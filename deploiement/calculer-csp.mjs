@@ -1,7 +1,7 @@
 /* =========================================================================
    CALCUL DE LA POLITIQUE DE CONTENU PAR EMPREINTE
 
-   Produit la directive Content-Security-Policy de biblio.xavier-holingue.eu,
+   Produit la directive Content-Security-Policy de lisia.y-factor.fr,
    en autorisant chaque script en ligne par son empreinte sha256 plutôt que
    par le mot-clef 'unsafe-inline'.
 

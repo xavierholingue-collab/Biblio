@@ -11,7 +11,7 @@
 
 import { defineConfig, devices } from "@playwright/test";
 
-const BASE = process.env.BASE ?? "https://biblio.xavier-holingue.eu";
+const BASE = process.env.BASE ?? "https://lisia.y-factor.fr";
 
 export default defineConfig({
   testDir: ".",
