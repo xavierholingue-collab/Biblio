@@ -493,6 +493,25 @@
       voyez, jusqu'à ce que vous en décidiez autrement.
     </p>
 
+    <!-- LE BOUTON N'APPARAÎT QUE S'IL MÈNE QUELQUE PART. « /api/session »
+         dit si Google est configuré ; sans cela, on cliquerait pour arriver
+         sur un message d'indisponibilité, ce qui est pire que rien.
+
+         C'EST UN LIEN, PAS UN APPEL. La connexion par Google est une
+         navigation : le navigateur doit quitter la page, revenir de chez
+         Google, et rapporter ses cookies. Un « fetch » ne ferait rien de
+         tout cela. -->
+    <div id="blocGoogle" hidden style="margin-top:16px;padding-top:14px;
+         border-top:1px solid var(--rule)">
+      <a class="btn creux" id="lienGoogle" href="/api/oidc/depart"
+         style="display:block;text-align:center;text-decoration:none">
+        Continuer avec Google
+      </a>
+      <p style="font-size:12px;color:var(--ink-soft);margin:8px 0 0">
+        Nous ne demandons que votre nom et votre adresse.
+      </p>
+    </div>
+
     <p style="font-size:13px;color:var(--ink-soft);margin:18px 0 10px;
               border-top:1px solid var(--rule);padding-top:14px">
       Ou, si vous connaissez le mot de passe de la bibliothèque :
@@ -807,6 +826,32 @@ async function demarrer() {
     const s = await api("/session");
     connecte = s.connecte;
     iaPublique = s.ia_publique;
+
+    /* Le bouton Google n'existe que si Google est configuré. */
+    const bg = document.getElementById("blocGoogle");
+    if (bg) bg.hidden = !s.google;
+
+    /* CE QUE GOOGLE NOUS RENVOIE DIRE. Le retour est une navigation, pas un
+       appel : le serveur n'a que la barre d'adresse pour parler. On traduit
+       ici, et on efface le paramètre — un message d'erreur qui survit à un
+       rechargement de page devient un message qui ne veut plus rien dire. */
+    const RETOURS = {
+      "bienvenue":    ["Bienvenue. Votre bibliothèque est prête, et elle est privée.", false],
+      "ok":           ["", false],
+      "renonce":      ["Connexion abandonnée.", false],
+      "expire":       ["La connexion a pris trop de temps. Recommencez.", true],
+      "refuse":       ["Google n'a pas confirmé votre identité. Réessayez, ou passez par le lien par courriel.", true],
+      "non-verifiee": ["Google n'a pas vérifié cette adresse. Utilisez le lien par courriel : il la vérifiera.", true],
+      "indisponible": ["La connexion par Google n'est pas disponible ici.", true],
+    };
+    const retour = new URLSearchParams(location.search).get("oidc");
+    if (retour && RETOURS[retour]) {
+      const [texte, ennui] = RETOURS[retour];
+      if (texte) annoncer(texte, ennui);
+      const propre = new URL(location.href);
+      propre.searchParams.delete("oidc");
+      history.replaceState(null, "", propre);
+    }
   } catch (e) {
     document.getElementById("app").hidden = false;
     annoncer("Serveur injoignable. Les conteneurs sont-ils démarrés ?", true);

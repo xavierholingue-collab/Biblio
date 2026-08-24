@@ -178,6 +178,128 @@ export async function consommerLien(client, jeton) {
   return { ...comptes[0], nouveau };
 }
 
+/* ===========================================================================
+   ARRIVER PAR GOOGLE
+
+   Trois cas, et l'ordre dans lequel on les cherche N'EST PAS INDIFFÉRENT.
+
+   1. LE « sub » EST CONNU — c'est la même personne, quelle que soit l'adresse
+      qu'elle porte aujourd'hui. On entre. Le courriel est rafraîchi au
+      passage : c'est un attribut, il a le droit d'avoir changé.
+
+   2. LE COURRIEL EST CONNU, le « sub » non — quelqu'un inscrit par lien
+      magique revient par Google. On RATTACHE, à condition que Google déclare
+      l'adresse vérifiée. Sans cette condition, il suffirait de créer un
+      Google Workspace sur un domaine qu'on contrôle et d'y déclarer l'adresse
+      de sa victime.
+
+   3. NI L'UN NI L'AUTRE — c'est une inscription. Même porte que le lien
+      magique : « creer_locataire », qui décide seul du quota, du plafond et
+      de l'identifiant d'URL.
+
+   CHERCHER LE « sub » D'ABORD, ET C'EST LE POINT. L'inverse — chercher le
+   courriel en premier — ferait qu'une personne ayant changé d'adresse Google
+   tomberait sur le cas 3 et se verrait offrir une bibliothèque vide, alors
+   que la sienne existe. Elle ne comprendrait pas, et nous non plus.
+
+   CETTE FONCTION NE DÉCIDE PAS DU REFUS. Quand l'adresse n'est pas vérifiée
+   et qu'un compte existe à ce nom, elle rend « rattachementRefuse » et laisse
+   l'appelant formuler le message. Le refus est une décision de produit ; le
+   rattachement est une règle de données.
+   =========================================================================== */
+export async function connexionParOidc(client, { sub, courriel: brut, verifie }) {
+  const courriel = normaliserCourriel(brut);
+  if (!sub) { const e = new Error("Identité Google incomplète."); e.statut = 400; throw e; }
+
+  /* 1. Le sub est connu. */
+  const { rows: parSub } = await client.query(
+    "select id, tenant_id, courriel from comptes where oidc_sub = $1", [sub]);
+  if (parSub.length) {
+    const c = parSub[0];
+    /* Le courriel a pu changer chez Google. On le suit — mais seulement s'il
+       est vérifié : sinon on écraserait une adresse prouvée par une autre qui
+       ne l'est pas, et c'est par là qu'on reprend un compte. */
+    if (verifie && courriel && courriel !== c.courriel) {
+      await client.query("update comptes set courriel = $1 where id = $2",
+        [courriel, c.id]).catch(() => { /* déjà pris par un autre compte : on garde l'ancien */ });
+    }
+    await client.query("update comptes set vu_le = now() where id = $1", [c.id]);
+    return { compte_id: c.id, tenant_id: c.tenant_id, courriel: c.courriel, nouveau: false };
+  }
+
+  /* 2. Le courriel est connu, le sub non. */
+  const { rows: parCourriel } = await client.query(
+    "select id, tenant_id, courriel from comptes where courriel = $1", [courriel]);
+  if (parCourriel.length) {
+    if (!verifie) return { rattachementRefuse: true, courriel };
+    const c = parCourriel[0];
+    await client.query(
+      "update comptes set oidc_sub = $1, vu_le = now() where id = $2", [sub, c.id]);
+    return { compte_id: c.id, tenant_id: c.tenant_id, courriel: c.courriel,
+             nouveau: false, rattache: true };
+  }
+
+  /* 3. Personne. C'est une inscription.
+
+     On exige la vérification ICI AUSSI, et pas seulement pour le
+     rattachement. Créer un compte sur une adresse non prouvée reviendrait à
+     donner une bibliothèque au nom de quelqu'un qui n'a rien demandé — et à
+     lui envoyer ensuite des courriels de service qu'il n'attend pas. */
+  if (!verifie) return { rattachementRefuse: true, courriel };
+  if (!courrielPlausible(courriel)) {
+    const e = new Error("Adresse de courriel invalide."); e.statut = 400; throw e;
+  }
+
+  const { rows: cree } = await client.query(
+    "select compte, locataire from public.creer_locataire($1)", [courriel]);
+  await client.query("update comptes set oidc_sub = $1 where id = $2",
+    [sub, cree[0].compte]);
+
+  return { compte_id: cree[0].compte, tenant_id: cree[0].locataire,
+           courriel, nouveau: true };
+}
+
+/* ---------------------------------------------------------------------------
+   LE COURT ALLER-RETOUR CHEZ GOOGLE
+
+   Trois valeurs — state, nonce, vérifieur PKCE — doivent survivre le temps
+   d'un aller-retour de trente secondes, et revenir intactes.
+
+   PAS EN BASE. Une table pour des valeurs de trente secondes serait une table
+   à purger, un index à entretenir, et une écriture sur le chemin de connexion.
+   Un cookie SIGNÉ suffit : le navigateur le garde, nous le vérifions, et il
+   disparaît de lui-même.
+
+   Il porte sa propre expiration parce qu'un cookie de session survit à
+   l'onglet, pas au navigateur : sans date, un aller-retour interrompu la
+   veille reviendrait valide le lendemain.
+   --------------------------------------------------------------------------- */
+export function signerTransit(secret, charge, secondes = 600) {
+  const c = { ...charge, expire: Date.now() + secondes * 1000 };
+  const donnees = Buffer.from(JSON.stringify(c)).toString("base64url");
+  const signature = createHmac("sha256", secret).update(donnees).digest("base64url");
+  return `${donnees}.${signature}`;
+}
+
+/** Rend la charge, ou null. Ne lève jamais. */
+export function verifierTransit(secret, jeton) {
+  if (!jeton || typeof jeton !== "string" || !jeton.includes(".")) return null;
+  const [donnees, signature] = jeton.split(".");
+  if (!donnees || !signature) return null;
+
+  const attendue = createHmac("sha256", secret).update(donnees).digest("base64url");
+  const a = Buffer.from(signature), b = Buffer.from(attendue);
+  /* Comparaison à temps constant, pour la même raison que la session : une
+     comparaison ordinaire s'arrête au premier octet différent. */
+  if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
+
+  try {
+    const c = JSON.parse(Buffer.from(donnees, "base64url").toString("utf8"));
+    if (!c || c.expire < Date.now()) return null;
+    return c;
+  } catch { return null; }
+}
+
 /** Ménage : les liens périmés n'ont aucune raison de s'accumuler. */
 export const purgerLiens = (client) =>
   client.query("delete from liens_connexion where expire_le < now() - interval '1 day'");

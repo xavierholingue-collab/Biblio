@@ -10,9 +10,12 @@ import { readFile } from "node:fs/promises";
 import pg from "pg";
 import { avecContexte, avecVisiteur } from "./locataire.mjs";
 import {
-  demanderLien, consommerLien, purgerLiens,
+  demanderLien, consommerLien, purgerLiens, connexionParOidc,
+  signerTransit, verifierTransit,
   courrielPlausible, normaliserCourriel, DUREE_LIEN_MINUTES,
 } from "./authentification.mjs";
+import { commencer as oidcCommencer, terminer as oidcTerminer,
+         etatOidc } from "./oidc.mjs";
 import { envoyerCourriel, messageDeConnexion, messageDInscription,
          etatCourriel } from "./courriel.mjs";
 import { chercherParIsbn, chercherParTexte, isbn13, etatCatalogues,
@@ -2159,6 +2162,118 @@ const serveur = createServer(async (req, rep) => {
       });
     }
 
+    /* =====================================================================
+       SE CONNECTER AVEC GOOGLE
+
+       DEUX ROUTES ET UN COOKIE, dont la portée est la seule chose subtile.
+
+       « SameSite=Lax » SUR LE COOKIE DE TRANSIT, ET C'EST OBLIGATOIRE.
+       Google renvoie la personne par une navigation venue d'un AUTRE site.
+       Un cookie « Strict » ne serait pas envoyé sur cette requête-là : le
+       state serait introuvable, et la connexion échouerait avec un message
+       parlant de falsification alors que rien n'a été falsifié.
+
+       C'est exactement le genre de défaut qui coûte une soirée : tout est
+       correct, et rien ne marche. « Lax » envoie le cookie sur les
+       navigations de premier niveau en GET — le cas, et seulement lui.
+
+       Le cookie de SESSION, lui, reste « Strict » : il n'a aucune raison de
+       voyager depuis un site tiers.
+       ===================================================================== */
+    const COOKIE_TRANSIT = DERRIERE_PROXY ? "__Host-oidc" : "oidc";
+    const effacerTransit =
+      `${COOKIE_TRANSIT}=; HttpOnly;${COOKIE_SECURE} SameSite=Lax; Path=/; Max-Age=0`;
+
+    /* Le retour se fait dans un NAVIGATEUR, pas en XHR : on redirige, on ne
+       rend pas du JSON. Le message voyage donc en paramètre, et la page le
+       traduit — elle seule sait comment le dire à sa manière. */
+    const versEcran = (ennui) => ({
+      statut: 302,
+      entetes: { Location: `/ma-bibliotheque.html${ennui ? `?oidc=${ennui}` : "?oidc=ok"}` },
+    });
+
+    if (chemin === "/api/oidc/depart" && req.method === "GET") {
+      const etat = etatOidc();
+      if (!etat.pret) {
+        console.error("OIDC mal configuré :", etat.detail);
+        const r = versEcran("indisponible");
+        rep.writeHead(r.statut, r.entetes); return rep.end();
+      }
+
+      const d = oidcCommencer({ base: adressePublique(req) });
+      const transit = signerTransit(SECRET,
+        { e: d.etat, n: d.nonce, v: d.verifieur }, 600);
+
+      rep.writeHead(302, {
+        Location: d.url,
+        "Set-Cookie": `${COOKIE_TRANSIT}=${transit}; HttpOnly;${COOKIE_SECURE}`
+                    + ` SameSite=Lax; Path=/; Max-Age=600`,
+      });
+      return rep.end();
+    }
+
+    if (chemin === "/api/oidc/retour" && req.method === "GET") {
+      const fini = (ennui) => {
+        const r = versEcran(ennui);
+        rep.writeHead(r.statut, { ...r.entetes, "Set-Cookie": effacerTransit });
+        return rep.end();
+      };
+
+      const transit = verifierTransit(SECRET, lireCookie(req, COOKIE_TRANSIT));
+      const code = url.searchParams.get("code");
+      const etatRecu = url.searchParams.get("state");
+
+      /* Google renvoie « error=access_denied » quand la personne referme sa
+         fenêtre. Ce n'est pas une panne : c'est un renoncement, et le dire
+         autrement serait inquiéter pour rien. */
+      if (url.searchParams.get("error")) return fini("renonce");
+
+      /* Le state prouve que ce retour répond à un départ que NOUS avons
+         provoqué. Sans lui, n'importe qui peut faire aboutir une connexion
+         dans le navigateur de quelqu'un d'autre. */
+      if (!transit || !code || !etatRecu || etatRecu !== transit.e) {
+        console.warn("retour OIDC sans transit valide");
+        return fini("expire");
+      }
+
+      let identite;
+      try {
+        identite = await oidcTerminer({ code, verifieur: transit.v,
+                                        nonceAttendu: transit.n,
+                                        base: adressePublique(req) });
+      } catch (e) {
+        /* Le détail va au journal, jamais à l'écran : il nomme parfois notre
+           identifiant client, et il n'apprendrait rien à la personne. */
+        console.error("OIDC refusé :", e.message);
+        return fini("refuse");
+      }
+
+      const issue = await avecVisiteur(bd, (c) => connexionParOidc(c, identite));
+
+      /* L'ADRESSE NON VÉRIFIÉE EST REFUSÉE FRANCHEMENT — décidé le 22/08.
+         Un repli silencieux sur le lien magique ferait croire à une panne, et
+         la personne chercherait le défaut là où il n'est pas. */
+      if (issue.rattachementRefuse) {
+        console.warn("OIDC : adresse non vérifiée par Google, refus");
+        return fini("non-verifiee");
+      }
+
+      const signe = signer({
+        c: issue.compte_id, t: issue.tenant_id,
+        expire: Date.now() + DUREE_SESSION,
+      });
+      console.log(`connexion Google (${issue.nouveau ? "inscription" : issue.rattache ? "rattachement" : "retour"})`);
+
+      rep.writeHead(302, {
+        Location: `/ma-bibliotheque.html?oidc=${issue.nouveau ? "bienvenue" : "ok"}`,
+        "Set-Cookie": [
+          `${COOKIE_SESSION}=${signe}; HttpOnly;${COOKIE_SECURE} SameSite=Strict; Path=/; Max-Age=${DUREE_SESSION / 1000}`,
+          effacerTransit,
+        ],
+      });
+      return rep.end();
+    }
+
     if (chemin === "/api/deconnexion" && req.method === "POST") {
       return json(rep, { ok: true }, 200, { "Set-Cookie": COOKIES_ACCEPTES
           .map(n => `${n}=; HttpOnly;${COOKIE_SECURE} SameSite=Strict; Path=/; Max-Age=0`) });
@@ -2209,6 +2324,10 @@ const serveur = createServer(async (req, rep) => {
         // Une recette sans clef ne peut pas produire de résumé. Le dire
         // évite d'attendre une réponse qui ne viendra pas.
         ia_disponible: Boolean(CLE_ANTHROPIC),
+        /* La page a besoin de savoir si le bouton Google mène quelque part.
+           Un bouton qui redirige vers un message d'indisponibilité est pire
+           que pas de bouton : on clique, on attend, on ne comprend pas. */
+        google: etatOidc().pret,
       });
     }
 

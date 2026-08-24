@@ -125,9 +125,16 @@ const appel = async (port, chemin, corps, entetes = {}) => {
   return { statut: r.status, entetes: r.headers, corps: await r.json().catch(() => null) };
 };
 
+/* Tout serveur ouvert ici doit être fermé ici. Le faux fournisseur OIDC a
+   été ajouté sans l'être : le fichier finissait ses contrôles et ne rendait
+   jamais la main, parce qu'une socket en écoute maintient Node en vie. Un
+   test qui ne se termine pas ne DIT rien — il finit tué par un délai, et son
+   verdict n'est jamais imprimé. */
+const aFermer = [];
 const fermer = async () => {
   for (const p of serveurs) p.kill();
   await new Promise(r => faussaire.close(r));
+  for (const s of aFermer) await new Promise(r => s.close(r));
   await banc.fermer();
 };
 
@@ -563,6 +570,265 @@ let jetonNeuf = null, locatairesAvantDemande = 0;
       vus[0].n === 0, `${vus[0].n} ouvrage(s) vus, ${chezXavier[0].n} existent chez Xavier`);
   }
 }
+
+/* =====================================================================
+   4 ter. SE CONNECTER AVEC GOOGLE — LES DEUX ROUTES, DE BOUT EN BOUT
+
+   test-oidc.mjs éprouve le MODULE : il refuse-t-il les jetons qu'il doit
+   refuser. Ici on éprouve le BRANCHEMENT : le state, le cookie de transit,
+   le rattachement au bon compte, et le refus d'une adresse non vérifiée.
+
+   Deux choses ne peuvent se voir qu'ici. La portée du cookie de transit —
+   « Strict » le rendrait invisible au retour de Google, et la connexion
+   échouerait en accusant une falsification. Et le rattachement, qui touche
+   la base et dépend de comptes existants.
+   ===================================================================== */
+
+const { generateKeyPairSync, createSign } = await import("node:crypto");
+const paire = generateKeyPairSync("rsa", { modulusLength: 2048 });
+const jwkG = { ...paire.publicKey.export({ format: "jwk" }),
+               kid: "g-1", alg: "RS256", use: "sig" };
+const CLIENT_G = "lisia.apps.googleusercontent.com";
+const PORT_G = PORT_BASE + 11;
+
+let prochaineIdentite = {};
+let nonceDuDepart = null;   // ce que le fournisseur a reçu au départ
+const b64j = (o) => Buffer.from(JSON.stringify(o)).toString("base64url");
+
+const fauxGoogle = createServer(async (req, rep) => {
+  const chemin = new URL(req.url, "http://x").pathname;
+  if (chemin === "/clefs") {
+    rep.writeHead(200, { "content-type": "application/json" });
+    return rep.end(JSON.stringify({ keys: [jwkG] }));
+  }
+  if (chemin === "/jeton") {
+    /* LE NONCE NE VIENT PAS DE L'ÉCHANGE — première version fautive, et elle
+       a fait échouer six contrôles en accusant le branchement.
+
+       Le nonce voyage dans la requête d'AUTORISATION : le fournisseur le
+       reçoit là, le retient le temps de l'aller-retour, et le recopie dans le
+       jeton. Ma doublure le cherchait dans le corps de l'échange, où il n'est
+       jamais. Elle produisait donc un jeton sans nonce — que le module
+       refusait, à juste titre.
+
+       Une doublure qui ne reproduit pas le comportement réel n'éprouve rien :
+       elle invente un monde où le code échoue pour la mauvaise raison. */
+    let brut = ""; for await (const m of req) brut += m;
+    const nonce = nonceDuDepart;
+    const t = Math.floor(Date.now() / 1000);
+    const corps = {
+      iss: `http://127.0.0.1:${PORT_G}`, aud: CLIENT_G,
+      sub: "google-1", email: "alice@exemple.fr", email_verified: true,
+      iat: t, exp: t + 3600, nonce, ...prochaineIdentite,
+    };
+    delete corps._nonce;
+    const tete = `${b64j({ alg: "RS256", kid: "g-1", typ: "JWT" })}.${b64j(corps)}`;
+    const sg = createSign("RSA-SHA256"); sg.update(tete); sg.end();
+    rep.writeHead(200, { "content-type": "application/json" });
+    return rep.end(JSON.stringify({
+      id_token: `${tete}.${sg.sign(paire.privateKey).toString("base64url")}` }));
+  }
+  rep.writeHead(404); rep.end();
+});
+await new Promise(r => fauxGoogle.listen(PORT_G, "127.0.0.1", r));
+aFermer.push(fauxGoogle);
+
+const avecGoogle = await lancer("google", {
+  DERRIERE_PROXY: "1",
+  ADRESSE_PUBLIQUE: "https://lisia.y-factor.fr",
+  COURRIEL_SERVICE: "resend",
+  COURRIEL_CLEF: "cle-de-controle",
+  COURRIEL_EXPEDITEUR: "biblio@exemple.fr",
+  INSCRIPTION_OUVERTE: "1",
+  OIDC_URL: `http://127.0.0.1:${PORT_G}/`,
+  OIDC_GOOGLE_ID: CLIENT_G,
+  OIDC_GOOGLE_SECRET: "secret-de-controle",
+}, PORT_BASE + 12);
+
+/* « redirect: manual » : ces routes REDIRIGENT, et suivre la redirection
+   ferait perdre l'en-tête qu'on veut lire. */
+const brut = (chemin, entetes = {}) =>
+  fetch(`http://127.0.0.1:${avecGoogle.port}${chemin}`,
+        { redirect: "manual", headers: entetes });
+
+/* Partir en retenant ce que le fournisseur retiendrait : le state, le nonce,
+   et le cookie de transit. */
+const partir = async () => {
+  const d = await brut("/api/oidc/depart");
+  const vers = new URL(d.headers.get("location"));
+  nonceDuDepart = vers.searchParams.get("nonce");
+  return {
+    reponse: d,
+    etat: vers.searchParams.get("state"),
+    cookie: (d.headers.get("set-cookie").match(/(?:__Host-)?oidc=([^;]+)/) ?? [])[1],
+  };
+};
+
+{
+  const depart = await partir();
+  const r = depart.reponse;
+  const vers = r.headers.get("location") ?? "";
+  const cookie = r.headers.get("set-cookie") ?? "";
+
+  verifier("le départ redirige vers le fournisseur",
+    r.status === 302 && vers.includes(`127.0.0.1:${PORT_G}`), `${r.status} → ${vers.slice(0, 60)}`);
+
+  /* LA PORTÉE DU COOKIE EST LA SEULE CHOSE SUBTILE ICI. Google renvoie par
+     une navigation venue d'un AUTRE site : un cookie « Strict » ne serait pas
+     envoyé, le state serait introuvable, et l'on accuserait une falsification
+     alors que rien n'a été falsifié. */
+  verifier("… en posant un cookie de transit en SameSite=Lax",
+    /SameSite=Lax/i.test(cookie) && !/SameSite=Strict/i.test(cookie),
+    cookie.slice(0, 90));
+  verifier("… HttpOnly, pour qu'aucun script ne le lise",
+    /HttpOnly/i.test(cookie), cookie.slice(0, 90));
+
+  const etatEnvoye = depart.etat, jetonTransit = depart.cookie;
+
+  /* --- Le retour nominal : une inscription --- */
+  const avantG = await compter();
+  const retour = await brut(`/api/oidc/retour?code=abc&state=${etatEnvoye}`,
+    { cookie: `__Host-oidc=${jetonTransit}` });
+
+  verifier("le retour ouvre une session et renvoie à la bibliothèque",
+    retour.status === 302 && /ma-bibliotheque/.test(retour.headers.get("location") ?? ""),
+    `${retour.status} → ${retour.headers.get("location")}`);
+  verifier("… en posant la session, elle en Strict",
+    /session=/.test(retour.headers.get("set-cookie") ?? "")
+    && /SameSite=Strict/i.test(retour.headers.get("set-cookie") ?? ""),
+    (retour.headers.get("set-cookie") ?? "").slice(0, 90));
+  verifier("… et le locataire est créé",
+    (await compter()) === avantG + 1, `${await compter()} locataires`);
+
+  const [neuf] = await q(
+    `select c.oidc_sub, c.courriel from comptes c where c.courriel = 'alice@exemple.fr'`);
+  verifier("… rattaché à son identifiant Google, pas à son adresse",
+    neuf?.oidc_sub === "google-1", JSON.stringify(neuf));
+}
+
+/* --- UN STATE QUI NE CORRESPOND PAS EST REFUSÉ --------------------------
+   C'est la protection contre la falsification de requête : sans elle,
+   n'importe qui peut faire aboutir une connexion dans le navigateur d'un
+   autre. */
+{
+  const d = await partir();
+  const r = await brut("/api/oidc/retour?code=abc&state=un-etat-fabrique",
+    { cookie: `__Host-oidc=${d.cookie}` });
+  verifier("un state qui ne correspond pas au cookie est refusé",
+    /oidc=expire/.test(r.headers.get("location") ?? ""),
+    r.headers.get("location"));
+}
+
+/* --- SANS COOKIE DE TRANSIT, RIEN NE PASSE ---------------------------- */
+{
+  const d = await partir();
+  const r = await brut(`/api/oidc/retour?code=abc&state=${d.etat}`);
+  verifier("… et sans cookie du tout, non plus",
+    /oidc=expire/.test(r.headers.get("location") ?? ""),
+    r.headers.get("location"));
+}
+
+/* --- L'ADRESSE NON VÉRIFIÉE EST REFUSÉE FRANCHEMENT --------------------
+   Décidé le 22/08 : un repli silencieux sur le lien magique ferait croire à
+   une panne, et la personne chercherait le défaut là où il n'est pas. */
+{
+  prochaineIdentite = { sub: "google-2", email: "bob@exemple.fr", email_verified: false };
+  const avantR = await compter();
+  const d = await partir();
+  const r = await brut(`/api/oidc/retour?code=abc&state=${d.etat}`,
+    { cookie: `__Host-oidc=${d.cookie}` });
+
+  verifier("une adresse non vérifiée est refusée, et le dit",
+    /oidc=non-verifiee/.test(r.headers.get("location") ?? ""),
+    r.headers.get("location"));
+  verifier("… et aucun compte n'est créé au passage",
+    (await compter()) === avantR, `${await compter()} locataires`);
+}
+
+/* --- LE RATTACHEMENT À UN COMPTE VENU DU LIEN MAGIQUE -------------------
+   « nouvelle@exemple.fr » s'est inscrite plus haut par lien magique. Elle
+   revient par Google : on doit retrouver SA bibliothèque, pas en créer une
+   seconde. */
+{
+  prochaineIdentite = { sub: "google-3", email: "nouvelle@exemple.fr", email_verified: true };
+  const avantL = await compter();
+  const d = await partir();
+  const r = await brut(`/api/oidc/retour?code=abc&state=${d.etat}`,
+    { cookie: `__Host-oidc=${d.cookie}` });
+
+  verifier("revenir par Google retrouve le compte du lien magique",
+    r.status === 302 && /oidc=ok/.test(r.headers.get("location") ?? ""),
+    r.headers.get("location"));
+  verifier("… sans créer une seconde bibliothèque",
+    (await compter()) === avantL, `${await compter()} locataires`);
+
+  const [rattache] = await q(
+    "select oidc_sub from comptes where courriel = 'nouvelle@exemple.fr'");
+  verifier("… et le compte porte désormais son identifiant Google",
+    rattache?.oidc_sub === "google-3", JSON.stringify(rattache));
+}
+/* --- LE SUB EST CHERCHÉ AVANT LE COURRIEL, ET C'EST TESTÉ ---------------
+
+   Ajouté après une mutation : inverser l'ordre — chercher le courriel
+   d'abord — ne faisait tomber AUCUN contrôle. Aucun de mes cas ne mettait
+   les deux clés en désaccord.
+
+   Or c'est précisément là que l'ordre compte. « alice@exemple.fr » s'est
+   inscrite par Google sous le sub « google-1 ». Elle revient avec la MÊME
+   identité Google et une adresse CHANGÉE — mariage, domaine, alias devenu
+   principal. Cherché par sub, on la reconnaît. Cherché par courriel, on ne
+   trouve rien et on lui offre une bibliothèque vide alors que la sienne
+   existe : elle ne comprendrait pas, et nous non plus. */
+{
+  prochaineIdentite = { sub: "google-1", email: "alice.mariee@exemple.fr",
+                        email_verified: true };
+  const avantS = await compter();
+  const d = await partir();
+  const r = await brut(`/api/oidc/retour?code=abc&state=${d.etat}`,
+    { cookie: `__Host-oidc=${d.cookie}` });
+
+  verifier("une adresse Google changée retrouve le même compte",
+    r.status === 302 && /oidc=ok/.test(r.headers.get("location") ?? ""),
+    r.headers.get("location"));
+  verifier("… sans créer une bibliothèque de plus",
+    (await compter()) === avantS, `${await compter()} locataires`);
+
+  const [suivi] = await q("select courriel from comptes where oidc_sub = 'google-1'");
+  verifier("… et le courriel suit, puisqu'il n'est qu'un attribut",
+    suivi?.courriel === "alice.mariee@exemple.fr", JSON.stringify(suivi));
+}
+
+/* --- LA PRISE DE CONTRÔLE, ET SON REFUS ---------------------------------
+
+   LE CONTRÔLE LE PLUS IMPORTANT DE CETTE SECTION, et il manquait. Une
+   mutation retirant la vérification dans la branche de rattachement n'a rien
+   fait tomber : mon cas « non vérifiée » portait une adresse INCONNUE, qui
+   part en création — une branche où la vérification est testée ailleurs.
+
+   Le scénario réel est celui-ci. Quelqu'un crée un Google Workspace sur un
+   domaine qu'il contrôle, y déclare l'adresse d'un inscrit, et se présente.
+   Google rend « email_verified: false » — il n'a pas prouvé cette adresse.
+   Sans la condition, on rattacherait, et l'attaquant entrerait dans la
+   bibliothèque de sa victime. */
+{
+  prochaineIdentite = { sub: "google-pirate", email: "nouvelle@exemple.fr",
+                        email_verified: false };
+  const d = await partir();
+  const r = await brut(`/api/oidc/retour?code=abc&state=${d.etat}`,
+    { cookie: `__Host-oidc=${d.cookie}` });
+
+  verifier("une adresse NON VÉRIFIÉE ne prend pas un compte existant",
+    /oidc=non-verifiee/.test(r.headers.get("location") ?? ""),
+    r.headers.get("location"));
+
+  const [victime] = await q(
+    "select oidc_sub from comptes where courriel = 'nouvelle@exemple.fr'");
+  verifier("… et le compte visé garde son identifiant Google d'origine",
+    victime?.oidc_sub === "google-3",
+    `${JSON.stringify(victime)} — l'attaquant s'est rattaché`);
+}
+
+prochaineIdentite = {};
 
 /* =====================================================================
    5. BREVO : LE MÊME CODE, UN AUTRE SERVICE
