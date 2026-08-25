@@ -831,6 +831,114 @@ const partir = async () => {
 prochaineIdentite = {};
 
 /* =====================================================================
+   4 bis. LES INSCRIPTIONS FERMÉES — LES DEUX PORTES, PAS UNE SEULE
+
+   POURQUOI CETTE SECTION N'EXISTAIT PAS, ET CE QUE CELA A COÛTÉ
+
+   Tous les serveurs de ce fichier étaient lancés avec
+   « INSCRIPTION_OUVERTE: "1" ». Le drapeau n'était donc JAMAIS éprouvé dans
+   la position où il protège. Une suite entièrement verte, et un contrôle qui
+   n'avait jamais été mis en position de refuser quoi que ce soit.
+
+   Le défaut est sorti en production le 24/08/2026 : drapeau à 0, le lien
+   magique refusait les inconnus, et une connexion Google a créé une
+   bibliothèque neuve. « connexionParOidc » ne recevait pas le drapeau.
+
+   D'où un serveur de plus, fermé celui-là, et les deux portes essayées
+   dessus. La troisième vérification est la contrepartie indispensable :
+   fermer les INSCRIPTIONS ne doit pas fermer les CONNEXIONS.
+   ===================================================================== */
+
+const ferme = await lancer("ferme", {
+  DERRIERE_PROXY: "1",
+  ADRESSE_PUBLIQUE: "https://lisia.y-factor.fr",
+  COURRIEL_SERVICE: "resend",
+  COURRIEL_CLEF: "cle-de-controle",
+  COURRIEL_EXPEDITEUR: "biblio@exemple.fr",
+  INSCRIPTION_OUVERTE: "0",
+  OIDC_URL: `http://127.0.0.1:${PORT_G}/`,
+  OIDC_GOOGLE_ID: CLIENT_G,
+  OIDC_GOOGLE_SECRET: "secret-de-controle",
+}, PORT_BASE + 13);
+
+const brutF = (chemin, entetes = {}) =>
+  fetch(`http://127.0.0.1:${ferme.port}${chemin}`,
+        { redirect: "manual", headers: entetes });
+
+const partirF = async () => {
+  const d = await brutF("/api/oidc/depart");
+  const vers = new URL(d.headers.get("location"));
+  nonceDuDepart = vers.searchParams.get("nonce");
+  return {
+    etat: vers.searchParams.get("state"),
+    cookie: (d.headers.get("set-cookie").match(/(?:__Host-)?oidc=([^;]+)/) ?? [])[1],
+  };
+};
+
+const nbLocataires = async () =>
+  Number((await q("select count(*) as n from tenants"))[0].n);
+
+/* --- La porte Google, fermée -------------------------------------------- */
+{
+  const avant = await nbLocataires();
+
+  prochaineIdentite = { sub: "google-inconnu", email: "inconnu@exemple.fr",
+                        email_verified: true };
+  const d = await partirF();
+  const r = await brutF(`/api/oidc/retour?code=abc&state=${d.etat}`,
+    { cookie: `__Host-oidc=${d.cookie}` });
+
+  verifier("inscriptions fermées : Google le DIT, il ne fait pas semblant",
+    /oidc=fermee/.test(r.headers.get("location") ?? ""),
+    r.headers.get("location"));
+
+  /* LA VÉRIFICATION QUI COMPTE. La redirection seule ne prouve rien : c'est
+     précisément ce qu'un message d'erreur posé par-dessus une création
+     réussie afficherait aussi. */
+  verifier("… et AUCUNE bibliothèque n'a été créée",
+    (await nbLocataires()) === avant,
+    `${avant} → ${await nbLocataires()} — la porte Google crée encore`);
+
+  const [compte] = await q(
+    "select id from comptes where courriel = 'inconnu@exemple.fr'");
+  verifier("… ni aucun compte", compte === undefined, JSON.stringify(compte));
+}
+
+/* --- La porte du courriel, fermée --------------------------------------- */
+{
+  const avant = await nbLocataires();
+  recus.length = 0;
+
+  const r = await appel(ferme.port, "/api/lien", { courriel: "autre-inconnu@exemple.fr" });
+
+  /* La réponse reste « envoyé » : dire « adresse inconnue » livrerait la
+     liste des inscrits à qui l'essaie. Le silence est le comportement voulu,
+     et c'est le COMPTAGE qui prouve qu'il ne cache pas une création. */
+  verifier("inscriptions fermées : le lien magique ne crée rien non plus",
+    (await nbLocataires()) === avant,
+    `${avant} → ${await nbLocataires()}`);
+  verifier("… et aucun courriel n'est parti", recus.length === 0, String(recus.length));
+}
+
+/* --- Fermer les inscriptions ne ferme pas les connexions ---------------- */
+{
+  prochaineIdentite = { sub: "google-1", email: "alice.mariee@exemple.fr",
+                        email_verified: true };
+  const d = await partirF();
+  const r = await brutF(`/api/oidc/retour?code=abc&state=${d.etat}`,
+    { cookie: `__Host-oidc=${d.cookie}` });
+
+  const ou = r.headers.get("location") ?? "";
+  /* « __Host-session » et non « session » : ce serveur est lancé avec
+     DERRIERE_PROXY=1, et server.js préfixe alors le cookie. */
+  verifier("un inscrit se connecte TOUJOURS, inscriptions fermées ou non",
+    /oidc=ok/.test(ou) && /__Host-session=/.test(r.headers.get("set-cookie") ?? ""),
+    `${ou} — le drapeau a débordé sur la connexion`);
+}
+
+prochaineIdentite = {};
+
+/* =====================================================================
    5. BREVO : LE MÊME CODE, UN AUTRE SERVICE
 
    Éprouvé maintenant alors que la migration est seulement envisagée. Écrire

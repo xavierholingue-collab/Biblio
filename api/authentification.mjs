@@ -131,7 +131,44 @@ export async function demanderLien(client, courrielBrut, { inscriptionOuverte = 
  * nouveau lien, ce qui n'est pas grave — mais le locataire créé à moitié, lui,
  * resterait. « avecVisiteur » fournit cette transaction.
  */
-export async function consommerLien(client, jeton) {
+/* ===========================================================================
+   LA SEULE PORTE PAR OÙ NAÎT UNE BIBLIOTHÈQUE
+
+   Ce fichier affirmait déjà, en tête de « oidc.mjs », qu'« un seul endroit
+   sait créer un locataire ». C'ÉTAIT FAUX : il y en avait deux, et une seule
+   consultait « INSCRIPTION_OUVERTE ».
+
+   Constaté en production le 24/08/2026 : le drapeau valait 0 — donc le lien
+   magique refusait les inconnus — et une connexion Google a pourtant créé une
+   bibliothèque neuve. Le drapeau s'appelait « inscription ouverte » et ne
+   fermait que l'inscription PAR COURRIEL.
+
+   D'où cette fonction, et l'invariant qu'un contrôle vérifie désormais :
+   « public.creer_locataire » n'est appelé QU'ICI, dans tout docker/api. Une
+   porte future qui oublierait le drapeau devra passer par cette fonction, qui
+   le lui demandera.
+
+   LE DÉFAUT REFUSE. « inscriptionOuverte » vaut « false » quand l'appelant ne
+   dit rien : celui qui oublie de se prononcer obtient la fermeture, pas
+   l'ouverture. C'est l'inverse qui avait produit le défaut.
+
+   ELLE LÈVE, elle ne rend pas un témoin. Un appelant qui oublie de lire un
+   témoin rendu poursuit avec « undefined » et crée quand même ; une exception
+   ne s'ignore pas.
+   =========================================================================== */
+async function creerLocataire(client, courriel, { inscriptionOuverte = false } = {}) {
+  if (!inscriptionOuverte) {
+    const e = new Error("Les inscriptions sont fermées.");
+    e.inscriptionFermee = true;
+    e.statut = 403;
+    throw e;
+  }
+  const { rows } = await client.query(
+    "select compte, locataire from public.creer_locataire($1)", [courriel]);
+  return { compte: rows[0].compte, locataire: rows[0].locataire };
+}
+
+export async function consommerLien(client, jeton, options = {}) {
   if (!jeton || typeof jeton !== "string") return null;
 
   const { rows } = await client.query(
@@ -155,11 +192,14 @@ export async function consommerLien(client, jeton) {
        compte qui vient d'être créé — le résultat est le même, et il n'y a
        qu'une bibliothèque. */
     try {
-      const { rows: cree } = await client.query(
-        "select compte, locataire from public.creer_locataire($1)", [rows[0].courriel]);
-      compteId = cree[0].compte;
+      const cree = await creerLocataire(client, rows[0].courriel, options);
+      compteId = cree.compte;
       nouveau = true;
     } catch (e) {
+      /* « inscriptionFermee » n'a pas de code SQL : elle traverse ce
+         rattrapage et remonte. Un lien émis pendant que les inscriptions
+         étaient ouvertes, ouvert après leur fermeture, échoue — c'est ce que
+         « fermé » doit vouloir dire. */
       if (e.code !== "23505") throw e;
       const { rows: deja } = await client.query(
         "select id from comptes where courriel = $1", [rows[0].courriel]);
@@ -207,7 +247,8 @@ export async function consommerLien(client, jeton) {
    l'appelant formuler le message. Le refus est une décision de produit ; le
    rattachement est une règle de données.
    =========================================================================== */
-export async function connexionParOidc(client, { sub, courriel: brut, verifie }) {
+export async function connexionParOidc(client, { sub, courriel: brut, verifie },
+                                       options = {}) {
   const courriel = normaliserCourriel(brut);
   if (!sub) { const e = new Error("Identité Google incomplète."); e.statut = 400; throw e; }
 
@@ -250,12 +291,14 @@ export async function connexionParOidc(client, { sub, courriel: brut, verifie })
     const e = new Error("Adresse de courriel invalide."); e.statut = 400; throw e;
   }
 
-  const { rows: cree } = await client.query(
-    "select compte, locataire from public.creer_locataire($1)", [courriel]);
+  /* LE DRAPEAU EST CONSULTÉ ICI AUSSI — c'est tout l'objet du correctif du
+     24/08. Les deux cas précédents ne le consultent pas, et c'est voulu : se
+     reconnecter à une bibliothèque qui existe déjà n'est pas s'inscrire. */
+  const cree = await creerLocataire(client, courriel, options);
   await client.query("update comptes set oidc_sub = $1 where id = $2",
-    [sub, cree[0].compte]);
+    [sub, cree.compte]);
 
-  return { compte_id: cree[0].compte, tenant_id: cree[0].locataire,
+  return { compte_id: cree.compte, tenant_id: cree.locataire,
            courriel, nouveau: true };
 }
 

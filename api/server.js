@@ -2143,7 +2143,18 @@ const serveur = createServer(async (req, rep) => {
     /* --- CONNEXION PAR LIEN — USAGE ------------------------------------ */
     if (chemin === "/api/connexion-lien" && req.method === "POST") {
       const { jeton } = await lireCorps(req);
-      const compte = await avecVisiteur(bd, (c) => consommerLien(c, jeton));
+
+      let compte;
+      try {
+        compte = await avecVisiteur(bd, (c) =>
+          consommerLien(c, jeton, { inscriptionOuverte: INSCRIPTION_OUVERTE }));
+      } catch (e) {
+        /* Un lien émis pendant que les inscriptions étaient ouvertes, ouvert
+           après leur fermeture. Rare, mais il faut le dire vrai : un 500
+           laisserait croire à une panne. */
+        if (!e.inscriptionFermee) throw e;
+        return json(rep, { error: "Les inscriptions sont fermées pour le moment." }, 403);
+      }
 
       if (!compte) {
         /* Un seul message pour trois cas — jeton inconnu, déjà utilisé,
@@ -2248,7 +2259,19 @@ const serveur = createServer(async (req, rep) => {
         return fini("refuse");
       }
 
-      const issue = await avecVisiteur(bd, (c) => connexionParOidc(c, identite));
+      /* LE DRAPEAU PASSE PAR ICI AUSSI — corrigé le 24/08/2026. Il ne le
+         faisait pas, et Google créait donc des bibliothèques pendant que le
+         lien magique refusait les inconnus. Constaté en production, pas en
+         relecture : c'est un compte réellement créé qui l'a montré. */
+      let issue;
+      try {
+        issue = await avecVisiteur(bd, (c) =>
+          connexionParOidc(c, identite, { inscriptionOuverte: INSCRIPTION_OUVERTE }));
+      } catch (e) {
+        if (!e.inscriptionFermee) throw e;
+        console.warn("OIDC : inscription refusée, les inscriptions sont fermées");
+        return fini("fermee");
+      }
 
       /* L'ADRESSE NON VÉRIFIÉE EST REFUSÉE FRANCHEMENT — décidé le 22/08.
          Un repli silencieux sur le lien magique ferait croire à une panne, et
@@ -2530,6 +2553,54 @@ const serveur = createServer(async (req, rep) => {
        « ok ». L'écran affiche donc toujours ce que la base applique, et non
        ce qu'il a demandé — la différence entre les deux est précisément ce
        qu'on veut voir quand un réglage ne prend pas. */
+    /* =====================================================================
+       LA PORTE DE SORTIE — ARTICLE 17
+
+       Il n'existait aucune sortie avant le 24/08/2026 : la seule façon de
+       partir était de m'écrire, et de me faire confiance. Ce n'est pas un
+       droit, c'est une faveur.
+
+       LA CONFIRMATION EST L'ADRESSE RECOPIÉE, pas une case à cocher. Une
+       case se coche par réflexe ; recopier son adresse oblige à savoir ce
+       qu'on fait. C'est aussi ce qui distingue un geste voulu d'un clic
+       provoqué depuis ailleurs — le cookie est en « SameSite=Strict », mais
+       on ne s'appuie pas sur un seul rempart.
+
+       LA FONCTION EN BASE NE PREND AUCUN PARAMÈTRE : elle lit le locataire
+       dans « app.tenant_id », que « dans() » vient de poser depuis la
+       session signée. Aucune valeur calculée ici ne peut désigner la
+       bibliothèque de quelqu'un d'autre.
+       ===================================================================== */
+    if (chemin === "/api/compte" && req.method === "DELETE") {
+      const { confirmation } = await lireCorps(req);
+
+      const bilan = await dans(async (c) => {
+        const { rows } = await c.query("select courriel from comptes limit 1");
+        const attendue = rows[0]?.courriel ?? null;
+
+        /* Sans adresse au dossier — cas théorique — on refuse plutôt que de
+           laisser passer une confirmation vide qui vaudrait accord. */
+        if (!attendue
+            || normaliserCourriel(confirmation) !== normaliserCourriel(attendue)) {
+          refuser("Pour supprimer, recopiez exactement l'adresse de votre compte.", 400);
+        }
+
+        const { rows: [t] } =
+          await c.query("select * from public.supprimer_locataire()");
+        console.warn(`suppression de compte : ${t.ouvrages_effaces} ouvrage(s)`);
+        return { ouvrages: Number(t.ouvrages_effaces),
+                 comptes: Number(t.comptes_effaces) };
+      });
+
+      /* La session ne survit pas à la bibliothèque qu'elle désignait : sans
+         cela, l'onglet resté ouvert continuerait d'interroger un locataire
+         disparu, et l'écran parlerait d'erreurs plutôt que d'un départ. */
+      return json(rep, { supprime: true, ...bilan }, 200, {
+        "Set-Cookie": COOKIES_ACCEPTES.map(n =>
+          `${n}=; HttpOnly;${COOKIE_SECURE} SameSite=Strict; Path=/; Max-Age=0`),
+      });
+    }
+
     if (chemin === "/api/reglages" && req.method === "GET") {
       return json(rep, await dans((c) => lireReglages(c)));
     }

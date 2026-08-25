@@ -194,13 +194,54 @@
       <p class="etat" id="etatLangue"></p>
     </section>
 
-    <section style="border-bottom:none">
+    <section>
       <h2>Appels au modèle ce mois-ci</h2>
       <p class="chiffre" id="quotaChiffre"></p>
       <div class="jauge" id="quotaJauge"><div></div></div>
       <p class="aide" id="quotaTexte"></p>
     </section>
 
+    <!-- ================================================================
+         LA PORTE DE SORTIE
+
+         Elle est EN BAS, et volontairement sans raccourci : on ne tombe
+         pas dessus. Mais elle existe, elle est à vous, et elle ne
+         demande de permission à personne.
+
+         Pas de case à cocher : on coche par réflexe. Recopier son adresse
+         oblige à savoir ce qu'on fait, et c'est la seule friction qui
+         reste après la confirmation.
+         ================================================================ -->
+    <section style="border-bottom:none">
+      <h2>Supprimer mon compte</h2>
+      <p class="aide">
+        La suppression est <strong>immédiate et définitive</strong> : votre
+        bibliothèque, vos notes, vos résumés, votre adresse. Il n'y a ni
+        corbeille, ni délai, ni restauration possible.
+        <a href="/confidentialite.html">Ce qui part et ce qui reste</a>.
+      </p>
+      <p class="aide">
+        <strong>Exportez d'abord</strong> — le bouton « Exporter en JSON »,
+        en bas de votre bibliothèque, vous rend tout ce que Lisia détient.
+      </p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+        <input type="email" id="confirmationSuppression" autocomplete="off"
+               placeholder="Recopiez votre adresse pour confirmer"
+               aria-label="Recopiez votre adresse de courriel pour confirmer la suppression"
+               style="font:inherit;font-size:14px;padding:7px 9px;background:var(--paper-2);border:1px solid var(--rule);color:var(--ink);border-radius:2px;min-width:min(320px,100%)">
+        <button id="supprimerCompte"
+                style="font-size:14px;padding:8px 14px;background:var(--roman);color:#fff;border:1px solid var(--roman);border-radius:2px">
+          Supprimer définitivement
+        </button>
+      </div>
+      <p class="etat" id="etatSuppression"></p>
+    </section>
+
+  </div>
+
+  <div style="margin-top:38px;padding-top:16px;border-top:1px solid var(--rule);font-size:14px;color:var(--ink-soft)">
+    <a href="/mentions-legales.html" style="margin-right:14px">Mentions légales</a>
+    <a href="/confidentialite.html">Confidentialité</a>
   </div>
 </div>
 
@@ -455,6 +496,50 @@ $("chercheLivre").addEventListener("change", () => {
     zone.innerHTML = "";
     $("chercheLivre").value = "";
   }));
+});
+
+/* -------------------------------------------------------- La sortie
+
+   DEUX GESTES, PAS UN. L'adresse recopiée, puis une confirmation du
+   navigateur. Ce n'est pas de la défiance envers la personne : c'est qu'un
+   clic mal placé sur un téléphone effacerait une bibliothèque de plusieurs
+   centaines d'ouvrages, sans retour possible.
+
+   LA PAGE NE VÉRIFIE PAS L'ADRESSE, elle l'envoie. Comparer ici demanderait
+   de connaître l'adresse du compte côté navigateur — donc de l'exposer — et
+   surtout créerait une DEUXIÈME version du contrôle, à côté de celle du
+   serveur. C'est toujours la version affichée qui rassure pendant que
+   l'autre décide. Le serveur seul compare. */
+$("supprimerCompte").addEventListener("click", async () => {
+  const saisie = $("confirmationSuppression").value.trim();
+  if (!saisie) {
+    return dire("etatSuppression", "Recopiez votre adresse pour confirmer.", true);
+  }
+  if (!confirm("Supprimer définitivement votre bibliothèque ?\n\n"
+             + "Cette action est immédiate et irréversible.")) return;
+
+  const bouton = $("supprimerCompte");
+  bouton.disabled = true;
+  try {
+    const bilan = await api("/compte", "DELETE", { confirmation: saisie });
+    /* On ne renvoie pas vers l'application : la session vient d'être
+       effacée, et « ma-bibliotheque » afficherait un écran de connexion,
+       ce qui ressemble à une panne plutôt qu'à un départ réussi. */
+    document.body.innerHTML = "";
+    const p = document.createElement("div");
+    p.style.cssText = "max-width:640px;margin:14vh auto;padding:0 22px;"
+                    + "font-family:var(--sans);line-height:1.6";
+    p.innerHTML = "<h1 style=\"font-family:var(--serif);font-weight:400\">"
+                + "C'est fait.</h1>";
+    const t = document.createElement("p");
+    t.textContent = `${bilan.ouvrages} ouvrage(s) et votre compte ont été `
+                  + "effacés. Il ne reste rien de vous ici. Merci d'être passé.";
+    p.append(t);
+    document.body.append(p);
+  } catch (e) {
+    bouton.disabled = false;
+    dire("etatSuppression", e.message, true);
+  }
 });
 
 /* ------------------------------------------------------------ Démarrage */

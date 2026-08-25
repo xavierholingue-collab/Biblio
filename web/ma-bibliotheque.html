@@ -604,6 +604,14 @@
     <input type="file" id="importFile" accept=".json" hidden>
     <span class="sauvegarde" id="sauvegarde"></span>
   </div>
+
+  <!-- L'export est juste au-dessus, et ce n'est pas un hasard : la
+       portabilité de l'article 20 est déjà là, gratuite, à côté du lien qui
+       explique ce qu'on fait de vos données. -->
+  <div style="margin-top:26px;padding-top:14px;border-top:1px solid var(--rule);font-size:14px;color:var(--ink-soft)">
+    <a href="/mentions-legales.html" style="margin-right:14px">Mentions légales</a>
+    <a href="/confidentialite.html">Confidentialité</a>
+  </div>
 </div>
 
 
@@ -842,6 +850,7 @@ async function demarrer() {
       "expire":       ["La connexion a pris trop de temps. Recommencez.", true],
       "refuse":       ["Google n'a pas confirmé votre identité. Réessayez, ou passez par le lien par courriel.", true],
       "non-verifiee": ["Google n'a pas vérifié cette adresse. Utilisez le lien par courriel : il la vérifiera.", true],
+      "fermee":       ["Les inscriptions ne sont pas ouvertes pour le moment. Si vous avez déjà un compte, connectez-vous avec l'adresse qui lui est rattachée.", true],
       "indisponible": ["La connexion par Google n'est pas disponible ici.", true],
     };
     const retour = new URLSearchParams(location.search).get("oidc");

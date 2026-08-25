@@ -191,6 +191,7 @@ jobs:
           lancer lien  test-lien-magique.mjs
           lancer usag  test-usage-ia.mjs
           lancer bibl  test-bibliographie.mjs
+          lancer supp  test-suppression.mjs
 
       # ------------------------------------------------------------------
       # AUTHENTIFICATION PAR LIEN MAGIQUE
@@ -230,6 +231,20 @@ jobs:
       # qu'un attaquant fabriquerait — ce qu'on ne peut pas demander à Google.
       - name: Google en OIDC, chaque verification retiree une a une
         run: node tests/test-oidc.mjs
+
+      # Une seule porte par ou nait une bibliotheque. Le 24/08/2026,
+      # INSCRIPTION_OUVERTE ne gouvernait que le lien magique : Google creait
+      # des comptes avec le drapeau a 0. Aucune suite ne pouvait le voir,
+      # toutes lancaient leurs serveurs avec le drapeau a 1.
+      - name: Une seule porte, et elle demande le drapeau
+        run: node tests/test-portes-inscription.mjs
+
+      # Les pages legales disent-elles ce que le code fait ? Une politique
+      # perimee est PIRE que pas de politique : elle promet. Ce controle
+      # refuse la livraison si un tiers appele par le code n'y est pas
+      # declare — il a attrape Resend le jour meme ou il a ete ecrit.
+      - name: Les pages legales disent ce que le code fait
+        run: node tests/test-pages-legales.mjs
 
       - name: Authentification par lien magique
         run: |

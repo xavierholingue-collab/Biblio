@@ -1,0 +1,194 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Confidentialité — Lisia</title>
+
+<!-- Aucun script, aucune mesure d'audience sur cette page : quelqu'un qui
+     vient lire ce qu'on fait de ses données ne doit pas être mesuré en le
+     lisant. -->
+
+<style>
+  :root {
+    --paper: #E9EBE6; --paper-2: #F2F3EF; --ink: #1A1F1C; --ink-soft: #5E665F;
+    --rule: #C9CEC5; --acad: #2F5D62; --roman: #8A3B4A;
+    --serif: Georgia, "Iowan Old Style", "Times New Roman", serif;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink);
+         font-family: var(--sans); font-size: 16px; line-height: 1.6; }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 0 22px 90px; }
+  header { padding: 48px 0 22px; border-bottom: 2px solid var(--ink); }
+  h1 { font-family: var(--serif); font-weight: 400;
+       font-size: clamp(28px, 5vw, 38px); letter-spacing: -0.02em; margin: 0; }
+  h2 { font-family: var(--serif); font-weight: 400; font-size: 21px;
+       margin: 34px 0 8px; }
+  p, li { max-width: 66ch; }
+  table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 15px; }
+  th, td { text-align: left; vertical-align: top; padding: 8px 10px;
+           border-bottom: 1px solid var(--rule); }
+  th { font-weight: 600; }
+  a { color: var(--acad); }
+  .note { background: var(--paper-2); border-left: 3px solid var(--acad);
+          padding: 14px 18px; margin: 22px 0; font-size: 15px; }
+  .fort { border-left-color: var(--roman); }
+  footer { margin-top: 46px; padding-top: 18px; border-top: 1px solid var(--rule);
+           font-size: 14.5px; color: var(--ink-soft); }
+  footer a { margin-right: 14px; }
+</style>
+
+<div class="wrap">
+<header><h1>Ce que Lisia sait de vous</h1></header>
+
+<p>Cette page dit exactement quelles données sont conservées, pourquoi, où
+elles vont, et comment les faire disparaître. Elle est écrite pour être lue,
+pas pour être acceptée.</p>
+
+<h2>Qui est responsable</h2>
+<p><strong>Xavier Holingue</strong>, éditeur du service à titre non
+professionnel — voir les <a href="/mentions-legales.html">mentions
+légales</a>. Contact pour toute question relative à vos données :
+<a href="mailto:contact@y-factor.fr">contact@y-factor.fr</a>.</p>
+
+<h2>Ce qui est conservé</h2>
+<table>
+  <tr><th>Donnée</th><th>Pourquoi</th><th>Base légale</th></tr>
+  <tr>
+    <td>Votre adresse de courriel</td>
+    <td>C'est votre identifiant. Elle sert à vous envoyer le lien de connexion,
+        et rien d'autre. Aucune lettre d'information, aucune relance.</td>
+    <td>Exécution du service</td>
+  </tr>
+  <tr>
+    <td>Un identifiant Google, si vous choisissez ce bouton</td>
+    <td>Un numéro stable qui vous rattache à votre bibliothèque. Lisia ne
+        reçoit ni votre mot de passe, ni l'accès à votre compte Google.</td>
+    <td>Exécution du service</td>
+  </tr>
+  <tr>
+    <td>Votre bibliothèque</td>
+    <td>Les ouvrages et articles que vous ajoutez, leur statut de lecture, vos
+        notes, le rayon choisi, la distinction perso / pro, les résumés
+        engendrés.</td>
+    <td>Exécution du service</td>
+  </tr>
+  <tr>
+    <td>Le journal des appels au modèle</td>
+    <td>Date, route appelée, modèle, volume et coût. Il sert à faire respecter
+        le plafond mensuel de dépense — sans lui, un compte pourrait consommer
+        sans limite. Il ne contient pas le texte de vos requêtes.</td>
+    <td>Intérêt légitime : maîtrise des coûts</td>
+  </tr>
+</table>
+
+<p><strong>Ce qui n'est pas collecté :</strong> aucun mot de passe (Lisia n'en
+utilise pas), aucune donnée bancaire (le service est gratuit), aucune donnée
+publicitaire, aucun profilage, aucune revente. Vos adresses IP apparaissent
+dans les journaux techniques du serveur, conservés au plus quelques
+semaines, et ne sont rapprochées d'aucun compte.</p>
+
+<h2>Les cookies</h2>
+<p>Deux, tous deux strictement nécessaires, donc sans bandeau de consentement
+à afficher :</p>
+<ul>
+  <li>un cookie de <strong>session</strong>, qui vous garde connecté ;</li>
+  <li>un cookie de <strong>transit</strong> de dix minutes, posé uniquement
+      pendant l'aller-retour vers Google, et effacé au retour.</li>
+</ul>
+<p>La mesure d'audience utilise <strong>Umami</strong>, installé sur le même
+serveur que Lisia. Il ne pose aucun cookie, ne suit personne d'un site à
+l'autre, et n'envoie rien à un tiers.</p>
+
+<h2>Où vont vos données</h2>
+<table>
+  <tr><th>Destinataire</th><th>Ce qu'il reçoit</th><th>Où</th></tr>
+  <tr>
+    <td>Groupe LWS <span style="color:var(--ink-soft)">(hébergement)</span></td>
+    <td>Tout, puisque le serveur est chez lui — la base est chiffrée dans les
+        sauvegardes, pas en fonctionnement.</td>
+    <td>France</td>
+  </tr>
+  <tr>
+    <td>Brevo — Sendinblue SAS <span style="color:var(--ink-soft)">(courriels)</span></td>
+    <td>Votre adresse et le lien de connexion, au moment de l'envoi.</td>
+    <td>France</td>
+  </tr>
+  <tr>
+    <td>Resend <span style="color:var(--ink-soft)">(courriels — non utilisé)</span></td>
+    <td>Un second prestataire d'envoi, présent dans le code mais
+        <strong>inactif</strong> : aujourd'hui, c'est Brevo qui envoie. Il est
+        nommé ici parce qu'une bascule ne doit pas se faire sans que cette
+        page le dise — un contrôle automatique refuse la livraison si un
+        prestataire appelé par le code n'est pas déclaré ici.</td>
+    <td>États-Unis, si activé</td>
+  </tr>
+  <tr>
+    <td>Anthropic PBC <span style="color:var(--ink-soft)">(résumés)</span></td>
+    <td>Le titre et l'auteur de l'ouvrage à résumer. <strong>Jamais votre
+        adresse, jamais votre identité, jamais votre bibliothèque
+        entière.</strong></td>
+    <td>États-Unis</td>
+  </tr>
+  <tr>
+    <td>Google <span style="color:var(--ink-soft)">(connexion, si vous la choisissez)</span></td>
+    <td>Le fait que vous vous connectiez à Lisia. Rien de votre bibliothèque.</td>
+    <td>États-Unis / Irlande</td>
+  </tr>
+</table>
+
+<p>Les deux derniers impliquent un transfert hors de l'Union européenne,
+encadré par les clauses contractuelles types de la Commission européenne.
+Google n'intervient que si vous utilisez le bouton « Continuer avec
+Google » ; le lien par courriel ne le sollicite jamais.</p>
+
+<p>Les catalogues consultés pour identifier un livre — Open Library, Google
+Books, la BnF, Crossref, doi.org — sont interrogés <strong>par le
+serveur</strong>, avec un ISBN ou un DOI. Votre navigateur ne les contacte
+pas, et ils n'apprennent rien de vous.</p>
+
+<h2>Combien de temps</h2>
+<p>Tant que votre compte existe. Les liens de connexion expirent en quelques
+minutes et sont détruits ensuite. Les sauvegardes chiffrées sont conservées
+neuf jours glissants, ce qui signifie qu'un compte supprimé peut y subsister
+au plus neuf jours avant de disparaître définitivement.</p>
+
+<h2>Vos droits</h2>
+<ul>
+  <li><strong>Accès et portabilité</strong> — l'export CSV ou JSON, en bas de
+      votre bibliothèque, vous rend l'intégralité de son contenu, sans
+      demande à formuler.</li>
+  <li><strong>Rectification</strong> — chaque fiche est modifiable
+      directement.</li>
+  <li><strong>Effacement</strong> — voir ci-dessous.</li>
+  <li><strong>Opposition et limitation</strong> — par courriel au contact
+      ci-dessus.</li>
+</ul>
+<p>Vous pouvez introduire une réclamation auprès de la
+<a href="https://www.cnil.fr/fr/plaintes">CNIL</a>.</p>
+
+<h2>Supprimer votre compte</h2>
+<div class="note fort">
+  <p>Depuis <strong>Réglages → Supprimer mon compte</strong>. La suppression
+  est <strong>immédiate et définitive</strong> : aucune corbeille, aucun
+  délai de grâce, aucune restauration possible. Pensez à exporter avant.</p>
+</div>
+<p>Disparaissent : votre compte, votre adresse, votre identifiant Google, vos
+possessions, statuts, notes, résumés, articles, réglages, et le journal de
+vos appels au modèle.</p>
+<p>Ne disparaissent pas : les <strong>notices bibliographiques du catalogue
+commun</strong> — titre, auteur, éditeur, ISBN. Elles sont partagées avec les
+autres lecteurs qui possèdent les mêmes ouvrages, proviennent de catalogues
+publics, et ne désignent personne. Les effacer viderait les étagères
+d'autrui. Ce qui vous reliait à elles part avec le reste.</p>
+<p>Il est dit ici parce qu'une promesse d'effacement qui tait une exception
+est une promesse fausse.</p>
+
+<h2>Si cette page change</h2>
+<p>La date ci-dessous fait foi. Une modification qui élargirait l'usage de
+vos données vous serait annoncée par courriel avant d'entrer en vigueur.</p>
+
+<footer>
+  <a href="/">Accueil</a>
+  <a href="/mentions-legales.html">Mentions légales</a>
+  <span>Dernière mise à jour : 24 août 2026</span>
+</footer>
+</div>

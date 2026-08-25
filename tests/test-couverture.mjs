@@ -101,6 +101,31 @@ if (fs.existsSync(path.join(TESTS, "parcours.spec.mjs"))) {
     "aucune référence à playwright.config.mjs dans le workflow");
 }
 
+/* ---------------------------------------------------------------------------
+   LE REGISTRE SE SOUMET À SA PROPRE RÈGLE
+
+   METHODE.md nomme les contrôles nés de la règle 4 — « une promesse sans
+   contrôle n'est qu'une promesse ». Il cite donc des fichiers, et un fichier
+   cité peut être renommé.
+
+   Un registre de fautes qui pointe vers des contrôles disparus serait
+   exactement la dérive qu'il dénonce : une affirmation sur l'ensemble du
+   dépôt, plus vérifiée par rien, et qui continue de rassurer. */
+const METHODE = [".", "..", path.join("..", "..")]
+  .map(c => path.join(c, "METHODE.md"))
+  .find(p => fs.existsSync(p));
+
+if (METHODE) {
+  const cité = [...fs.readFileSync(METHODE, "utf8")
+    .matchAll(/\btests\/(test-[\w.-]+\.m?js)\b/g)].map(m => m[1]);
+  const perdus = [...new Set(cité)].filter(n => !fichiers.includes(n));
+  verifier("METHODE.md ne cite que des contrôles qui existent",
+    cité.length > 0 && perdus.length === 0,
+    cité.length === 0
+      ? "le registre ne cite plus aucun contrôle"
+      : `disparu(s) : ${perdus.join(", ")} — le registre promet ce qui n'existe plus`);
+}
+
 for (const l of ok) console.log("  ok   " + l);
 for (const l of ko) console.log("  KO   " + l);
 console.log(`\n  ${ok.length + ko.length} vérifications, ${ko.length ? ko.length + " échec(s)" : "aucune erreur"}.`);

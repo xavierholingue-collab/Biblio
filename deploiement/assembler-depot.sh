@@ -110,6 +110,11 @@ ok "deploiement"
 cp -f "${SOURCE}/docker/README-docker.md" "${DEPOT}/docs/" 2>/dev/null
 cp -f "${SOURCE}/files/README-bibliotheque.md" "${DEPOT}/docs/" 2>/dev/null
 
+# METHODE.md voyage avec le code pour la meme raison que le reste de la
+# documentation : un registre de fautes rangé ailleurs ne serait relu par
+# personne. Celui-ci se lit en ouvrant le depot.
+cp -f "${SOURCE}/docker/METHODE.md" "${DEPOT}/docs/" 2>/dev/null && ok "METHODE.md"
+
 # La documentation d'architecture voyage AVEC le code, et c'est le point.
 #
 # Un document qui vit ailleurs devient faux sans que personne ne le voie : il
