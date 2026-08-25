@@ -111,9 +111,20 @@ if (fs.existsSync(path.join(TESTS, "parcours.spec.mjs"))) {
    Un registre de fautes qui pointe vers des contrôles disparus serait
    exactement la dérive qu'il dénonce : une affirmation sur l'ensemble du
    dépôt, plus vérifiée par rien, et qui continue de rassurer. */
+/* DEUX DISPOSITIONS, ET J'AVAIS OUBLIÉ LA SECONDE. Dans la source, le
+   registre est à côté du code ; dans le dépôt assemblé, l'assembleur le
+   range sous « docs/ ». Ne chercher qu'à la racine faisait SAUTER le
+   contrôle en silence — vert par absence, ce qui est précisément ce que
+   METHODE.md reproche aux autres. Trouvé en reproduisant la disposition du
+   dépôt, le 24/08 au soir. */
 const METHODE = [".", "..", path.join("..", "..")]
-  .map(c => path.join(c, "METHODE.md"))
+  .flatMap(c => [path.join(c, "METHODE.md"), path.join(c, "docs", "METHODE.md")])
   .find(p => fs.existsSync(p));
+
+/* Et s'il reste introuvable, on le DIT : un registre qu'aucun contrôle ne
+   voit n'est plus adossé à rien. */
+verifier("METHODE.md est trouvé là où il est rangé",
+  METHODE !== undefined, "registre introuvable dans cette disposition");
 
 if (METHODE) {
   const cité = [...fs.readFileSync(METHODE, "utf8")

@@ -165,17 +165,31 @@ jobs:
         run: |
           psql -h localhost -U biblio -d biblio -v ON_ERROR_STOP=1 -c \
             "create role biblio_app login password 'controle' nosuperuser nobypassrls;"
-          for base in rls lang cat clois ctx rejeu regl durc lien usag bibl; do
-            psql -h localhost -U biblio -d biblio -v ON_ERROR_STOP=1 -c \
-              "create database biblio_${base} owner biblio_app;"
-          done
+
+          # LA LISTE DES BASES A DISPARU — 25/08/2026.
+          #
+          # Elle etait ecrite ici, a la main, et il fallait penser a l'allonger
+          # en meme temps qu'on ajoutait un « lancer ». C'etait la SEPTIEME
+          # liste manuelle de ce depot, et elle a coute la livraison #64 :
+          # test-suppression.mjs ajoute la veille, base « biblio_supp »
+          # oubliee, chaine rouge apres cinq minutes de controles verts.
+          #
+          # Chaque « lancer » cree desormais SA base. Il n'y a plus de liste a
+          # tenir a jour, donc plus rien a oublier. Une structure qui rend la
+          # faute impossible vaut mieux qu'un controle qui la signale.
 
       - name: Cloisonnement, visibilite, catalogue, contexte, reglages, durcissement
         env: { PGPASSWORD: controle }
         run: |
           npm install pg fast-xml-parser --no-audit --no-fund --silent
+          # Une base par fichier : chacun cree ses propres locataires, et deux
+          # jeux de donnees dans la meme base se marcheraient dessus. Elle est
+          # creee ICI, au moment de s'en servir — c'est ce qui supprime la
+          # liste qu'il fallait tenir a jour ailleurs.
           lancer () {
             echo "== $2"
+            psql -h localhost -U biblio -d biblio -v ON_ERROR_STOP=1 -q -c \
+              "create database biblio_$1 owner biblio_app;"
             PGURL=postgres://biblio_app:controle@localhost:5432/biblio_$1 \
             PGURL_OEIL=postgres://biblio:controle@localhost:5432/biblio_$1 \
               node tests/$2

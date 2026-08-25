@@ -80,6 +80,34 @@ catalogue PostgreSQL ou de la chaîne de livraison**, jamais d'une liste
 septième aurait été celle des tables à effacer, et elle aurait laissé
 derrière elle exactement les données qu'on promettait de supprimer.
 
+### La septième liste, trouvée quatre heures après avoir écrit ce corollaire
+
+**25/08/2026, livraison #64.** `test-suppression.mjs` est ajouté à la chaîne
+par une ligne `lancer supp test-suppression.mjs`. Ce que cette ligne ne dit
+pas, c'est qu'une **autre** liste, trente lignes plus haut, énumérait les
+bases à créer :
+
+```yaml
+for base in rls lang cat clois ctx rejeu regl durc lien usag bibl; do
+```
+
+Cinq minutes de contrôles verts — 28, 19, 13, 21, 16, 22, 42, 34, 81, 53,
+81 vérifications — puis `database "biblio_supp" does not exist`.
+
+Le corollaire ci-dessus avait été écrit le même jour, quelques heures plus
+tôt. Le connaître n'a pas suffi : une liste manuelle ne se signale pas, elle
+attend.
+
+**Ce qui a été fait, et pourquoi ce n'est pas un contrôle.** On aurait pu
+ajouter une vérification comparant les `lancer` aux `create database`. C'eût
+été un contrôle de plus pour surveiller une faute qu'on peut simplement
+rendre impossible : chaque `lancer` crée désormais **sa** base, au moment de
+s'en servir. Il n'y a plus de liste, donc plus rien à oublier.
+
+> **Une structure qui rend la faute impossible vaut mieux qu'un contrôle qui
+> la signale.** Le contrôle se lit après coup ; la structure se lit en
+> écrivant.
+
 ---
 
 ## 3. La question du déploiement
@@ -100,6 +128,29 @@ dans la position où il protège.
 **Corollaire.** Un réglage de sécurité doit être éprouvé dans ses **deux**
 positions. Un contrôle qui n'a jamais eu l'occasion de refuser n'a rien
 prouvé.
+
+### Le second volet, ajouté le 24/08 au soir
+
+La règle ci-dessus ne regardait que **vers l'extérieur** : l'inconnu, celui
+qui n'a pas de compte. Elle était incomplète, et c'est le déploiement du
+soir même qui l'a montré.
+
+À la première question, ce déploiement répondait « rien, et même moins » :
+la porte Google se refermait. Rassurant, et insuffisant — car il donnait par
+ailleurs à tout utilisateur **déjà connecté** le pouvoir d'effacer sa
+bibliothèque sans retour possible. Première action irréversible de
+l'application, et la première question ne la voyait pas.
+
+Deux questions, donc, et non une :
+
+> 1. *Qu'est-ce qu'un **inconnu** peut faire après, qu'il ne pouvait pas
+>    avant ?* — le risque d'intrusion.
+> 2. *Qu'est-ce qu'un utilisateur **légitime** peut faire après, qu'il ne
+>    pouvait pas avant ?* — le risque d'accident, et d'irréversibilité.
+
+La seconde change ce qu'on livre : une capacité destructrice demande une
+confirmation qui coûte un geste réfléchi — ici, recopier son adresse plutôt
+que cocher une case — et un export offert juste avant.
 
 ---
 
