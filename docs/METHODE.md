@@ -50,6 +50,46 @@ contredire.
   tout ce qui avait déjà été constaté doit s'afficher quand même. Voir
   `enChaine()` dans `tests/test-suppression.mjs`.
 
+### La mutation doit reproduire la CONDITION, pas seulement changer le code
+
+**25/08/2026, la porte de sortie.** Le bouton de suppression ne marchait
+pas en production. La route lisait l'adresse à confirmer par
+`select courriel from comptes limit 1` — sans clause `where`. « comptes »
+est la seule table métier sans cloisonnement, volontairement : se connecter
+exige de chercher une adresse à travers tous les comptes. La requête rendait
+donc l'adresse d'un compte quelconque.
+
+Trois fautes se sont recouvertes, et c'est ce qui rend le cas instructif.
+
+**Première : j'ai éprouvé la base, pas la route.** `test-suppression.mjs`
+appelle `supprimer_locataire()` directement. Il prouvait que PostgreSQL
+efface bien — ce qui était vrai — et rien du chemin HTTP. Je l'avais même
+dit à Xavier avant l'essai, sans en tirer la conséquence : écrire le
+contrôle manquant.
+
+**Deuxième : une assertion devinée a masqué une mutation survivante.**
+J'avais écrit « la réponse annonce 2 ouvrages ». Il y en avait 3. La
+vérification échouait donc *toujours*, mutation ou non — et son échec
+ressemblait à celui de la mutation. Le banc semblait mordre ; il mordait sur
+mon erreur. Les nombres attendus se **lisent en base**, ils ne se devinent
+pas.
+
+**Troisième, la plus subtile : la mutation ne reproduisait pas la
+condition.** Mon montage insérait le compte de Xavier en premier. `limit 1`
+rendait alors *sa* ligne, la bonne, et la mutation survivait au vert. Il a
+fallu insérer le voisin d'abord pour que `limit 1` se trompe — c'est-à-dire
+pour reproduire la production, où un compte datait du 14 août et l'autre du
+24.
+
+> Remettre le défaut dans le code ne suffit pas. Il faut aussi remettre les
+> **données** dans l'état qui le rend visible. Un défaut peut être présent et
+> muet.
+
+Une fois la condition juste, le contrôle a dit ce que je n'avais pas
+compris : avec `limit 1`, taper l'adresse d'un **inconnu** supprimait votre
+bibliothèque. La confirmation n'était pas seulement inopérante ; elle
+validait sur la donnée d'un tiers.
+
 ---
 
 ## 2. La question de l'unité

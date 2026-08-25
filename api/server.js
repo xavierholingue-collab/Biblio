@@ -2575,7 +2575,26 @@ const serveur = createServer(async (req, rep) => {
       const { confirmation } = await lireCorps(req);
 
       const bilan = await dans(async (c) => {
-        const { rows } = await c.query("select courriel from comptes limit 1");
+        /* « where tenant_id = … » N'EST PAS UNE PRÉCAUTION, C'EST LA SEULE
+           BORNE — corrigé le 25/08/2026, après un essai réel.
+
+           « comptes » est la seule table métier SANS politique de
+           cloisonnement, et c'est voulu : se connecter exige de chercher une
+           adresse à travers TOUS les comptes, avant de savoir de qui il
+           s'agit. La connexion cloisonnée ne restreint donc RIEN ici.
+
+           Écrite « select courriel from comptes limit 1 », la requête rendait
+           l'adresse d'un compte quelconque — en production, celui créé le
+           premier. La confirmation comparait la saisie à l'adresse d'un
+           AUTRE : impossible de supprimer son propre compte, et une
+           « confirmation » qui ne confirmait rien.
+
+           Toute lecture de « comptes » depuis une connexion de locataire doit
+           porter ce filtre. « test-http-cloisonnement.mjs » le vérifie
+           désormais avec deux locataires. */
+        const { rows } = await c.query(
+          `select courriel from comptes
+            where tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid`);
         const attendue = rows[0]?.courriel ?? null;
 
         /* Sans adresse au dossier — cas théorique — on refuse plutôt que de

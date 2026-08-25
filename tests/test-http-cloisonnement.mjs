@@ -252,6 +252,96 @@ verifier("supprimer SON PROPRE ouvrage fonctionne toujours",
   monEffacement.statut === 200 && restant.length === 0,
   `statut ${monEffacement.statut}, reste ${JSON.stringify(restant)}`);
 
+/* ==========================================================================
+   LA PORTE DE SORTIE, À TRAVERS HTTP — ET NON EN APPELANT LA BASE
+
+   CE CONTRÔLE MANQUAIT, ET SON ABSENCE A COÛTÉ UN DÉFAUT EN PRODUCTION.
+
+   « test-suppression.mjs » appelle « supprimer_locataire() » directement : il
+   prouve que la base efface bien, et rien d'autre. Le 25/08/2026, la route
+   HTTP lisait l'adresse à confirmer par « select courriel from comptes
+   limit 1 » — sans clause « where ».
+
+   « comptes » est la seule table métier SANS politique de cloisonnement, et
+   c'est voulu : se connecter exige de chercher une adresse à travers TOUS
+   les comptes. La connexion de locataire ne restreignait donc rien, et la
+   requête rendait l'adresse d'un compte quelconque. Résultat en production :
+   impossible de supprimer le sien, et une confirmation qui comparait la
+   saisie à l'adresse d'un inconnu.
+
+   Deux locataires sont indispensables ici. Avec un seul, « limit 1 » rend la
+   bonne ligne par accident, et le contrôle passe au vert en ne prouvant
+   rien.
+   ========================================================================== */
+
+await q("delete from comptes where tenant_id in ($1, $2)", [xavier.id, bob]);
+
+/* L'ORDRE D'INSERTION N'EST PAS INDIFFÉRENT, ET C'EST TOUT L'INTÉRÊT.
+
+   Une première rédaction insérait Xavier d'abord. « limit 1 » sans « order
+   by » rendait alors SA ligne — la bonne — et la mutation qui remettait le
+   défaut a survécu : le contrôle passait au vert en ne prouvant rien.
+
+   Bob est donc inséré EN PREMIER. Sur une table neuve, le parcours suit
+   l'ordre d'insertion : « limit 1 » rend l'adresse de Bob pendant que la
+   session est celle de Xavier, ce qui est exactement la situation de
+   production — un compte créé le 14 août, un autre le 24. */
+await q("insert into comptes (tenant_id, courriel) values ($1, 'bob@controle.fr')",
+  [bob]);
+await q("insert into comptes (tenant_id, courriel) values ($1, 'xavier@controle.fr')",
+  [xavier.id]);
+
+/* Ce que la suppression doit annoncer, LU en base plutôt que deviné. Une
+   première rédaction affirmait « 2 » ; il y en avait 3, et l'assertion
+   fausse est ce qui a masqué la survie de la mutation. */
+const attenduOuvrages = Number((await q(
+  "select count(*) as n from possessions where tenant_id = $1", [xavier.id]))[0].n);
+
+/* 1. L'ADRESSE DU VOISIN NE CONFIRME RIEN. C'est la vérification qui
+      attrape le défaut : avec « limit 1 », c'est précisément celle-là qui
+      était acceptée. */
+const avecVoisine = await appel("/api/compte",
+  { cookie, methode: "DELETE", corps: { confirmation: "bob@controle.fr" } });
+verifier("l'adresse d'un AUTRE compte ne confirme pas la suppression",
+  avecVoisine.statut === 400,
+  `statut ${avecVoisine.statut} — ${JSON.stringify(avecVoisine.corps)}`);
+
+const [intacte] = await q("select id from tenants where id = $1", [xavier.id]);
+verifier("… et rien n'a été effacé au passage",
+  intacte !== undefined, "la bibliothèque a disparu sur une confirmation étrangère");
+
+/* 2. UNE SAISIE VIDE NON PLUS — sinon la confirmation serait décorative. */
+verifier("une confirmation vide est refusée",
+  (await appel("/api/compte",
+    { cookie, methode: "DELETE", corps: { confirmation: "" } })).statut === 400);
+
+/* 3. SA PROPRE ADRESSE SUPPRIME — et la casse ne doit pas y faire obstacle :
+      quelqu'un qui recopie depuis son courrielleur peut hériter d'une
+      majuscule. */
+const sienne = await appel("/api/compte",
+  { cookie, methode: "DELETE", corps: { confirmation: "Xavier@Controle.FR" } });
+verifier("sa propre adresse supprime, quelle qu'en soit la casse",
+  sienne.statut === 200 && sienne.corps?.supprime === true,
+  `statut ${sienne.statut} — ${JSON.stringify(sienne.corps)}`);
+
+verifier("… et la réponse dit combien d'ouvrages sont partis",
+  sienne.corps?.ouvrages === attenduOuvrages,
+  `${JSON.stringify(sienne.corps)} — attendu ${attenduOuvrages}`);
+
+/* 4. LE VOISIN N'A RIEN PERDU. */
+const restants = await q("select identifiant from tenants order by identifiant");
+verifier("… tandis que le locataire voisin est toujours là",
+  restants.length === 1 && restants[0].identifiant === "bob",
+  JSON.stringify(restants));
+
+const bobIntact = await q("select id from possessions where tenant_id = $1", [bob]);
+verifier("… avec ses deux ouvrages",
+  bobIntact.length === 2, `${bobIntact.length} ouvrage(s)`);
+
+/* 5. LA SESSION NE SURVIT PAS À LA BIBLIOTHÈQUE QU'ELLE DÉSIGNAIT. */
+verifier("le cookie de session est effacé par la réponse",
+  /=;|Max-Age=0/.test(sienne.cookie ?? ""), sienne.cookie);
+
 /* --------------------------------------------------------------- Bilan */
 
 await fermer();
