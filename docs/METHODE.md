@@ -186,6 +186,43 @@ sait parler à Resend, la politique de confidentialité ne nommait que Brevo.
 
 ---
 
+## 5. Quand deux contrôles se contredisent, remonter à leur raison d'être
+
+**Le geste.** Ne jamais désarmer le contrôle qui gêne. Relire *pourquoi*
+chacun existe : le conflit se dénoue presque toujours là, et l'un des deux
+se révèle hors de son domaine.
+
+**Ce qu'il a coûté — 25/08/2026, livraison #65.** Deux contrôles écrits le
+même jour, à quelques heures d'écart :
+
+- `test-environnement.mjs` exigeait le bandeau de recette sur **chaque**
+  page — parce qu'« on efface un jour des données en croyant être ailleurs ».
+- `test-pages-legales.mjs` exigeait que les pages légales ne portent
+  **aucun** script — parce qu'on ne mesure pas quelqu'un pendant qu'il lit
+  ce qu'on fait de ses données.
+
+Les pages légales sont arrivées, et les deux avaient raison localement.
+
+La solution facile aurait été de nommer les deux fichiers comme exceptions.
+La lecture des raisons donne mieux : le bandeau protège d'une **action**
+faite sur le mauvais environnement, et une page sans action ne court pas ce
+risque. Le script du bandeau, lui, appelle `/api/session` — donc contredit
+frontalement la promesse de l'autre page.
+
+**L'exemption est une propriété vérifiée, jamais un nom.** Non pas « ces
+deux pages sont dispensées », mais « une page sans script, sans formulaire,
+sans bouton et sans champ est dispensée ». Le jour où l'une gagne un bouton,
+elle cesse d'être inerte et le contrôle la réclame de nouveau, tout seul —
+vérifié par mutation.
+
+**Et l'exemption elle-même s'éprouve.** Trois vérifications ajoutées pour
+cela, dont une qui échoue si *toutes* les pages devenaient inertes : sans
+elle, le contrôle aurait pu passer au vert en ne regardant plus rien.
+
+> Un contrôle qui peut s'exempter lui-même n'est plus un contrôle.
+
+---
+
 ## Ce qui ne s'automatise pas, et revient à Xavier
 
 Le seul défaut réellement dangereux du 24/08 n'a été trouvé par aucun

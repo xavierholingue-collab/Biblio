@@ -48,6 +48,44 @@ const WEB = ["web", path.join("..", "web")].find(c => fs.existsSync(path.join(c,
  * On lit donc le dossier. Une page nouvelle est éprouvée d'office. */
 const PAGES = fs.readdirSync(WEB).filter(f => f.endsWith(".html")).sort();
 if (!PAGES.length) { console.error("  ECHEC aucune page dans web/"); process.exit(1); }
+
+/* --------------------------------------------------------------------------
+   LES PAGES INERTES SONT DISPENSÉES — ET L'EXEMPTION EST UNE PROPRIÉTÉ,
+   PAS UNE LISTE DE NOMS
+
+   25/08/2026. Les pages légales sont arrivées, et deux contrôles écrits le
+   même jour se sont contredits : celui-ci réclamait le bandeau sur CHAQUE
+   page, « test-pages-legales.mjs » exigeait qu'elles ne portent AUCUN
+   script. Chacun avait raison localement.
+
+   L'arbitrage se fait sur la raison d'être du bandeau, écrite en tête de ce
+   fichier : « on efface un jour des données en croyant être ailleurs ». Le
+   risque est celui d'une ACTION faite sur le mauvais environnement. Une page
+   qui n'offre aucune action ne le court pas.
+
+   Et le script du bandeau appelle « /api/session » : le poser sur la
+   politique de confidentialité ferait qu'on interroge le serveur, cookie
+   compris, pendant que quelqu'un lit ce qu'on fait de ses données. La page
+   promet le contraire.
+
+   D'OÙ LA FORME DE L'EXEMPTION. Ce n'est pas « ces deux pages-là sont
+   dispensées » — un nom que j'aurais tapé couvrirait encore la page le jour
+   où elle gagnerait un bouton. C'est « une page sans script, sans
+   formulaire, sans bouton et sans champ est dispensée ». Le jour où l'une
+   d'elles cesse d'être inerte, ce contrôle la réclame de nouveau, tout seul.
+
+   Les liens vers l'application, eux, restent : la protection reprend là où
+   le risque reprend.
+   -------------------------------------------------------------------------- */
+const estInerte = (html) =>
+  !/<script/i.test(html) && !/<form/i.test(html)
+  && !/<button/i.test(html) && !/<input/i.test(html);
+
+const contenu = new Map(
+  PAGES.map(p => [p, fs.readFileSync(path.join(WEB, p), "utf8")]));
+
+const PAGES_ACTIVES = PAGES.filter(p => !estInerte(contenu.get(p)));
+const PAGES_INERTES = PAGES.filter(p =>  estInerte(contenu.get(p)));
 if (!API || !WEB) { console.error("  ECHEC api/ ou web/ introuvable"); process.exit(1); }
 
 const ok = [], ko = [];
@@ -98,8 +136,8 @@ for (const [nom, env, port, attendu] of CAS) {
     session.environnement === (attendu ? "recette" : "production"),
     JSON.stringify(session));
 
-  for (const page of PAGES) {
-    const html = fs.readFileSync(path.join(WEB, page), "utf8");
+  for (const page of PAGES_ACTIVES) {
+    const html = contenu.get(page);
     const dom = new JSDOM(html, {
       runScripts: "dangerously",
       url: `http://127.0.0.1:${port}/`,
@@ -127,13 +165,43 @@ for (const [nom, env, port, attendu] of CAS) {
    pas emporterait l'avertissement avec lui. On vérifie la forme, parce que
    le comportement, lui, ne distingue pas les deux cas dans un navigateur
    qui fonctionne. */
-for (const page of PAGES) {
-  const html = fs.readFileSync(path.join(WEB, page), "utf8");
+for (const page of PAGES_ACTIVES) {
+  const html = contenu.get(page);
   const apres = html.slice(html.indexOf('id="bandeau-recette"'));
   const bloc = apres.slice(0, apres.indexOf("</script>") + 9);
   verifier(`${page} : le bandeau a son propre script classique`,
     /<script>/.test(bloc) && !/<script[^>]+type=["']module/.test(bloc),
     bloc.slice(0, 120));
+}
+
+/* --------------------------------------------------------------------------
+   L'EXEMPTION ELLE-MÊME EST ÉPROUVÉE
+
+   Sans ces trois vérifications, dispenser les pages inertes reviendrait à
+   creuser un trou : il suffirait que TOUTES les pages deviennent inertes —
+   ou qu'une page active soit mal classée — pour que le contrôle passe au
+   vert en ne regardant plus rien. Un contrôle qui s'exempte lui-même est
+   exactement ce que ce dépôt traque.
+   -------------------------------------------------------------------------- */
+verifier("des pages ACTIVES restent éprouvées",
+  PAGES_ACTIVES.length >= 3,
+  `${PAGES_ACTIVES.length} active(s) : ${PAGES_ACTIVES.join(", ")} — `
+  + "le contrôle ne regarde presque plus rien");
+
+for (const page of PAGES_INERTES) {
+  /* Une page dispensée ne doit pas porter un bandeau qui ne s'affichera
+     jamais : il rassurerait sans rien faire. */
+  verifier(`${page} : dispensée, et sans bandeau mort`,
+    !contenu.get(page).includes("bandeau-recette"),
+    "elle porte l'élément mais aucun script pour le lever");
+}
+
+/* Et l'inertie doit rester VRAIE : c'est la seule chose qui justifie la
+   dispense. On la revérifie explicitement plutôt que de faire confiance au
+   classement qui l'a produite. */
+for (const page of PAGES_INERTES) {
+  verifier(`${page} : réellement inerte — aucune action possible`,
+    estInerte(contenu.get(page)), "elle offre une action : le bandeau redevient dû");
 }
 
 await banc.fermer();
