@@ -96,6 +96,18 @@ for (const p of [MENTIONS, CONFID]) {
     /mailto:[^"']+@/.test(t), "aucune adresse de contact");
 }
 
+/* L'ARTICLE 6 III EXIGE QUE L'HÉBERGEUR PUISSE ÊTRE JOINT, pas seulement
+   nommé : dénomination, adresse ET numéro de téléphone. Un numéro manquant
+   est le genre d'oubli qu'on ne voit jamais en relisant, parce que la page
+   a l'air complète sans lui. */
+const mentions = lire(path.join(WEB, MENTIONS));
+verifier("les mentions donnent un TÉLÉPHONE pour joindre l'hébergeur",
+  /0\d([ .-]?\d{2}){4}|\+33[ .-]?\d([ .-]?\d{2}){4}/.test(mentions),
+  "l'hébergeur est nommé mais injoignable — art. 6 III de la LCEN");
+
+verifier("… et son adresse postale",
+  /\b\d{5}\b/.test(mentions), "aucun code postal : l'hébergeur n'est pas situable");
+
 /* ===================================================================== */
 /* 3. LE CONTRÔLE CENTRAL : AUCUN TIERS NON DÉCLARÉ                       */
 /* ===================================================================== */
