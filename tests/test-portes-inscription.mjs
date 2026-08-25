@@ -143,6 +143,50 @@ for (const porte of ["demanderLien", "consommerLien", "connexionParOidc"]) {
 }
 
 /* ===================================================================== */
+/* 1 bis. LE PLAFOND JOURNALIER EXISTE, ET RESTE UN PLAFOND               */
+/* ===================================================================== */
+
+/* Le NOMBRE est une décision d'affaires, pas une propriété de correction :
+   « test-lien-magique.mjs » le lit et remplit la journée jusque-là, quel
+   qu'il soit. Une mutation qui le porte de 50 à 1000 survit donc, et c'est
+   voulu — sinon changer d'avis casserait un contrôle sans rien gagner.
+
+   MAIS UN PLAFOND À UN MILLION EST UN PLAFOND ABSENT, et il ne dirait rien.
+   On borne donc l'ordre de grandeur, pas la valeur : au-delà de 500
+   inscriptions par jour — 250 $ par mois au tarif d'un compte neuf — ce
+   n'est plus un garde-fou pour une offre gratuite, c'est un oubli.
+
+   Même raisonnement que « tenants_plafond_borne » sur plafond_usd. */
+const migration = [".", "..", path.join("..", "..")]
+  .flatMap(c => [path.join(c, "db", "14-plafond-inscriptions.sql"),
+                 path.join(c, "docker", "db", "14-plafond-inscriptions.sql")])
+  .find(p => fs.existsSync(p));
+
+verifier("la migration du plafond d'inscriptions est là",
+  migration !== undefined, "14-plafond-inscriptions.sql introuvable");
+
+if (migration) {
+  const texte = fs.readFileSync(migration, "utf8");
+
+  /* LA VALEUR N'EST PAS BORNÉE ICI, ET C'EST DÉLIBÉRÉ. Une première
+     rédaction la cherchait par « select\s+(\d+) » : écrite « select (select
+     50) », l'expression laissait la regex retrouver le 50 à l'intérieur, et
+     la mutation survivait. Lire du texte ne permet pas de borner un nombre
+     qu'on n'évalue pas.
+
+     La borne est donc dans « test-lien-magique.mjs », qui interroge la base
+     et obtient la vraie valeur. Ici on ne vérifie que la STRUCTURE — ce qui
+     est justement ce que la lecture de source sait faire. */
+
+  /* La barrière doit être en BASE. Un plafond qui ne vivrait que dans
+     server.js serait oublié par la porte suivante — le défaut du matin. */
+  verifier("le refus est posé par un déclencheur, pas seulement par le serveur",
+    /create trigger tenants_plafond_inscriptions[\s\S]{0,200}before insert on public\.tenants/
+      .test(texte),
+    "aucun déclencheur sur l'insertion de tenants");
+}
+
+/* ===================================================================== */
 /* 2. AUCUN MESSAGE ÉMIS SANS TRADUCTION                                  */
 /* ===================================================================== */
 

@@ -120,6 +120,26 @@ catalogue PostgreSQL ou de la chaîne de livraison**, jamais d'une liste
 septième aurait été celle des tables à effacer, et elle aurait laissé
 derrière elle exactement les données qu'on promettait de supprimer.
 
+### Un nombre se borne là où on peut l'évaluer, pas là où il est écrit
+
+**25/08/2026, le plafond d'inscriptions.** Pour empêcher qu'un plafond
+journalier soit fixé à un million — c'est-à-dire absent, et muet —, j'ai
+d'abord écrit une vérification qui lisait la valeur dans le fichier SQL,
+par `select\s+(\d+)`.
+
+Écrit `select (select 50)`, l'expression laissait la regex retrouver le 50 à
+l'intérieur. La borne était contournée par une écriture parfaitement
+légitime, et la mutation survivait au vert.
+
+La borne est donc passée dans le contrôle qui **interroge la base** et
+obtient la vraie valeur. La lecture de source garde ce qu'elle sait faire :
+vérifier qu'un déclencheur existe, qu'un appel est unique, qu'un fichier est
+cité. La structure se lit ; une valeur se calcule.
+
+> Un contrôle qui lit du texte ne peut pas borner un nombre qu'il n'évalue
+> pas. Il peut seulement borner la façon dont ce nombre est écrit — ce qui
+> n'est pas la même chose, et ne protège de rien.
+
 ### La septième liste, trouvée quatre heures après avoir écrit ce corollaire
 
 **25/08/2026, livraison #64.** `test-suppression.mjs` est ajouté à la chaîne

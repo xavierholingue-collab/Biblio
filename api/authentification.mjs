@@ -94,6 +94,25 @@ export async function demanderLien(client, courrielBrut, { inscriptionOuverte = 
   // Inconnu et porte fermée : on s'arrête ici, mais silencieusement.
   if (!connu && !inscriptionOuverte) return { envoye: true, jeton: null };
 
+  /* LE PLAFOND JOURNALIER SE CONSULTE ICI, AVANT D'ENVOYER — 25/08/2026.
+     Le déclencheur de 14-plafond-inscriptions.sql refuse à la CRÉATION,
+     c'est-à-dire quand le lien est ouvert. Sans cette consultation, on
+     expédierait un courriel dont le lien échouerait au clic : recevoir un
+     lien qui ne marche pas est pire que ne rien recevoir.
+
+     Ce n'est PAS une seconde version de la règle : le plafond n'est écrit
+     qu'en base, et c'est la base qu'on interroge. Ici on lit, là-bas on
+     refuse. Le refus reste la seule barrière — celle-ci n'est qu'une
+     politesse, et le contrôle vérifie que la barrière tient sans elle.
+
+     Le silence est le même que ci-dessus : dire « plus de place aujourd'hui »
+     à une adresse inconnue apprendrait qu'elle est inconnue. */
+  if (!connu) {
+    const [{ possible }] = (await client.query(
+      "select public.inscriptions_possibles() as possible")).rows;
+    if (!possible) return { envoye: true, jeton: null };
+  }
+
   const jeton = randomBytes(32).toString("base64url");
   /* UNE COLONNE OU L'AUTRE, jamais les deux — la contrainte
      « liens_une_seule_cible » le vérifie en base plutôt que de compter sur
@@ -163,9 +182,28 @@ async function creerLocataire(client, courriel, { inscriptionOuverte = false } =
     e.statut = 403;
     throw e;
   }
-  const { rows } = await client.query(
-    "select compte, locataire from public.creer_locataire($1)", [courriel]);
-  return { compte: rows[0].compte, locataire: rows[0].locataire };
+  try {
+    const { rows } = await client.query(
+      "select compte, locataire from public.creer_locataire($1)", [courriel]);
+    return { compte: rows[0].compte, locataire: rows[0].locataire };
+  } catch (e) {
+    /* PLAFOND JOURNALIER ATTEINT — posé le 25/08/2026, quand les inscriptions
+       ont été ouvertes. Le déclencheur de 14-plafond-inscriptions.sql lève
+       « 53400 ».
+
+       On le traduit dans le MÊME témoin que la fermeture volontaire : pour la
+       personne, les deux disent la même chose — « pas d'inscription
+       aujourd'hui, revenez, ou connectez-vous si vous avez déjà un compte ».
+       Deux messages distincts l'obligeraient à comprendre une distinction qui
+       ne change rien à ce qu'elle doit faire. */
+    if (e.code === "53400") {
+      const f = new Error("Les inscriptions sont momentanément fermées.");
+      f.inscriptionFermee = true;
+      f.statut = 403;
+      throw f;
+    }
+    throw e;
+  }
 }
 
 export async function consommerLien(client, jeton, options = {}) {

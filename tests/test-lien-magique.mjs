@@ -939,6 +939,120 @@ const nbLocataires = async () =>
 prochaineIdentite = {};
 
 /* =====================================================================
+   4 ter. LE PLAFOND JOURNALIER D'INSCRIPTIONS
+
+   Ouvrir les inscriptions le 25/08/2026 a rendu visible ce que personne ne
+   bornait : le NOMBRE de bibliothèques créées par jour. Le limiteur ne
+   s'appliquait qu'à « /api/lien » ; « /api/oidc/retour » n'en avait aucun.
+
+   LE SERVEUR EST OUVERT ICI — « avecGoogle », INSCRIPTION_OUVERTE=1. Ce
+   n'est donc pas la fermeture volontaire qu'on éprouve, mais le plafond,
+   sur une porte grande ouverte.
+
+   LA VÉRIFICATION QUI COMPTE EST LA DERNIÈRE : le refus doit venir de la
+   BASE, pas de la consultation polie que « demanderLien » fait avant
+   d'envoyer. Si la barrière n'était que dans le serveur, une porte future
+   l'oublierait — c'est le défaut du matin, rejoué.
+   ===================================================================== */
+bloc_plafond: {
+  const plafond = Number(
+    (await q("select public.plafond_inscriptions_jour() as p"))[0].p);
+  const avant = await nbLocataires();
+
+  /* LE CHIFFRE EST UNE DÉCISION D'AFFAIRES, SON ORDRE DE GRANDEUR NON.
+     Ce contrôle remplit la journée jusqu'au plafond, quel qu'il soit : le
+     porter de 50 à 1000 ne le ferait pas tomber, et c'est voulu — figer 50
+     casserait le contrôle chaque fois que Xavier change d'avis.
+
+     Mais un plafond à un million serait un plafond ABSENT, et muet. On borne
+     donc l'ordre de grandeur : au-delà de 500 par jour — 250 $ par mois au
+     tarif d'un compte neuf — ce n'est plus un garde-fou pour une offre
+     gratuite, c'est un oubli.
+
+     La borne est ICI et non dans « test-portes-inscription.mjs » : celui-ci
+     lit du texte, et une première rédaction s'y était fait piéger par
+     « select (select 50) ». Un nombre se borne là où on peut l'évaluer. */
+  verifier("le plafond d'inscriptions reste un plafond, pas un alibi",
+    plafond >= 1 && plafond <= 500,
+    `${plafond} par jour — au-delà de 500, ce n'est plus une borne`);
+
+  /* ET ON S'ARRÊTE LÀ SI LE CHIFFRE EST ABSURDE.
+
+     Sans cette sortie, la première version de ce bloc tentait de créer un
+     million de bouchons : le contrôle PLANTAIT au lieu d'échouer, et son
+     verdict arrivait vide. Quatrième occurrence de ce travers dans la
+     journée, cette fois dans le contrôle même qui venait d'être écrit.
+
+     La vérification ci-dessus a déjà consigné l'échec ; ce qui suit
+     n'apprendrait rien de plus et coûterait un délai d'attente. */
+  if (!(plafond >= 1 && plafond <= 500)) break bloc_plafond;
+
+  /* Remplir la journée. Ces locataires-là sont créés par l'observateur, donc
+     SANS « app.inscription » : ils ne sont pas bridés, mais ils COMPTENT.
+     C'est voulu — le plafond borne la croissance du jour, quelle qu'en soit
+     l'origine. */
+  const restant = plafond - (await q(
+    "select public.inscriptions_du_jour() as n"))[0].n;
+  for (let i = 0; i < restant; i++) {
+    await q(`insert into tenants (identifiant, nom, visibilite)
+             values ($1, $1, 'privee')`, [`bouchon-${i}`]);
+  }
+
+  verifier("le plafond du jour est atteint",
+    (await q("select public.inscriptions_possibles() as p"))[0].p === false,
+    JSON.stringify(await q("select public.inscriptions_du_jour() as n")));
+
+  /* --- Google, porte ouverte, plafond atteint --- */
+  const pleines = await nbLocataires();
+  prochaineIdentite = { sub: "google-trop", email: "trop@exemple.fr",
+                        email_verified: true };
+  const d = await partir();
+  const r = await brut(`/api/oidc/retour?code=abc&state=${d.etat}`,
+    { cookie: `__Host-oidc=${d.cookie}` });
+
+  verifier("plafond atteint : Google refuse l'inscription et le dit",
+    /oidc=fermee/.test(r.headers.get("location") ?? ""),
+    r.headers.get("location"));
+
+  verifier("… et aucune bibliothèque de plus n'est née",
+    (await nbLocataires()) === pleines,
+    `${pleines} → ${await nbLocataires()} — le plafond ne borne rien`);
+
+  /* --- Le lien magique n'envoie rien qui échouerait au clic --- */
+  recus.length = 0;
+  await appel(avecGoogle.port, "/api/lien", { courriel: "trop2@exemple.fr" });
+  verifier("… et aucun lien n'est envoyé, qui échouerait à l'ouverture",
+    recus.length === 0, `${recus.length} courriel(s) partis`);
+
+  /* --- LA BARRIÈRE EST EN BASE, PAS DANS LE SERVEUR ---
+     On appelle « creer_locataire » directement, en posant soi-même le
+     drapeau d'inscription : c'est ce que ferait une porte future qui
+     oublierait de consulter « inscriptions_possibles() ». */
+  let refuse = false;
+  try {
+    await banc.dans(null, `select public.creer_locataire('contournement@exemple.fr')`);
+  } catch (e) { refuse = e.code === "53400"; }
+  verifier("un chemin qui NE consulte PAS le serveur est refusé quand même",
+    refuse, "la base a laissé créer : la barrière n'est que dans server.js");
+
+  /* --- Et un inscrit se connecte toujours --- */
+  prochaineIdentite = { sub: "google-1", email: "alice.mariee@exemple.fr",
+                        email_verified: true };
+  const d2 = await partir();
+  const r2 = await brut(`/api/oidc/retour?code=abc&state=${d2.etat}`,
+    { cookie: `__Host-oidc=${d2.cookie}` });
+  verifier("plafond atteint, un inscrit se connecte TOUJOURS",
+    /oidc=ok/.test(r2.headers.get("location") ?? ""), r2.headers.get("location"));
+
+  /* Nettoyage : les bouchons fausseraient tout ce qui suit. */
+  await q("delete from tenants where identifiant like 'bouchon-%'");
+  verifier("les bouchons sont retirés, la suite repart d'un état propre",
+    (await nbLocataires()) === avant, `${avant} → ${await nbLocataires()}`);
+}
+
+prochaineIdentite = {};
+
+/* =====================================================================
    5. BREVO : LE MÊME CODE, UN AUTRE SERVICE
 
    Éprouvé maintenant alors que la migration est seulement envisagée. Écrire
