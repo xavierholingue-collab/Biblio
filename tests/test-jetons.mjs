@@ -15,7 +15,7 @@
    ---------------------------------------------------------------------------
    LA RÈGLE EST UNE PROPRIÉTÉ, PAS UNE LISTE
 
-   La migration se fait page par page : au 25/08/2026, seule la landing
+   La migration se fait page par page : au 31/08/2026, seule la landing
    utilise les jetons. Exiger « aucune couleur nulle part » ferait échouer le
    contrôle sur des pages qu'on n'a pas encore touchées, et l'on prendrait
    l'habitude de le voir rouge — ce qui revient à ne plus l'avoir.

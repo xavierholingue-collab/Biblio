@@ -89,7 +89,7 @@ alter table public.tenants
 /* --------------------------------------------------------------------------
    0,900 — ET CE CHIFFRE N'EST PLUS LIBRE : IL DÉCOULE DE L'AUTRE
 
-   25/08/2026. En écrivant la page d'accueil, il a fallu dire au visiteur ce
+   31/08/2026. En écrivant la page d'accueil, il a fallu dire au visiteur ce
    que l'offre gratuite lui donne. Et les deux plafonds ne disaient pas la
    même chose :
 

@@ -271,7 +271,7 @@ jobs:
 
       # Deux bornes justes separement dont la conjonction ment : le quota
       # annoncait dix appels, le plafond d'argent fermait au sixieme. Vu le
-      # 25/08 en ecrivant la page d'accueil, pas par un controle.
+      # 31/08 en ecrivant la page d'accueil, pas par un controle.
       - name: Les deux plafonds ne se contredisent pas
         run: node tests/test-plafonds-coherents.mjs
 

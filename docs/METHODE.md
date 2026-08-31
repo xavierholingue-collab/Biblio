@@ -189,11 +189,12 @@ dans la position où il protège.
 positions. Un contrôle qui n'a jamais eu l'occasion de refuser n'a rien
 prouvé.
 
-### Le second volet, ajouté le 24/08 au soir
+### Le second volet, ajouté le 25/08
 
 La règle ci-dessus ne regardait que **vers l'extérieur** : l'inconnu, celui
-qui n'a pas de compte. Elle était incomplète, et c'est le déploiement du
-soir même qui l'a montré.
+qui n'a pas de compte. Elle était incomplète, et c'est le déploiement de la
+porte de sortie — livraison #64, chaîne lancée le 25/08 à 08 h 19 — qui l'a
+montré.
 
 À la première question, ce déploiement répondait « rien, et même moins » :
 la porte Google se refermait. Rassurant, et insuffisant — car il donnait par
@@ -321,3 +322,28 @@ leur part.
 exemple. Une entrée fausse coûte plus cher qu'une entrée absente : c'est ce
 qui justifie le commit de rectification du 22/08 sur la mesure d'audience,
 où un constat erroné avait été inscrit avant vérification.*
+
+---
+
+## Rectification du 31/08/2026 — les dates de ce registre étaient fausses
+
+Le travail de refonte visuelle — jetons, polices hébergées, page d'accueil,
+plafond à 0,900 $ — a été fait le **31 août**. Je l'avais daté du 25 août,
+dans sept endroits : `jetons.css`, `test-jetons.mjs`,
+`test-plafonds-coherents.mjs`, `11-plafond-depense.sql`, `calculer-csp.mjs`,
+`bibliotheque-publique.html` et la chaîne de livraison. La section 5
+ci-dessus disait aussi « ajouté le 24/08 au soir » pour un ajout du 25.
+
+Personne ne l'a signalé : une date fausse ne casse rien, elle se contente de
+mentir doucement. C'est Xavier qui l'a vue, en lisant `cree_le` d'un compte
+créé le 31 à 16 h 35 alors que le registre parlait du 25.
+
+**Ce qui a permis de trancher** : les horodatages, et eux seuls. Le compte
+supprimé datait du 24/08 18 h 10, la chaîne de la suppression a tourné le
+25/08 à 08 h 19, le nouveau compte est du 31/08 16 h 35. Aucune date n'a été
+corrigée « de mémoire » ; celles que ces trois repères ne permettaient pas
+d'établir ont été réécrites pour dire ce qu'on peut prouver plutôt qu'une
+heure vraisemblable.
+
+> Un registre dont on corrige les dates en silence vaut moins qu'un registre
+> qui dit les avoir corrigées. La rectification fait partie de l'entrée.

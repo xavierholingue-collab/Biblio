@@ -13,7 +13,7 @@
    Et un résumé coûte 0,086 $. Le portefeuille se fermait donc au sixième
    appel, alors que le compteur en annonçait dix.
 
-   Rien ne l'a signalé. Cela s'est vu le 25/08 en écrivant la page d'accueil,
+   Rien ne l'a signalé. Cela s'est vu le 31/08 en écrivant la page d'accueil,
    au moment de dire à un visiteur ce que le gratuit lui donne : la phrase
    « une dizaine de demandes » était fausse dès qu'on demandait la fonction
    la plus utile.
