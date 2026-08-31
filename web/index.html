@@ -1,16 +1,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Une bibliothèque de travail</title>
-<meta name="description" content="Bibliothèque professionnelle : management, décision, industrie, numérique, philosophie et sciences sociales.">
-<!-- Telemetrie d'audience (Umami), servie en first-party.
-     Le script vient de /stats/s.js, c'est-a-dire du domaine de Biblio via
-     le proxy Caddy : script-src 'self' et connect-src 'self' le couvrent
-     deja, la politique de contenu n'a pas eu a changer. Script externe,
-     donc hors du calcul des empreintes sha256 de calculer-csp.mjs.
+<title>Lisia — votre bibliothèque, enfin interrogeable</title>
+<meta name="description" content="Scannez vos livres, retrouvez-les par rayon, par auteur ou par thème, et décrivez ce que vous cherchez à comprendre : Lisia construit un parcours de lecture dans vos propres étagères.">
+<link rel="stylesheet" href="/jetons.css">
 
-     data-host-url est INDISPENSABLE : sans lui, la collecte partirait sur
-     /api/send et tomberait dans l'API metier (handle /api/* -> :3006).
-     data-domains limite l'envoi a la production : la recette ne pollue pas.
+<!-- Telemetrie d'audience (Umami), servie en first-party depuis /stats.
      Aucune donnee personnelle, aucun cookie. -->
 <script defer
         src="/stats/s.js"
@@ -20,8 +14,10 @@
 
 <style>
   /* ------------------------------------------------- Bandeau de recette
-     Visible, mais pas decoratif : il repond a une question de securite.
-     On efface un jour des donnees en croyant etre ailleurs. */
+     Sa couleur est ECRITE ICI, et c'est la seule exception a la regle des
+     jetons — voir test-jetons.mjs. Un avertissement de securite ne doit pas
+     dependre du chargement d'un fichier externe : si jetons.css n'arrive
+     pas, le bandeau doit rester rouge et lisible. */
   #bandeau-recette {
     position: sticky; top: 0; z-index: 999;
     background: #8A3B4A; color: #fff;
@@ -31,164 +27,156 @@
   }
   #bandeau-recette[hidden] { display: none; }
 
-  :root {
-    --paper:      #E9EBE6;
-    --paper-2:    #F2F3EF;
-    --ink:        #1A1F1C;
-    --ink-soft:   #5E665F;
-    --rule:       #C9CEC5;
-    --acad:       #2F5D62;
-    --bd:         #A9722A;
-    --roman:      #8A3B4A;
-    --focus:      #2F5D62;
-    --serif: Georgia, "Iowan Old Style", "Times New Roman", serif;
-    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  }
   * { box-sizing: border-box; }
   body {
-    margin: 0; background: var(--paper); color: var(--ink);
-    font-family: var(--sans); font-size: 16px; line-height: 1.55;
+    margin: 0; background: var(--creme); color: var(--encre);
+    font-family: var(--texte); font-size: 16px; line-height: 1.55;
     -webkit-font-smoothing: antialiased;
   }
-  .wrap { max-width: 940px; margin: 0 auto; padding: 0 22px 90px; }
-  [hidden] { display: none !important; }
   a { color: inherit; }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 0 24px; }
 
-  /* ---------- Bandeau ---------- */
-  .bandeau { padding: 60px 0 34px; border-bottom: 2px solid var(--ink); }
+  /* ------------------------------------------------------------ En-tête */
+  header.haut {
+    height: 68px; display: flex; align-items: center; gap: 26px;
+    border-bottom: 1px solid var(--trait);
+  }
+  .marque {
+    font-family: var(--titre); font-size: 25px; font-weight: 600;
+    letter-spacing: -0.02em; text-decoration: none; margin-right: auto;
+  }
+  .marque i { color: var(--cobalt); font-style: normal; }
+  header.haut nav { display: flex; align-items: center; gap: 22px; font-size: 15px; }
+  header.haut nav a { text-decoration: none; color: var(--encre-douce); }
+  header.haut nav a:hover { color: var(--encre); }
+  .bouton {
+    display: inline-block; text-decoration: none; font: inherit; font-weight: 600;
+    padding: 11px 20px; border-radius: var(--r-bouton); border: 1px solid transparent;
+    cursor: pointer; transition: background .15s, transform .15s, box-shadow .15s;
+  }
+  .bouton.encre  { background: var(--encre); color: var(--creme); }
+  .bouton.encre:hover  { background: var(--encre-appui); }
+  .bouton.cobalt { background: var(--cobalt); color: var(--blanc); }
+  .bouton.cobalt:hover { background: var(--cobalt-fonce); }
+  .bouton.creux  { background: var(--blanc); color: var(--encre); border-color: var(--trait); }
+  .bouton.creux:hover  { border-color: var(--encre-douce); }
+  @media (max-width: 720px) { header.haut nav a.ancre { display: none; } }
+
+  /* --------------------------------------------------------------- Hero */
+  .hero { padding: 76px 0 64px; text-align: center; }
   h1 {
-    font-family: var(--serif); font-weight: 400; font-size: clamp(32px, 6vw, 48px);
-    letter-spacing: -0.02em; margin: 0 0 14px; line-height: 1.08;
+    font-family: var(--titre); font-weight: 600;
+    font-size: clamp(34px, 5.4vw, 58px); line-height: 1.08;
+    letter-spacing: -0.025em; margin: 0 0 22px;
   }
   .chapeau {
-    font-family: var(--serif); font-size: clamp(17px, 2.4vw, 20px);
-    line-height: 1.5; max-width: 62ch; margin: 0 0 8px; color: var(--ink);
+    font-size: clamp(16px, 2vw, 19px); color: var(--encre-douce);
+    max-width: 62ch; margin: 0 auto 34px;
   }
-  .sous-chapeau { font-size: 15px; color: var(--ink-soft); max-width: 62ch; margin: 14px 0 0; }
+  .actions { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  .actions .bouton { padding: 14px 26px; font-size: 16px; }
+  .sous-actions { margin-top: 16px; font-size: 14px; color: var(--encre-douce); }
 
-  /* ---------- Mosaïque des rayons ----------
-     Une tuile par rayon, AIRE proportionnelle au nombre d'ouvrages.
-     L'aire est la seule variable encodée : pas de hauteur décorative,
-     pas de couleur qui ne dise rien. La barre du bas ajoute une seconde
-     information, mesurée elle aussi : la part déjà lue. */
-  .mosaique {
-    position: relative; width: 100%;
-    height: clamp(280px, 44vw, 400px);
-    margin: 10px 0 8px;
+  /* ------------------------------------------------- Les dos de livres */
+  .etagere {
+    display: flex; align-items: flex-end; justify-content: center;
+    gap: 7px; margin-top: 54px; min-height: 190px;
   }
-  .tuile {
-    position: absolute; overflow: hidden; text-decoration: none;
-    color: var(--ink); background: var(--paper-2);
-    border: 1px solid var(--rule);
-    display: flex; flex-direction: column; justify-content: space-between;
-    padding: 9px 10px 0; cursor: pointer;
-    transition: background .12s ease, border-color .12s ease;
+  .dos {
+    width: 34px; border-radius: 2px 3px 3px 2px;
+    box-shadow: var(--ombre-couverture);
+    display: flex; align-items: center; justify-content: center;
+    transition: transform .18s;
   }
-  .tuile:hover, .tuile:focus-visible {
-    background: #DDE2DA; border-color: var(--ink); outline: none; z-index: 2;
+  .dos:hover { transform: translateY(-8px); }
+  .dos span {
+    writing-mode: vertical-rl; transform: rotate(180deg);
+    font-family: var(--titre); font-size: 11.5px; color: var(--blanc);
+    padding: 12px 0; white-space: nowrap; overflow: hidden;
   }
-  .tuile .nom {
-    font-size: 13px; line-height: 1.25; overflow: hidden;
-    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3;
-  }
-  .tuile .n {
-    font-family: var(--mono); font-size: 11px; color: var(--ink-soft);
-    letter-spacing: .04em; margin-top: 4px;
-  }
-  .tuile .jauge {
-    height: 6px; margin: 6px -10px 0; background: var(--rule); flex: none;
-  }
-  .tuile .jauge i { display: block; height: 100%; }
-  .tuile.muette { padding: 5px 6px 0; }
-  .tuile.muette .nom { display: none; }
-  .tuile.muette .n { margin-top: 0; font-size: 10px; }
+  @media (max-width: 640px) { .etagere .dos:nth-child(n+7) { display: none; } }
 
-  .legende-mosaique {
-    font-family: var(--mono); font-size: 11px; color: var(--ink-soft);
-    letter-spacing: .04em; margin-bottom: 40px; line-height: 1.7;
-  }
-
-  /* ---------- Chiffres ---------- */
-  .chiffres {
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-    gap: 1px; background: var(--rule); border: 1px solid var(--rule);
-    margin: 40px 0;
-  }
-  .chiffre { background: var(--paper); padding: 20px 18px; }
-  .chiffre .n {
-    font-family: var(--serif); font-size: 38px; line-height: 1; letter-spacing: -0.02em;
-  }
-  .chiffre .quoi {
-    font-family: var(--mono); font-size: 10px; letter-spacing: .1em;
-    text-transform: uppercase; color: var(--ink-soft); margin-top: 8px;
-  }
-
-  /* ---------- Sections ---------- */
+  /* ----------------------------------------------------------- Sections */
+  section.blanc { background: var(--blanc); border-block: 1px solid var(--trait); }
+  section { padding: 72px 0; }
   h2 {
-    font-family: var(--mono); font-size: 11px; letter-spacing: .14em;
-    text-transform: uppercase; color: var(--ink-soft); font-weight: 400;
-    margin: 46px 0 16px; padding-bottom: 8px; border-bottom: 1px solid var(--rule);
+    font-family: var(--titre); font-weight: 600;
+    font-size: clamp(25px, 3.4vw, 34px); letter-spacing: -0.02em;
+    margin: 0 0 10px;
+  }
+  .intro { color: var(--encre-douce); max-width: 62ch; margin: 0 0 38px; }
+
+  .grille { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(238px, 1fr)); }
+  .carte {
+    background: var(--blanc); border: 1px solid var(--trait);
+    border-radius: var(--r-carte); padding: 22px; box-shadow: var(--ombre-carte);
+  }
+  section.blanc .carte { background: var(--creme); }
+  .carte .glyphe { font-family: var(--titre); font-size: 22px; color: var(--cobalt); }
+  .carte h3 {
+    font-size: 16px; font-weight: 600; margin: 12px 0 6px;
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  }
+  .carte p { margin: 0; font-size: 14.5px; color: var(--encre-douce); }
+  .plus {
+    font-size: 10.5px; font-weight: 700; letter-spacing: .08em;
+    color: var(--cobalt); background: var(--cobalt-voile);
+    padding: 2px 7px; border-radius: var(--r-pilule);
   }
 
-  /* ---------- Décennies ---------- */
-  .decennies { display: flex; align-items: flex-end; gap: 4px; height: 130px; margin-top: 10px; }
-  .dec { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 6px; }
-  .dec .b { width: 100%; background: var(--acad); border-radius: 1px 1px 0 0; min-height: 2px; }
-  .dec .e { font-family: var(--mono); font-size: 9px; color: var(--ink-soft); letter-spacing: .02em; }
-
-  /* ---------- Listes ---------- */
-  .colonnes { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 34px; }
-  .ligne { display: flex; justify-content: space-between; gap: 14px; padding: 7px 0; border-bottom: 1px solid var(--rule); font-size: 15px; }
-  .ligne .d { font-family: var(--mono); font-size: 12px; color: var(--ink-soft); white-space: nowrap; }
-  .ligne .t { font-family: var(--serif); font-size: 16px; line-height: 1.3; }
-  .ligne .a { font-size: 13px; color: var(--ink-soft); }
-
-  /* ---------- Accès ---------- */
-  .acces { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 16px; margin-top: 20px; }
-  .porte {
-    display: block; text-decoration: none; border: 1px solid var(--ink);
-    padding: 22px 20px; background: var(--paper-2);
-    transition: background .12s ease, transform .12s ease;
+  /* -------------------------------------------------- Parcours, 2 colonnes */
+  .deux { display: grid; gap: 44px; grid-template-columns: 1fr 1fr; align-items: start; }
+  @media (max-width: 860px) { .deux { grid-template-columns: 1fr; } }
+  .etapes { list-style: none; margin: 0; padding: 0; }
+  .etapes li { display: flex; gap: 14px; padding: 14px 0; border-bottom: 1px solid var(--trait); }
+  .etapes li:last-child { border-bottom: none; }
+  .num {
+    flex: none; width: 26px; height: 26px; border-radius: var(--r-pilule);
+    background: var(--cobalt); color: var(--blanc); font-size: 13px; font-weight: 600;
+    display: grid; place-items: center;
   }
-  .porte:hover { background: var(--ink); color: var(--paper); transform: translateY(-2px); }
-  .porte .t { font-family: var(--serif); font-size: 21px; margin-bottom: 6px; }
-  .porte .d { font-size: 14px; opacity: .85; }
-  .porte .cle {
-    font-family: var(--mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase;
-    margin-top: 12px; opacity: .7;
+  .etapes b { font-family: var(--titre); font-weight: 600; font-size: 15.5px; }
+  .etapes p { margin: 3px 0 0; font-size: 14px; color: var(--encre-douce); }
+  .demande {
+    background: var(--sable); border-radius: var(--r-carte);
+    padding: 18px 20px; font-family: var(--titre); font-size: 17px;
   }
+  .demande em { color: var(--encre-douce); font-style: normal; font-size: 13px;
+                font-family: var(--texte); display: block; margin-bottom: 8px; }
 
-  /* ---------- Divers ---------- */
-  .note-bas {
-    margin-top: 54px; padding-top: 20px; border-top: 1px solid var(--rule);
-    font-size: 13px; color: var(--ink-soft); max-width: 70ch;
+  /* ------------------------------------------------------------- Offres */
+  section.nuit { background: var(--nuit); color: var(--creme); border: none; }
+  section.nuit h2 { color: var(--creme); }
+  section.nuit .intro { color: var(--nuit-douce); }
+  .offres { display: grid; gap: 20px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); max-width: 720px; }
+  .offre {
+    background: var(--nuit-carte); border: 1px solid var(--nuit-trait);
+    border-radius: var(--r-carte); padding: 26px;
   }
-  .chargement { padding: 60px 0; text-align: center; color: var(--ink-soft); font-family: var(--mono); font-size: 12px; }
-  .erreur { padding: 24px; border: 1px solid var(--roman); color: var(--roman); font-size: 14px; margin: 34px 0; }
-  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+  .offre.mise { border: 2px solid var(--cobalt); }
+  .offre h3 { font-family: var(--titre); font-size: 19px; margin: 0 0 4px; font-weight: 600; }
+  .prix { font-family: var(--titre); font-size: 34px; font-weight: 600; margin: 6px 0 18px; }
+  .prix small { font-size: 14px; font-weight: 400; color: var(--nuit-douce); font-family: var(--texte); }
+  .offre ul { list-style: none; margin: 0 0 22px; padding: 0; font-size: 14.5px; }
+  .offre li { padding: 6px 0 6px 22px; position: relative; color: var(--nuit-douce); }
+  .offre li::before { content: "·"; position: absolute; left: 8px; color: var(--cobalt); font-weight: 700; }
+  .offre li.oui { color: var(--creme); }
+  .recommande {
+    font-size: 10.5px; font-weight: 700; letter-spacing: .08em; color: var(--blanc);
+    background: var(--cobalt); padding: 3px 9px; border-radius: var(--r-pilule);
+    margin-left: 8px;
+  }
+  .bientot { font-size: 13px; color: var(--nuit-douce); margin-top: 20px; }
+
+  /* --------------------------------------------------------------- Pied */
+  footer { padding: 40px 0 64px; font-size: 14px; color: var(--encre-douce); }
+  footer .liens { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 12px; }
+  footer a { text-decoration: none; }
+  footer a:hover { text-decoration: underline; }
 </style>
 
 <div id="bandeau-recette" hidden>RECETTE — ces donnees sont une copie, rien de ce qui est fait ici n'atteint la bibliotheque reelle</div>
-
-<!-- Le bandeau a SON PROPRE script, classique et autonome. Deux raisons.
-
-     Une premiere version l'avait glisse dans le dernier bloc de la page —
-     qui se trouve etre le module du scanner de codes-barres. Le bandeau
-     dependait donc du chargement d'un module qui n'a rien a voir : s'il
-     echoue, ou si le navigateur le refuse, l'avertissement disparait
-     exactement quand on en aurait besoin.
-
-     Et il doit s'executer TOT. Un bandeau qui apparait apres qu'on a
-     commence a cliquer ne previent plus, il constate. -->
 <script>
-/* L'API dit quel environnement elle sert ; la page l'affiche. Une seule
-   source, celle du serveur — une page ne peut pas deviner ou elle tourne,
-   et un test sur le nom de domaine se tromperait des qu'on en ajoute un.
-
-   En cas d'echec de l'appel, on ne montre RIEN. Le sens de ce choix : un
-   bandeau affiche a tort en production serait embarrassant, tandis que son
-   absence en recette se remarque des le premier clic. */
 (async () => {
   try {
     const r = await fetch("/api/session", { credentials: "same-origin" });
@@ -198,342 +186,208 @@
       const b = document.getElementById("bandeau-recette");
       if (b) b.hidden = false;
     }
-  } catch { /* silence : voir la note ci-dessus */ }
+  } catch { /* silence : un bandeau affiche a tort en production serait pire */ }
 })();
 </script>
-
 
 <div class="wrap">
-  <header class="bandeau">
-    <h1>Une bibliothèque de travail</h1>
-    <p class="chapeau">
-      Ce que j'ai lu, ce que je relis, et ce qui reste sur la pile. Une bibliothèque
-      d'ingénieur et de dirigeant, où le lean côtoie la philosophie et où les sciences
-      de la décision servent de fil conducteur.
-    </p>
-    <p class="sous-chapeau">
-      Chaque ouvrage porte un résumé rédigé par Claude, vérifié par recherche web, avec
-      son degré de certitude. On peut aussi décrire ce que l'on cherche à comprendre :
-      un parcours de lecture est alors construit dans ces rayons.
-    </p>
+  <header class="haut">
+    <a class="marque" href="/">Lis<i>ia</i></a>
+    <nav>
+      <a class="ancre" href="#fonctions">Fonctions</a>
+      <a class="ancre" href="#offres">Offres</a>
+      <a href="/ma-bibliotheque.html?espace=perso">Se connecter</a>
+      <a class="bouton encre" href="/ma-bibliotheque.html?espace=perso">Créer ma bibliothèque</a>
+    </nav>
   </header>
-
-  <div id="chargement" class="chargement">Chargement des statistiques…</div>
-  <div id="erreur" class="erreur" hidden></div>
-
-  <main id="contenu" hidden>
-    <div class="chiffres" id="chiffres"></div>
-
-    <h2 id="titreRayons">Les rayons</h2>
-    <div class="mosaique" id="mosaique"></div>
-    <p class="legende-mosaique" id="legendeMosaique"></p>
-
-    <h2>Par décennie de parution</h2>
-    <div class="decennies" id="decennies"></div>
-
-    <div class="colonnes" style="margin-top:46px">
-      <div>
-        <h2 style="margin-top:0">Auteurs les plus présents</h2>
-        <div id="auteurs"></div>
-      </div>
-      <div>
-        <h2 style="margin-top:0">Entrées les plus récentes</h2>
-        <div id="recents"></div>
-      </div>
-    </div>
-
-    <h2>Entrer</h2>
-    <div class="acces">
-      <a class="porte" href="/ma-bibliotheque.html">
-        <div class="t">La bibliothèque professionnelle</div>
-        <div class="d">Parcourir les rayons, lire les résumés, demander un parcours de lecture.</div>
-        <div class="cle" id="cleAcces">Accès libre</div>
-      </a>
-      <a class="porte" href="/ma-bibliotheque.html?espace=perso">
-        <div class="t">L'espace personnel</div>
-        <div class="d">Romans, bandes dessinées, lectures qui ne regardent que moi.</div>
-        <div class="cle" id="clePerso">Mot de passe requis</div>
-      </a>
-    </div>
-
-    <p class="note-bas" id="noteBas"></p>
-
-    <!-- Les deux liens légaux, sur CHAQUE page. Une page de mentions qui
-         n'est atteignable que par son adresse n'est pas publiée : elle est
-         cachée. « test-pages-legales.mjs » vérifie qu'aucune page n'oublie
-         ce pied. -->
-    <div style="margin-top:52px;padding-top:16px;border-top:1px solid var(--rule);font-size:14px;opacity:.75">
-      <a href="/mentions-legales.html" style="margin-right:14px">Mentions légales</a>
-      <a href="/confidentialite.html">Confidentialité</a>
-    </div>
-  </main>
 </div>
 
-<script>
-const HEX = { "Savoirs": "#2F5D62", "BD": "#A9722A", "Roman": "#8A3B4A" };
+<div class="wrap hero">
+  <h1>Votre bibliothèque,<br>enfin interrogeable.</h1>
+  <p class="chapeau">
+    Scannez vos livres, retrouvez-les par rayon, par auteur ou par thème —
+    et décrivez ce que vous cherchez à comprendre : Lisia construit un
+    parcours de lecture dans vos propres étagères.
+  </p>
+  <div class="actions">
+    <a class="bouton cobalt" href="/ma-bibliotheque.html?espace=perso">Commencer gratuitement</a>
+    <a class="bouton creux" href="/bibliotheque-publique.html">Voir une vraie bibliothèque</a>
+  </div>
+  <!-- « Gratuit sans limite d'ouvrages » est vrai et c'est la difference
+       avec les autres : la limite n'est pas le nombre de livres, c'est le
+       nombre de demandes a l'IA. On le dit ici plutot que de le laisser
+       decouvrir au dixieme resume. -->
+  <p class="sous-actions">
+    Sans limite d'ouvrages · une dizaine de demandes à l'IA par mois ·
+    en français et en anglais
+  </p>
 
-function texte(el, t) { el.textContent = t; }
-function nombre(n) { return new Intl.NumberFormat("fr-FR").format(n); }
+  <div class="etagere" aria-hidden="true">
+    <div class="dos" style="height:170px;background:var(--savoirs)"><span>Système 1 / Système 2</span></div>
+    <div class="dos" style="height:148px;background:var(--savoirs)"><span>Le Cygne noir</span></div>
+    <div class="dos" style="height:132px;background:var(--roman)"><span>1984</span></div>
+    <div class="dos" style="height:186px;background:var(--savoirs)"><span>Nexus</span></div>
+    <div class="dos" style="height:158px;background:var(--bd)"><span>Blast</span></div>
+    <div class="dos" style="height:140px;background:var(--savoirs)"><span>Le Prince</span></div>
+    <div class="dos" style="height:176px;background:var(--savoirs)"><span>Superforecasting</span></div>
+    <div class="dos" style="height:150px;background:var(--roman)"><span>Candide</span></div>
+    <div class="dos" style="height:164px;background:var(--roman)"><span>Millénium</span></div>
+  </div>
+</div>
 
-function chiffre(n, quoi) {
-  return `<div class="chiffre"><div class="n">${n}</div><div class="quoi">${quoi}</div></div>`;
-}
+<section class="blanc" id="fonctions">
+  <div class="wrap">
+    <h2>Tout ce qu'une bibliothèque devrait savoir faire</h2>
+    <p class="intro">
+      Ajoutez un livre en trois secondes, retrouvez-le en deux clics. Chaque
+      élément — auteur, rayon, thème — est cliquable et vous emmène quelque part.
+    </p>
+    <div class="grille">
+      <div class="carte">
+        <div class="glyphe">▯▮▯</div>
+        <h3>Scan code-barres</h3>
+        <p>Visez le dos du livre : titre, auteur, éditeur et couverture sont
+           remplis et classés automatiquement.</p>
+      </div>
+      <div class="carte">
+        <div class="glyphe">“</div>
+        <h3>Résumés vérifiés <span class="plus">PLUS</span></h3>
+        <p>Un résumé, trois à cinq idées-clés et des thèmes cliquables —
+           vérifiés par recherche web, avec leur degré de certitude.</p>
+      </div>
+      <div class="carte">
+        <div class="glyphe">→</div>
+        <h3>Parcours par intention <span class="plus">PLUS</span></h3>
+        <p>Décrivez ce que vous voulez comprendre : un parcours ordonné est
+           construit dans vos propres rayons.</p>
+      </div>
+      <div class="carte">
+        <div class="glyphe">§</div>
+        <h3>Articles et DOI</h3>
+        <p>Un article de revue s'ajoute par son DOI, avec son résumé d'auteur
+           et sa pagination. Les chapitres d'ouvrage ne sont pas confondus
+           avec les revues.</p>
+      </div>
+      <div class="carte">
+        <div class="glyphe">◧</div>
+        <h3>Privé par défaut</h3>
+        <p>Rien ne sort tant que vous ne l'avez pas décidé — par bibliothèque,
+           par rayon, ou livre par livre.</p>
+      </div>
+      <div class="carte">
+        <div class="glyphe">↓</div>
+        <h3>Vos données vous appartiennent</h3>
+        <p>Export CSV ou JSON à tout moment, sans rien demander. Et une
+           suppression de compte immédiate et complète.</p>
+      </div>
+      <div class="carte">
+        <div class="glyphe">☍</div>
+        <h3>Sur votre téléphone</h3>
+        <p>Lisia s'installe sur l'écran d'accueil comme une application, et
+           le scanner utilise l'appareil photo.</p>
+      </div>
+      <div class="carte">
+        <div class="glyphe">⌘</div>
+        <h3>Hébergé en France</h3>
+        <p>Serveur en France, courriels par un prestataire français,
+           sauvegardes chiffrées. Aucune publicité, aucune revente.</p>
+      </div>
+    </div>
+  </div>
+</section>
 
-/* -------------------------------------------------------------------------
-   PAVAGE « SQUARIFIÉ »  (Bruls, Huizing & van Wijk, 2000)
+<section>
+  <div class="wrap deux">
+    <div>
+      <h2>« Qu'ai-je envie d'apprendre ? »</h2>
+      <p class="intro">
+        La question qu'on se pose devant ses propres étagères, et à laquelle
+        aucun catalogue ne répond. Décrivez un sujet, une difficulté, une
+        décision à prendre : Lisia trace un chemin ordonné dans ce que vous
+        possédez déjà — et dit franchement ce qui vous manque.
+      </p>
+      <div class="demande">
+        <em>Par exemple</em>
+        Comprendre pourquoi les équipes prennent de mauvaises décisions
+        collectives, et ce que je peux faire en tant que manager.
+      </div>
+    </div>
+    <ul class="etapes">
+      <li><span class="num">1</span><div>
+        <b>Système 1 / Système 2</b>
+        <p>Pour nommer les biais avant de les combattre. Chapitres 3 et 22.</p>
+      </div></li>
+      <li><span class="num">2</span><div>
+        <b>Le Cygne noir</b>
+        <p>Pourquoi le consensus se trompe ensemble, et avec assurance.</p>
+      </div></li>
+      <li><span class="num">3</span><div>
+        <b>Superforecasting</b>
+        <p>Ce qui distingue les groupes qui prévoient bien des autres.</p>
+      </div></li>
+      <li><span class="num">4</span><div>
+        <b>Ce qui vous manque</b>
+        <p>Aucun ouvrage de vos rayons ne traite de l'animation de réunion
+           elle-même — deux titres sont suggérés, hors bibliothèque.</p>
+      </div></li>
+    </ul>
+  </div>
+</section>
 
-   Découper un rectangle en tuiles d'aires données. L'algorithme naïf — des
-   bandes successives — donne des rectangles très allongés pour les petits
-   rayons : à aire égale, un trait fin et un carré ne se comparent pas à
-   l'œil, et l'aire cesse d'être lisible. Celui-ci empile les tuiles par
-   rangées le long du côté court et ferme la rangée dès que le rapport
-   d'aspect commencerait à se dégrader.
+<section class="nuit" id="offres">
+  <div class="wrap">
+    <h2>Deux offres, et la première suffit longtemps</h2>
+    <p class="intro">
+      Cataloguer sa bibliothèque est gratuit, sans limite de titres. Ce qui
+      est payant, c'est ce qui appelle un modèle de langue — parce que chaque
+      appel a un coût réel.
+    </p>
+    <div class="offres">
+      <div class="offre">
+        <h3>Gratuit</h3>
+        <div class="prix">0 €</div>
+        <ul>
+          <li class="oui">Ouvrages et articles en nombre illimité</li>
+          <li class="oui">Scan code-barres, ajout par ISBN ou par DOI</li>
+          <li class="oui">Rayons, statuts, notes, recherche</li>
+          <li class="oui">Export CSV et JSON</li>
+          <li>Une dizaine de demandes à l'IA par mois</li>
+        </ul>
+        <a class="bouton creux" href="/ma-bibliotheque.html?espace=perso">Commencer</a>
+      </div>
+      <div class="offre mise">
+        <h3>Plus <span class="recommande">BIENTÔT</span></h3>
+        <div class="prix">2,99 € <small>par mois</small></div>
+        <ul>
+          <li class="oui">Tout ce qui précède</li>
+          <li class="oui">Résumés et idées-clés sans compter</li>
+          <li class="oui">Parcours de lecture par intention</li>
+          <li class="oui">Suggestions hors bibliothèque</li>
+        </ul>
+        <!-- PAS DE BOUTON D'ACHAT : il n'y a aucun moyen de paiement.
+             Un bouton qui ne mene nulle part est pire qu'une absence. -->
+        <span style="font-size:14px;color:var(--nuit-douce)">
+          Pas encore disponible. Le gratuit n'est pas une periode d'essai :
+          il reste gratuit.
+        </span>
+      </div>
+    </div>
+    <p class="bientot">
+      Aujourd'hui, tout le monde est sur l'offre gratuite et aucun paiement
+      n'est possible. Quand Plus ouvrira, rien de ce que vous avez catalogué
+      ne deviendra payant.
+    </p>
+  </div>
+</section>
 
-   Entrée  : [{ n, ... }] trié par n décroissant.
-   Sortie  : les mêmes objets enrichis de x, y, w, h (en pixels).
-   ------------------------------------------------------------------------- */
-function pavage(items, W, H) {
-  const total = items.reduce((s, i) => s + i.n, 0);
-  if (!total || W <= 0 || H <= 0) return [];
-
-  const echelle = (W * H) / total;
-  const file = items.map(i => Object.assign({}, i, { aire: i.n * echelle }));
-  const posees = [];
-  let x = 0, y = 0, w = W, h = H, i = 0;
-
-  // Rapport d'aspect le plus défavorable d'une rangée donnée.
-  const pire = (rangee, cote) => {
-    const s = rangee.reduce((a, b) => a + b.aire, 0);
-    if (s <= 0 || cote <= 0) return Infinity;
-    const max = Math.max.apply(null, rangee.map(r => r.aire));
-    const min = Math.min.apply(null, rangee.map(r => r.aire));
-    return Math.max((cote * cote * max) / (s * s), (s * s) / (cote * cote * min));
-  };
-
-  while (i < file.length && w > 0.5 && h > 0.5) {
-    const vertical = w >= h;            // on empile le long du côté court
-    const cote = vertical ? h : w;
-    const rangee = [file[i]];
-    let j = i + 1;
-    while (j < file.length &&
-           pire(rangee.concat([file[j]]), cote) <= pire(rangee, cote)) {
-      rangee.push(file[j]); j++;
-    }
-
-    const s = rangee.reduce((a, b) => a + b.aire, 0);
-    const epaisseur = Math.min(s / cote, vertical ? w : h);
-    let d = 0;
-    rangee.forEach(r => {
-      const longueur = epaisseur > 0 ? r.aire / epaisseur : 0;
-      posees.push(Object.assign({}, r, vertical
-        ? { x: x,     y: y + d, w: epaisseur, h: longueur }
-        : { x: x + d, y: y,     w: longueur,  h: epaisseur }));
-      d += longueur;
-    });
-
-    if (vertical) { x += epaisseur; w -= epaisseur; }
-    else          { y += epaisseur; h -= epaisseur; }
-    i = j;
-  }
-
-  // Si la boucle s'est arrêtée faute de place, les rayons restants existent
-  // toujours : mieux vaut une tuile minuscule qu'un rayon escamoté.
-  while (i < file.length) {
-    posees.push(Object.assign({}, file[i], { x: 0, y: 0, w: 0, h: 0 }));
-    i++;
-  }
-  return posees;
-}
-
-let STATS = null;
-let essaisMosaique = 0;
-
-function dessinerMosaique() {
-  const el = document.getElementById("mosaique");
-  if (!STATS || !el) return;
-
-  const W = el.clientWidth, H = el.clientHeight;
-
-  // Tracer dans un cadre de largeur nulle produirait une mosaïque vide, sans
-  // erreur ni message : le pire des résultats, puisqu'il ressemble à « ce
-  // rayon n'existe pas ». Cela arrive quand le bloc est encore masqué au
-  // moment du premier appel. On réessaie, mais un nombre borné de fois :
-  // une boucle d'animation sans fin serait pire que l'absence de figure.
-  if (W < 2 || H < 2) {
-    if (essaisMosaique++ < 5) requestAnimationFrame(dessinerMosaique);
-    return;
-  }
-  essaisMosaique = 0;
-
-  const rayons = STATS.sous_categories.slice().sort((a, b) => b.n - a.n);
-  el.innerHTML = "";
-
-  pavage(rayons, W, H).forEach(t => {
-    if (t.w < 1 || t.h < 1) return;
-    const couleur = HEX[t.categorie] || "#444";
-    const partLue = t.n ? Math.round((t.lus ?? 0) / t.n * 100) : 0;
-
-    const a = document.createElement("a");
-    a.className = "tuile" + (t.w < 96 || t.h < 62 ? " muette" : "");
-    a.style.left = t.x + "px";
-    a.style.top = t.y + "px";
-    a.style.width = t.w + "px";
-    a.style.height = t.h + "px";
-    a.style.background = couleur + "22";      // teinte légère de la catégorie
-    a.style.borderColor = couleur + "66";
-    a.href = "/ma-bibliotheque.html?rayon=" + encodeURIComponent(t.sous_categorie);
-    a.setAttribute("aria-label",
-      t.sous_categorie + " : " + t.n + " ouvrage" + (t.n > 1 ? "s" : "")
-      + ", " + (t.lus || 0) + " lu" + ((t.lus || 0) > 1 ? "s" : "")
-      + ". Ouvrir ce rayon.");
-    /* Le volume du rayon vit dans l'infobulle, jamais dans la géométrie :
-       l'aire encode le nombre d'ouvrages, et elle seule. Mêler les deux
-       rendrait la figure illisible — on ne saurait plus si une grande tuile
-       contient beaucoup de livres ou de gros livres. */
-    const pagesRayon = t.pages_connues ?? 0;
-    a.title = t.sous_categorie + " — " + t.n + " ouvrage" + (t.n > 1 ? "s" : "")
-      + ", " + partLue + " % lus"
-      + (pagesRayon
-          ? ` · ${Number(t.pages_volume ?? 0).toLocaleString("fr-FR")} pages connues `
-            + `sur ${pagesRayon} ouvrage${pagesRayon > 1 ? "s" : ""}`
-          : " · pagination inconnue");
-
-    const haut = document.createElement("div");
-    const nom = document.createElement("div");
-    nom.className = "nom"; nom.textContent = t.sous_categorie;
-    const nb = document.createElement("div");
-    nb.className = "n"; nb.textContent = t.n;
-    haut.appendChild(nom); haut.appendChild(nb);
-
-    const jauge = document.createElement("div");
-    jauge.className = "jauge";
-    const rempli = document.createElement("i");
-    rempli.style.width = partLue + "%";
-    rempli.style.background = couleur;
-    jauge.appendChild(rempli);
-
-    a.appendChild(haut); a.appendChild(jauge);
-    el.appendChild(a);
-  });
-}
-
-function dessinerDecennies(stats) {
-  const el = document.getElementById("decennies");
-  if (!stats.decennies.length) { el.hidden = true; return; }
-  const max = Math.max(...stats.decennies.map(d => d.n));
-  el.innerHTML = stats.decennies.map(d => `
-    <div class="dec" title="${d.n} ouvrage${d.n > 1 ? "s" : ""}">
-      <div class="b" style="height:${Math.round(d.n / max * 100)}%"></div>
-      <div class="e">${String(d.decennie).slice(-2)}</div>
-    </div>`).join("");
-}
-
-function dessinerListes(stats) {
-  document.getElementById("auteurs").innerHTML = stats.auteurs_recurrents.map(a => `
-    <div class="ligne"><span>${a.auteur}</span><span class="d">${a.n} titres</span></div>`).join("")
-    || '<div class="ligne"><span>—</span></div>';
-
-  document.getElementById("recents").innerHTML = stats.plus_recents.map(l => `
-    <div class="ligne">
-      <span><span class="t">${l.titre}</span><br><span class="a">${l.auteur}</span></span>
-      <span class="d">${l.annee ?? ""}</span>
-    </div>`).join("");
-}
-
-(async () => {
-  try {
-    const r = await fetch("/api/statistiques", { credentials: "same-origin" });
-    if (!r.ok) throw new Error("Le serveur a répondu " + r.status);
-    const s = await r.json();
-
-    const partLus = s.total ? Math.round(s.lus / s.total * 100) : 0;
-
-    // La note moyenne ne porte que sur les ouvrages NOTÉS. Le dire dans
-    // l'étiquette, sinon « 4,32 » posé à côté de « 242 ouvrages » se lit
-    // comme la moyenne des 242. Ils sont 57.
-    const notes = s.notes ?? null;
-    const etiquetteNote = notes === null ? "note moyenne"
-      : notes === 0        ? "aucune note"
-      : "note moyenne (" + nombre(notes) + " notés)";
-
-    /* Le volume de pages est une mesure SÉPARÉE, et son étiquette dit sur
-       combien d'ouvrages elle porte.
-
-       On aurait pu dimensionner les tuiles de la mosaïque au volume plutôt
-       qu'au nombre d'ouvrages. Cela aurait obligé à inventer une aire pour
-       les ouvrages sans pagination — zéro les aurait effacés, la moyenne du
-       rayon aurait fabriqué un volume indiscernable d'une mesure. On garde
-       donc deux mesures distinctes, chacune avec son effectif. */
-    const pagesConnues = s.pages_connues ?? 0;
-    const volume = s.pages_volume ?? 0;
-    const vignettePages = pagesConnues === 0
-      ? chiffre("—", "pagination inconnue")
-      : chiffre(nombre(volume), "pages (" + nombre(pagesConnues) + " ouvrages sur " + nombre(s.total) + ")");
-
-    document.getElementById("chiffres").innerHTML = [
-      chiffre(nombre(s.total), "ouvrages"),
-      chiffre(nombre(s.lus), "lus (" + partLus + " %)"),
-      chiffre(nombre(s.a_lire + s.en_cours), "sur la pile"),
-      chiffre(nombre(s.avec_resume), "résumés"),
-      chiffre(nombre(s.auteurs), "auteurs"),
-      chiffre(s.note_moyenne !== null && notes ? s.note_moyenne.toFixed(2).replace(".", ",") : "—",
-              etiquetteNote),
-      vignettePages,
-    ].join("");
-
-    STATS = s;
-    dessinerMosaique();
-    dessinerDecennies(s);
-    dessinerListes(s);
-
-    const complet = s.perimetre === "complet";
-    texte(document.getElementById("titreRayons"),
-      "Les " + s.rayons + " rayons");
-    texte(document.getElementById("legendeMosaique"),
-      (complet
-        ? "Bibliothèque complète — " + nombre(s.total) + " ouvrages, tous rayons confondus. "
-        : "Ce qui est publié — " + nombre(s.total) + " ouvrages. ")
-      + "L'aire de chaque tuile est proportionnelle au nombre d'ouvrages — "
-      + "pas à leur volume. La barre du bas indique la part déjà lue. "
-      + "Cliquez un rayon pour l'ouvrir."
-      + (pagesConnues
-          ? " Le volume de pages, affiché au survol, ne porte que sur les "
-            + nombre(pagesConnues) + " ouvrages dont la pagination est connue."
-          : ""));
-
-    if (complet) {
-      texte(document.getElementById("clePerso"), "Session ouverte");
-      texte(document.getElementById("cleAcces"), "Session ouverte");
-    }
-
-    texte(document.getElementById("noteBas"),
-      "Les résumés sont produits par un modèle de langage et vérifiés par recherche web ; "
-      + "chacun porte la mention de sa date et de son degré de certitude, et reste à recouper "
-      + "avant citation. Les couvertures proviennent d'Open Library et de Google Books. "
-      + (s.annee_min && s.annee_max
-          ? "Les ouvrages présentés vont de " + s.annee_min + " à " + s.annee_max + "."
-          : ""));
-
-    document.getElementById("chargement").hidden = true;
-    document.getElementById("contenu").hidden = false;
-
-    // Le pavage dépend de la largeur disponible : il doit être recalculé
-    // quand elle change. Le premier tracé a eu lieu pendant que le bloc
-    // était encore masqué — largeur nulle —, d'où ce second tracé une fois
-    // le contenu affiché.
-    dessinerMosaique();
-    let minuteur = null;
-    addEventListener("resize", () => {
-      clearTimeout(minuteur);
-      minuteur = setTimeout(dessinerMosaique, 120);
-    });
-  } catch (e) {
-    document.getElementById("chargement").hidden = true;
-    const err = document.getElementById("erreur");
-    err.hidden = false;
-    err.textContent = "Statistiques indisponibles : " + e.message
-      + ". Le serveur est-il démarré ?";
-  }
-})();
-
-</script>
+<footer>
+  <div class="wrap">
+    <div class="liens">
+      <a href="/mentions-legales.html">Mentions légales</a>
+      <a href="/confidentialite.html">Confidentialité</a>
+      <a href="/ma-bibliotheque.html?espace=perso">Se connecter</a>
+    </div>
+    <div>Lisia — vos données restent les vôtres, exportables à tout moment,
+      effaçables en un geste. Hébergé en France.</div>
+  </div>
+</footer>

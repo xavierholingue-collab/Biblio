@@ -1,0 +1,233 @@
+/* ===========================================================================
+   LES JETONS DE LISIA — une seule définition, pour toutes les pages
+
+   ---------------------------------------------------------------------------
+   POURQUOI UN FICHIER, ET PAS UN « :root » PAR PAGE
+
+   Les trois écrans déclaraient chacun leur palette. Trois copies d'une même
+   vérité, donc trois occasions de diverger — et c'est toujours celle qu'on
+   ne relit pas qui décide de ce que le visiteur voit.
+
+   « test-jetons.mjs » refuse désormais toute couleur écrite en dur ailleurs
+   qu'ici. La contrainte est la même que pour le domaine, les portes
+   d'inscription et les tiers déclarés : une chose vraie ne s'écrit qu'à un
+   endroit.
+
+   ---------------------------------------------------------------------------
+   LES POLICES SONT CHEZ NOUS, ET C'EST UNE DÉCISION DE CONFIDENTIALITÉ
+
+   Literata et Schibsted Grotesk sont sur Google Fonts. Les y appeler
+   donnerait à Google l'adresse IP de chaque visiteur, à chaque page —
+   y compris celle qui explique ce qu'on fait de ses données, et qui affirme
+   que le navigateur ne contacte aucun tiers.
+
+   Ce n'est pas une précaution abstraite : des tribunaux allemands ont
+   condamné des sites pour exactement cela. Les fichiers voyagent donc avec
+   le dépôt, la politique de contenu reste en « 'self' », et la page dit
+   vrai.
+
+   Les deux familles sont sous licence OFL 1.1 — l'hébergement et la
+   redistribution sont expressément permis. Les licences sont dans
+   « polices/ », à côté des fichiers.
+
+   ---------------------------------------------------------------------------
+   « unicode-range » N'EST PAS UN ORNEMENT
+
+   Il indique au navigateur quels caractères chaque fichier couvre. Sans lui,
+   les dix fichiers seraient tous téléchargés ; avec lui, une page française
+   n'en prend que cinq. Le sous-ensemble « latin » contient déjà œ (U+0153)
+   et tous les accents français : « latin-ext » ne se charge que pour un nom
+   d'auteur polonais ou tchèque.
+
+   « font-display: swap » affiche le texte tout de suite dans la police de
+   secours, puis substitue. Une page lisible en retard vaut mieux qu'une page
+   blanche à l'heure.
+   =========================================================================== */
+
+/* ------------------------------------------------------------- Literata
+   Les titres, les titres d'ouvrages, les grands chiffres. */
+@font-face {
+  font-family: "Literata";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/polices/literata-latin-400-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,
+                 U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,
+                 U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: "Literata";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/polices/literata-latin-ext-400-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,
+                 U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,
+                 U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: "Literata";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/polices/literata-latin-600-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,
+                 U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,
+                 U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: "Literata";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/polices/literata-latin-ext-600-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,
+                 U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,
+                 U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+
+/* --------------------------------------------------- Schibsted Grotesk
+   L'interface : boutons, étiquettes, texte courant. */
+@font-face {
+  font-family: "Schibsted Grotesk";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/polices/schibsted-grotesk-latin-400-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,
+                 U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,
+                 U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: "Schibsted Grotesk";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/polices/schibsted-grotesk-latin-ext-400-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,
+                 U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,
+                 U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: "Schibsted Grotesk";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/polices/schibsted-grotesk-latin-500-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,
+                 U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,
+                 U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: "Schibsted Grotesk";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/polices/schibsted-grotesk-latin-ext-500-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,
+                 U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,
+                 U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: "Schibsted Grotesk";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/polices/schibsted-grotesk-latin-700-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,
+                 U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,
+                 U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: "Schibsted Grotesk";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/polices/schibsted-grotesk-latin-ext-700-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,
+                 U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,
+                 U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+
+/* ===========================================================================
+   LES JETONS
+
+   Relevés sur le handoff de Claude Design du 25/08/2026. Les noms sont en
+   français parce que tout le reste du dépôt l'est : une variable
+   « --accent-hover » au milieu de « --encre-attenuee » se lit deux fois.
+   =========================================================================== */
+:root {
+  /* --- Surfaces ------------------------------------------------------- */
+  --creme:        #FBF6EC;   /* fond de l'application et des pages */
+  --blanc:        #FFFFFF;   /* cartes, panneaux, listes */
+  --sable:        #F1E9D8;   /* fonds secondaires, pastilles, encarts */
+
+  /* --- Encre ---------------------------------------------------------- */
+  --encre:        #1C2130;   /* texte principal, boutons noirs, fond sombre */
+  --encre-appui:  #0E1119;   /* le même, enfoncé : survol d'un bouton encre */
+  --encre-douce:  #6B7080;   /* texte atténué, légendes */
+  --trait:        #E3DCC9;   /* bordures, filets */
+
+  /* --- Accent --------------------------------------------------------- */
+  --cobalt:       #3A5BA0;   /* actions, liens, plan Plus, le « ia » du logo */
+  --cobalt-fonce: #2C477F;   /* survol */
+  --cobalt-voile: #3A5BA01A; /* fonds d'accent très légers */
+
+  /* --- Les trois rayons ------------------------------------------------
+     Elles portaient déjà ces rôles dans l'application ; seules les valeurs
+     changent. « Savoirs » s'appelle encore « acad » dans les pages, reste
+     d'un renommage de 07-savoirs.sql — on ne le corrige pas ici pour ne pas
+     mêler deux chantiers. */
+  --savoirs:      #3A5BA0;
+  --roman:        #A04455;
+  --bd:           #C08A2D;
+
+  /* --- Statuts de lecture ---------------------------------------------- */
+  --lu-fond:        #DDEBD9;  --lu-encre:        #2F5D3A;
+  --en-cours-fond:  #FDEAC8;  --en-cours-encre:  #8A5A12;
+  --a-lire-fond:    #E5E2F2;  --a-lire-encre:    #4A4390;
+  --resume-dispo:   #8FD0B4;  /* le filet vert sous une couverture résumée */
+
+  /* --- Écran sombre : offres, paywall ---------------------------------- */
+  --nuit:          #1C2130;
+  --nuit-carte:    #252B3E;
+  --nuit-trait:    #3A4158;
+  --nuit-douce:    #A8ACBB;
+
+  /* --- Typographies ---------------------------------------------------- */
+  --titre: "Literata", Georgia, "Iowan Old Style", "Times New Roman", serif;
+  --texte: "Schibsted Grotesk", system-ui, -apple-system, "Segoe UI", Roboto,
+           sans-serif;
+  --mono:  ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  /* --- Rayons ---------------------------------------------------------- */
+  --r-pilule:  999px;
+  --r-bouton:  10px;
+  --r-champ:   12px;
+  --r-carte:   14px;
+  --r-modale:  18px;
+
+  /* --- Ombres ----------------------------------------------------------
+     Celle des couvertures porte un « inset » : c'est lui qui fait le dos de
+     livre, en creusant le bord gauche. Sans lui, une couverture est un
+     rectangle ; avec lui, c'est un objet. */
+  --ombre-carte:      0 2px 8px rgba(28, 33, 48, .05);
+  --ombre-couverture: 0 2px 6px rgba(28, 33, 48, .14),
+                      inset -4px 0 8px -5px rgba(0, 0, 0, .4);
+  --ombre-survol:     0 10px 20px rgba(28, 33, 48, .22);
+  --ombre-modale:     0 24px 60px rgba(28, 33, 48, .28);
+
+  /* --- Mouvement -------------------------------------------------------- */
+  --leve: translateY(-4px);
+}
+
+/* Une préférence système qui demande moins d'animation est une demande, pas
+   une suggestion : certaines personnes en ont mal au cœur. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .001ms !important;
+    transition-duration: .001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

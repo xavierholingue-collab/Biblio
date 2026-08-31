@@ -21,13 +21,13 @@ const chemin = require("path");
 const { JSDOM } = require("jsdom");
 
 const CANDIDATS = [
-  chemin.join(__dirname, "..", "index.html"),        // web/test/
-  chemin.join(__dirname, "..", "web", "index.html"), // tests/ à la racine
-  chemin.join(process.cwd(), "web", "index.html"),   // lancé depuis la racine
+  chemin.join(__dirname, "..", "bibliotheque-publique.html"),        // web/test/
+  chemin.join(__dirname, "..", "web", "bibliotheque-publique.html"), // tests/ à la racine
+  chemin.join(process.cwd(), "web", "bibliotheque-publique.html"),   // lancé depuis la racine
 ];
 const HTML = CANDIDATS.find(c => fs.existsSync(c));
 if (!HTML) {
-  console.error("index.html introuvable. Emplacements essayés :");
+  console.error("bibliotheque-publique.html introuvable. Emplacements essayés :");
   CANDIDATS.forEach(c => console.error("  " + c));
   process.exit(1);
 }

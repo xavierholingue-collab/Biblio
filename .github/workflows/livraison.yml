@@ -260,6 +260,21 @@ jobs:
       - name: Les pages legales disent ce que le code fait
         run: node tests/test-pages-legales.mjs
 
+      # Une couleur ne s'ecrit qu'a un endroit. La regle est conditionnelle —
+      # une page qui charge jetons.css n'en definit plus — pour que la
+      # migration se fasse page par page sans laisser le controle rouge.
+      # Verifie aussi que les polices sont chez nous et non chez Google : les
+      # y appeler donnerait a Google l'IP de chaque visiteur, ce que la
+      # politique de confidentialite affirme ne pas faire.
+      - name: Une couleur ne s'ecrit qu'a un endroit
+        run: node tests/test-jetons.mjs
+
+      # Deux bornes justes separement dont la conjonction ment : le quota
+      # annoncait dix appels, le plafond d'argent fermait au sixieme. Vu le
+      # 25/08 en ecrivant la page d'accueil, pas par un controle.
+      - name: Les deux plafonds ne se contredisent pas
+        run: node tests/test-plafonds-coherents.mjs
+
       - name: Authentification par lien magique
         run: |
           npm install @electric-sql/pglite --no-audit --no-fund --silent

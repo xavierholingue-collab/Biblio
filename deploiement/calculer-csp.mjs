@@ -103,6 +103,14 @@ const politique = [
   "img-src 'self' data: https://covers.openlibrary.org https://books.google.com https://*.googleusercontent.com",
   "connect-src 'self' https://www.googleapis.com",
   "media-src 'self' blob:",
+  /* LES POLICES SONT CHEZ NOUS — 25/08/2026.
+     « default-src 'self' » les couvrait déjà : sans « font-src », c'est lui
+     qui s'applique. On l'écrit quand même, parce qu'une directive absente est
+     une décision qu'on ne relit pas. Le jour où « default-src » s'élargirait
+     pour une autre raison, les polices s'élargiraient avec lui, en silence.
+     Écrite ici, la règle dit ce qu'elle veut dire : Literata et Schibsted
+     Grotesk viennent de /polices/, jamais de Google. */
+  "font-src 'self'",
   "form-action 'self'",
   "base-uri 'none'",
   "frame-ancestors 'none'",

@@ -50,7 +50,7 @@ test.describe("Page d'accueil publique", () => {
 
   test("la page s'exécute sans être bridée par la politique de contenu", async ({ page }) => {
     const plaintes = surveiller(page);
-    await page.goto("/", { waitUntil: "networkidle" });
+    await page.goto("/bibliotheque-publique.html", { waitUntil: "networkidle" });
 
     // Si le script est bloqué, ce bandeau ne disparaît jamais. C'est
     // exactement le symptôme observé le 04/08/2026.
@@ -61,7 +61,7 @@ test.describe("Page d'accueil publique", () => {
   });
 
   test("les chiffres sont réellement affichés", async ({ page }) => {
-    await page.goto("/", { waitUntil: "networkidle" });
+    await page.goto("/bibliotheque-publique.html", { waitUntil: "networkidle" });
     /* On vérifie que les mesures ATTENDUES sont là, pas qu'il y en ait un
        certain nombre.
 
@@ -95,7 +95,7 @@ test.describe("Page d'accueil publique", () => {
     const stats = await (await request.get("/api/statistiques")).json();
     const total = stats.total;
 
-    await page.goto("/", { waitUntil: "networkidle" });
+    await page.goto("/bibliotheque-publique.html", { waitUntil: "networkidle" });
     const tuiles = page.locator("#mosaique .tuile");
     await expect(tuiles).toHaveCount(stats.sous_categories.length);
 
@@ -130,7 +130,7 @@ test.describe("Page d'accueil publique", () => {
   });
 
   test("la mosaïque ne déborde pas et la page ne défile pas latéralement", async ({ page }) => {
-    await page.goto("/", { waitUntil: "networkidle" });
+    await page.goto("/bibliotheque-publique.html", { waitUntil: "networkidle" });
     const cadre = await page.locator("#mosaique").boundingBox();
 
     const debordent = await page.locator("#mosaique .tuile").evaluateAll((els, c) =>
@@ -151,7 +151,7 @@ test.describe("Page d'accueil publique", () => {
 
   test("cliquer un rayon ouvre l'application filtrée sur ce rayon", async ({ page }) => {
     const plaintes = surveiller(page);
-    await page.goto("/", { waitUntil: "networkidle" });
+    await page.goto("/bibliotheque-publique.html", { waitUntil: "networkidle" });
 
     const tuile = page.locator("#mosaique .tuile").first();
     const nom = (await tuile.locator(".nom").textContent()).trim();

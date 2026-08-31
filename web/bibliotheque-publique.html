@@ -1,0 +1,551 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Une bibliothèque de travail — Lisia</title>
+<!-- CETTE PAGE ÉTAIT « index.html » JUSQU'AU 25/08/2026.
+
+     La landing de Lisia a pris la racine, et cette page-ci a gardé son
+     contenu, son nom d'éléments et ses six contrôles — cinq Playwright sur
+     « #mosaique », « #contenu », « #chargement », plus web/test/test-accueil.js.
+
+     Elle n'a PAS été supprimée pour faire de la place : c'est la vraie
+     bibliothèque publique, et c'est ce que la landing montre quand elle
+     propose « voir une vraie bibliothèque ». Une démonstration fabriquée
+     aurait demandé du travail pour être moins vraie. -->
+<link rel="canonical" href="https://lisia.y-factor.fr/bibliotheque-publique.html">
+<meta name="description" content="Bibliothèque professionnelle : management, décision, industrie, numérique, philosophie et sciences sociales.">
+<!-- Telemetrie d'audience (Umami), servie en first-party.
+     Le script vient de /stats/s.js, c'est-a-dire du domaine de Biblio via
+     le proxy Caddy : script-src 'self' et connect-src 'self' le couvrent
+     deja, la politique de contenu n'a pas eu a changer. Script externe,
+     donc hors du calcul des empreintes sha256 de calculer-csp.mjs.
+
+     data-host-url est INDISPENSABLE : sans lui, la collecte partirait sur
+     /api/send et tomberait dans l'API metier (handle /api/* -> :3006).
+     data-domains limite l'envoi a la production : la recette ne pollue pas.
+     Aucune donnee personnelle, aucun cookie. -->
+<script defer
+        src="/stats/s.js"
+        data-website-id="e0fddae3-1198-42ee-a580-324af31bbcdf"
+        data-host-url="/stats"
+        data-domains="lisia.y-factor.fr"></script>
+
+<style>
+  /* ------------------------------------------------- Bandeau de recette
+     Visible, mais pas decoratif : il repond a une question de securite.
+     On efface un jour des donnees en croyant etre ailleurs. */
+  #bandeau-recette {
+    position: sticky; top: 0; z-index: 999;
+    background: #8A3B4A; color: #fff;
+    padding: .5rem 1rem; text-align: center;
+    font: 600 .85rem/1.4 system-ui, sans-serif;
+    letter-spacing: .04em;
+  }
+  #bandeau-recette[hidden] { display: none; }
+
+  :root {
+    --paper:      #E9EBE6;
+    --paper-2:    #F2F3EF;
+    --ink:        #1A1F1C;
+    --ink-soft:   #5E665F;
+    --rule:       #C9CEC5;
+    --acad:       #2F5D62;
+    --bd:         #A9722A;
+    --roman:      #8A3B4A;
+    --focus:      #2F5D62;
+    --serif: Georgia, "Iowan Old Style", "Times New Roman", serif;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font-family: var(--sans); font-size: 16px; line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 940px; margin: 0 auto; padding: 0 22px 90px; }
+  [hidden] { display: none !important; }
+  a { color: inherit; }
+
+  /* ---------- Bandeau ---------- */
+  .bandeau { padding: 60px 0 34px; border-bottom: 2px solid var(--ink); }
+  h1 {
+    font-family: var(--serif); font-weight: 400; font-size: clamp(32px, 6vw, 48px);
+    letter-spacing: -0.02em; margin: 0 0 14px; line-height: 1.08;
+  }
+  .chapeau {
+    font-family: var(--serif); font-size: clamp(17px, 2.4vw, 20px);
+    line-height: 1.5; max-width: 62ch; margin: 0 0 8px; color: var(--ink);
+  }
+  .sous-chapeau { font-size: 15px; color: var(--ink-soft); max-width: 62ch; margin: 14px 0 0; }
+
+  /* ---------- Mosaïque des rayons ----------
+     Une tuile par rayon, AIRE proportionnelle au nombre d'ouvrages.
+     L'aire est la seule variable encodée : pas de hauteur décorative,
+     pas de couleur qui ne dise rien. La barre du bas ajoute une seconde
+     information, mesurée elle aussi : la part déjà lue. */
+  .mosaique {
+    position: relative; width: 100%;
+    height: clamp(280px, 44vw, 400px);
+    margin: 10px 0 8px;
+  }
+  .tuile {
+    position: absolute; overflow: hidden; text-decoration: none;
+    color: var(--ink); background: var(--paper-2);
+    border: 1px solid var(--rule);
+    display: flex; flex-direction: column; justify-content: space-between;
+    padding: 9px 10px 0; cursor: pointer;
+    transition: background .12s ease, border-color .12s ease;
+  }
+  .tuile:hover, .tuile:focus-visible {
+    background: #DDE2DA; border-color: var(--ink); outline: none; z-index: 2;
+  }
+  .tuile .nom {
+    font-size: 13px; line-height: 1.25; overflow: hidden;
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3;
+  }
+  .tuile .n {
+    font-family: var(--mono); font-size: 11px; color: var(--ink-soft);
+    letter-spacing: .04em; margin-top: 4px;
+  }
+  .tuile .jauge {
+    height: 6px; margin: 6px -10px 0; background: var(--rule); flex: none;
+  }
+  .tuile .jauge i { display: block; height: 100%; }
+  .tuile.muette { padding: 5px 6px 0; }
+  .tuile.muette .nom { display: none; }
+  .tuile.muette .n { margin-top: 0; font-size: 10px; }
+
+  .legende-mosaique {
+    font-family: var(--mono); font-size: 11px; color: var(--ink-soft);
+    letter-spacing: .04em; margin-bottom: 40px; line-height: 1.7;
+  }
+
+  /* ---------- Chiffres ---------- */
+  .chiffres {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 1px; background: var(--rule); border: 1px solid var(--rule);
+    margin: 40px 0;
+  }
+  .chiffre { background: var(--paper); padding: 20px 18px; }
+  .chiffre .n {
+    font-family: var(--serif); font-size: 38px; line-height: 1; letter-spacing: -0.02em;
+  }
+  .chiffre .quoi {
+    font-family: var(--mono); font-size: 10px; letter-spacing: .1em;
+    text-transform: uppercase; color: var(--ink-soft); margin-top: 8px;
+  }
+
+  /* ---------- Sections ---------- */
+  h2 {
+    font-family: var(--mono); font-size: 11px; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--ink-soft); font-weight: 400;
+    margin: 46px 0 16px; padding-bottom: 8px; border-bottom: 1px solid var(--rule);
+  }
+
+  /* ---------- Décennies ---------- */
+  .decennies { display: flex; align-items: flex-end; gap: 4px; height: 130px; margin-top: 10px; }
+  .dec { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 6px; }
+  .dec .b { width: 100%; background: var(--acad); border-radius: 1px 1px 0 0; min-height: 2px; }
+  .dec .e { font-family: var(--mono); font-size: 9px; color: var(--ink-soft); letter-spacing: .02em; }
+
+  /* ---------- Listes ---------- */
+  .colonnes { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 34px; }
+  .ligne { display: flex; justify-content: space-between; gap: 14px; padding: 7px 0; border-bottom: 1px solid var(--rule); font-size: 15px; }
+  .ligne .d { font-family: var(--mono); font-size: 12px; color: var(--ink-soft); white-space: nowrap; }
+  .ligne .t { font-family: var(--serif); font-size: 16px; line-height: 1.3; }
+  .ligne .a { font-size: 13px; color: var(--ink-soft); }
+
+  /* ---------- Accès ---------- */
+  .acces { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 16px; margin-top: 20px; }
+  .porte {
+    display: block; text-decoration: none; border: 1px solid var(--ink);
+    padding: 22px 20px; background: var(--paper-2);
+    transition: background .12s ease, transform .12s ease;
+  }
+  .porte:hover { background: var(--ink); color: var(--paper); transform: translateY(-2px); }
+  .porte .t { font-family: var(--serif); font-size: 21px; margin-bottom: 6px; }
+  .porte .d { font-size: 14px; opacity: .85; }
+  .porte .cle {
+    font-family: var(--mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase;
+    margin-top: 12px; opacity: .7;
+  }
+
+  /* ---------- Divers ---------- */
+  .note-bas {
+    margin-top: 54px; padding-top: 20px; border-top: 1px solid var(--rule);
+    font-size: 13px; color: var(--ink-soft); max-width: 70ch;
+  }
+  .chargement { padding: 60px 0; text-align: center; color: var(--ink-soft); font-family: var(--mono); font-size: 12px; }
+  .erreur { padding: 24px; border: 1px solid var(--roman); color: var(--roman); font-size: 14px; margin: 34px 0; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div id="bandeau-recette" hidden>RECETTE — ces donnees sont une copie, rien de ce qui est fait ici n'atteint la bibliotheque reelle</div>
+
+<!-- Le bandeau a SON PROPRE script, classique et autonome. Deux raisons.
+
+     Une premiere version l'avait glisse dans le dernier bloc de la page —
+     qui se trouve etre le module du scanner de codes-barres. Le bandeau
+     dependait donc du chargement d'un module qui n'a rien a voir : s'il
+     echoue, ou si le navigateur le refuse, l'avertissement disparait
+     exactement quand on en aurait besoin.
+
+     Et il doit s'executer TOT. Un bandeau qui apparait apres qu'on a
+     commence a cliquer ne previent plus, il constate. -->
+<script>
+/* L'API dit quel environnement elle sert ; la page l'affiche. Une seule
+   source, celle du serveur — une page ne peut pas deviner ou elle tourne,
+   et un test sur le nom de domaine se tromperait des qu'on en ajoute un.
+
+   En cas d'echec de l'appel, on ne montre RIEN. Le sens de ce choix : un
+   bandeau affiche a tort en production serait embarrassant, tandis que son
+   absence en recette se remarque des le premier clic. */
+(async () => {
+  try {
+    const r = await fetch("/api/session", { credentials: "same-origin" });
+    if (!r.ok) return;
+    const s = await r.json();
+    if (s.environnement === "recette") {
+      const b = document.getElementById("bandeau-recette");
+      if (b) b.hidden = false;
+    }
+  } catch { /* silence : voir la note ci-dessus */ }
+})();
+</script>
+
+
+<div class="wrap">
+  <header class="bandeau">
+    <h1>Une bibliothèque de travail</h1>
+    <p class="chapeau">
+      Ce que j'ai lu, ce que je relis, et ce qui reste sur la pile. Une bibliothèque
+      d'ingénieur et de dirigeant, où le lean côtoie la philosophie et où les sciences
+      de la décision servent de fil conducteur.
+    </p>
+    <p class="sous-chapeau">
+      Chaque ouvrage porte un résumé rédigé par Claude, vérifié par recherche web, avec
+      son degré de certitude. On peut aussi décrire ce que l'on cherche à comprendre :
+      un parcours de lecture est alors construit dans ces rayons.
+    </p>
+  </header>
+
+  <div id="chargement" class="chargement">Chargement des statistiques…</div>
+  <div id="erreur" class="erreur" hidden></div>
+
+  <main id="contenu" hidden>
+    <div class="chiffres" id="chiffres"></div>
+
+    <h2 id="titreRayons">Les rayons</h2>
+    <div class="mosaique" id="mosaique"></div>
+    <p class="legende-mosaique" id="legendeMosaique"></p>
+
+    <h2>Par décennie de parution</h2>
+    <div class="decennies" id="decennies"></div>
+
+    <div class="colonnes" style="margin-top:46px">
+      <div>
+        <h2 style="margin-top:0">Auteurs les plus présents</h2>
+        <div id="auteurs"></div>
+      </div>
+      <div>
+        <h2 style="margin-top:0">Entrées les plus récentes</h2>
+        <div id="recents"></div>
+      </div>
+    </div>
+
+    <h2>Entrer</h2>
+    <div class="acces">
+      <a class="porte" href="/ma-bibliotheque.html">
+        <div class="t">La bibliothèque professionnelle</div>
+        <div class="d">Parcourir les rayons, lire les résumés, demander un parcours de lecture.</div>
+        <div class="cle" id="cleAcces">Accès libre</div>
+      </a>
+      <a class="porte" href="/ma-bibliotheque.html?espace=perso">
+        <div class="t">L'espace personnel</div>
+        <div class="d">Romans, bandes dessinées, lectures qui ne regardent que moi.</div>
+        <div class="cle" id="clePerso">Mot de passe requis</div>
+      </a>
+    </div>
+
+    <p class="note-bas" id="noteBas"></p>
+
+    <!-- Les deux liens légaux, sur CHAQUE page. Une page de mentions qui
+         n'est atteignable que par son adresse n'est pas publiée : elle est
+         cachée. « test-pages-legales.mjs » vérifie qu'aucune page n'oublie
+         ce pied. -->
+    <div style="margin-top:52px;padding-top:16px;border-top:1px solid var(--rule);font-size:14px;opacity:.75">
+      <a href="/" style="margin-right:14px">← Lisia</a>
+      <a href="/mentions-legales.html" style="margin-right:14px">Mentions légales</a>
+      <a href="/confidentialite.html">Confidentialité</a>
+    </div>
+  </main>
+</div>
+
+<script>
+const HEX = { "Savoirs": "#2F5D62", "BD": "#A9722A", "Roman": "#8A3B4A" };
+
+function texte(el, t) { el.textContent = t; }
+function nombre(n) { return new Intl.NumberFormat("fr-FR").format(n); }
+
+function chiffre(n, quoi) {
+  return `<div class="chiffre"><div class="n">${n}</div><div class="quoi">${quoi}</div></div>`;
+}
+
+/* -------------------------------------------------------------------------
+   PAVAGE « SQUARIFIÉ »  (Bruls, Huizing & van Wijk, 2000)
+
+   Découper un rectangle en tuiles d'aires données. L'algorithme naïf — des
+   bandes successives — donne des rectangles très allongés pour les petits
+   rayons : à aire égale, un trait fin et un carré ne se comparent pas à
+   l'œil, et l'aire cesse d'être lisible. Celui-ci empile les tuiles par
+   rangées le long du côté court et ferme la rangée dès que le rapport
+   d'aspect commencerait à se dégrader.
+
+   Entrée  : [{ n, ... }] trié par n décroissant.
+   Sortie  : les mêmes objets enrichis de x, y, w, h (en pixels).
+   ------------------------------------------------------------------------- */
+function pavage(items, W, H) {
+  const total = items.reduce((s, i) => s + i.n, 0);
+  if (!total || W <= 0 || H <= 0) return [];
+
+  const echelle = (W * H) / total;
+  const file = items.map(i => Object.assign({}, i, { aire: i.n * echelle }));
+  const posees = [];
+  let x = 0, y = 0, w = W, h = H, i = 0;
+
+  // Rapport d'aspect le plus défavorable d'une rangée donnée.
+  const pire = (rangee, cote) => {
+    const s = rangee.reduce((a, b) => a + b.aire, 0);
+    if (s <= 0 || cote <= 0) return Infinity;
+    const max = Math.max.apply(null, rangee.map(r => r.aire));
+    const min = Math.min.apply(null, rangee.map(r => r.aire));
+    return Math.max((cote * cote * max) / (s * s), (s * s) / (cote * cote * min));
+  };
+
+  while (i < file.length && w > 0.5 && h > 0.5) {
+    const vertical = w >= h;            // on empile le long du côté court
+    const cote = vertical ? h : w;
+    const rangee = [file[i]];
+    let j = i + 1;
+    while (j < file.length &&
+           pire(rangee.concat([file[j]]), cote) <= pire(rangee, cote)) {
+      rangee.push(file[j]); j++;
+    }
+
+    const s = rangee.reduce((a, b) => a + b.aire, 0);
+    const epaisseur = Math.min(s / cote, vertical ? w : h);
+    let d = 0;
+    rangee.forEach(r => {
+      const longueur = epaisseur > 0 ? r.aire / epaisseur : 0;
+      posees.push(Object.assign({}, r, vertical
+        ? { x: x,     y: y + d, w: epaisseur, h: longueur }
+        : { x: x + d, y: y,     w: longueur,  h: epaisseur }));
+      d += longueur;
+    });
+
+    if (vertical) { x += epaisseur; w -= epaisseur; }
+    else          { y += epaisseur; h -= epaisseur; }
+    i = j;
+  }
+
+  // Si la boucle s'est arrêtée faute de place, les rayons restants existent
+  // toujours : mieux vaut une tuile minuscule qu'un rayon escamoté.
+  while (i < file.length) {
+    posees.push(Object.assign({}, file[i], { x: 0, y: 0, w: 0, h: 0 }));
+    i++;
+  }
+  return posees;
+}
+
+let STATS = null;
+let essaisMosaique = 0;
+
+function dessinerMosaique() {
+  const el = document.getElementById("mosaique");
+  if (!STATS || !el) return;
+
+  const W = el.clientWidth, H = el.clientHeight;
+
+  // Tracer dans un cadre de largeur nulle produirait une mosaïque vide, sans
+  // erreur ni message : le pire des résultats, puisqu'il ressemble à « ce
+  // rayon n'existe pas ». Cela arrive quand le bloc est encore masqué au
+  // moment du premier appel. On réessaie, mais un nombre borné de fois :
+  // une boucle d'animation sans fin serait pire que l'absence de figure.
+  if (W < 2 || H < 2) {
+    if (essaisMosaique++ < 5) requestAnimationFrame(dessinerMosaique);
+    return;
+  }
+  essaisMosaique = 0;
+
+  const rayons = STATS.sous_categories.slice().sort((a, b) => b.n - a.n);
+  el.innerHTML = "";
+
+  pavage(rayons, W, H).forEach(t => {
+    if (t.w < 1 || t.h < 1) return;
+    const couleur = HEX[t.categorie] || "#444";
+    const partLue = t.n ? Math.round((t.lus ?? 0) / t.n * 100) : 0;
+
+    const a = document.createElement("a");
+    a.className = "tuile" + (t.w < 96 || t.h < 62 ? " muette" : "");
+    a.style.left = t.x + "px";
+    a.style.top = t.y + "px";
+    a.style.width = t.w + "px";
+    a.style.height = t.h + "px";
+    a.style.background = couleur + "22";      // teinte légère de la catégorie
+    a.style.borderColor = couleur + "66";
+    a.href = "/ma-bibliotheque.html?rayon=" + encodeURIComponent(t.sous_categorie);
+    a.setAttribute("aria-label",
+      t.sous_categorie + " : " + t.n + " ouvrage" + (t.n > 1 ? "s" : "")
+      + ", " + (t.lus || 0) + " lu" + ((t.lus || 0) > 1 ? "s" : "")
+      + ". Ouvrir ce rayon.");
+    /* Le volume du rayon vit dans l'infobulle, jamais dans la géométrie :
+       l'aire encode le nombre d'ouvrages, et elle seule. Mêler les deux
+       rendrait la figure illisible — on ne saurait plus si une grande tuile
+       contient beaucoup de livres ou de gros livres. */
+    const pagesRayon = t.pages_connues ?? 0;
+    a.title = t.sous_categorie + " — " + t.n + " ouvrage" + (t.n > 1 ? "s" : "")
+      + ", " + partLue + " % lus"
+      + (pagesRayon
+          ? ` · ${Number(t.pages_volume ?? 0).toLocaleString("fr-FR")} pages connues `
+            + `sur ${pagesRayon} ouvrage${pagesRayon > 1 ? "s" : ""}`
+          : " · pagination inconnue");
+
+    const haut = document.createElement("div");
+    const nom = document.createElement("div");
+    nom.className = "nom"; nom.textContent = t.sous_categorie;
+    const nb = document.createElement("div");
+    nb.className = "n"; nb.textContent = t.n;
+    haut.appendChild(nom); haut.appendChild(nb);
+
+    const jauge = document.createElement("div");
+    jauge.className = "jauge";
+    const rempli = document.createElement("i");
+    rempli.style.width = partLue + "%";
+    rempli.style.background = couleur;
+    jauge.appendChild(rempli);
+
+    a.appendChild(haut); a.appendChild(jauge);
+    el.appendChild(a);
+  });
+}
+
+function dessinerDecennies(stats) {
+  const el = document.getElementById("decennies");
+  if (!stats.decennies.length) { el.hidden = true; return; }
+  const max = Math.max(...stats.decennies.map(d => d.n));
+  el.innerHTML = stats.decennies.map(d => `
+    <div class="dec" title="${d.n} ouvrage${d.n > 1 ? "s" : ""}">
+      <div class="b" style="height:${Math.round(d.n / max * 100)}%"></div>
+      <div class="e">${String(d.decennie).slice(-2)}</div>
+    </div>`).join("");
+}
+
+function dessinerListes(stats) {
+  document.getElementById("auteurs").innerHTML = stats.auteurs_recurrents.map(a => `
+    <div class="ligne"><span>${a.auteur}</span><span class="d">${a.n} titres</span></div>`).join("")
+    || '<div class="ligne"><span>—</span></div>';
+
+  document.getElementById("recents").innerHTML = stats.plus_recents.map(l => `
+    <div class="ligne">
+      <span><span class="t">${l.titre}</span><br><span class="a">${l.auteur}</span></span>
+      <span class="d">${l.annee ?? ""}</span>
+    </div>`).join("");
+}
+
+(async () => {
+  try {
+    const r = await fetch("/api/statistiques", { credentials: "same-origin" });
+    if (!r.ok) throw new Error("Le serveur a répondu " + r.status);
+    const s = await r.json();
+
+    const partLus = s.total ? Math.round(s.lus / s.total * 100) : 0;
+
+    // La note moyenne ne porte que sur les ouvrages NOTÉS. Le dire dans
+    // l'étiquette, sinon « 4,32 » posé à côté de « 242 ouvrages » se lit
+    // comme la moyenne des 242. Ils sont 57.
+    const notes = s.notes ?? null;
+    const etiquetteNote = notes === null ? "note moyenne"
+      : notes === 0        ? "aucune note"
+      : "note moyenne (" + nombre(notes) + " notés)";
+
+    /* Le volume de pages est une mesure SÉPARÉE, et son étiquette dit sur
+       combien d'ouvrages elle porte.
+
+       On aurait pu dimensionner les tuiles de la mosaïque au volume plutôt
+       qu'au nombre d'ouvrages. Cela aurait obligé à inventer une aire pour
+       les ouvrages sans pagination — zéro les aurait effacés, la moyenne du
+       rayon aurait fabriqué un volume indiscernable d'une mesure. On garde
+       donc deux mesures distinctes, chacune avec son effectif. */
+    const pagesConnues = s.pages_connues ?? 0;
+    const volume = s.pages_volume ?? 0;
+    const vignettePages = pagesConnues === 0
+      ? chiffre("—", "pagination inconnue")
+      : chiffre(nombre(volume), "pages (" + nombre(pagesConnues) + " ouvrages sur " + nombre(s.total) + ")");
+
+    document.getElementById("chiffres").innerHTML = [
+      chiffre(nombre(s.total), "ouvrages"),
+      chiffre(nombre(s.lus), "lus (" + partLus + " %)"),
+      chiffre(nombre(s.a_lire + s.en_cours), "sur la pile"),
+      chiffre(nombre(s.avec_resume), "résumés"),
+      chiffre(nombre(s.auteurs), "auteurs"),
+      chiffre(s.note_moyenne !== null && notes ? s.note_moyenne.toFixed(2).replace(".", ",") : "—",
+              etiquetteNote),
+      vignettePages,
+    ].join("");
+
+    STATS = s;
+    dessinerMosaique();
+    dessinerDecennies(s);
+    dessinerListes(s);
+
+    const complet = s.perimetre === "complet";
+    texte(document.getElementById("titreRayons"),
+      "Les " + s.rayons + " rayons");
+    texte(document.getElementById("legendeMosaique"),
+      (complet
+        ? "Bibliothèque complète — " + nombre(s.total) + " ouvrages, tous rayons confondus. "
+        : "Ce qui est publié — " + nombre(s.total) + " ouvrages. ")
+      + "L'aire de chaque tuile est proportionnelle au nombre d'ouvrages — "
+      + "pas à leur volume. La barre du bas indique la part déjà lue. "
+      + "Cliquez un rayon pour l'ouvrir."
+      + (pagesConnues
+          ? " Le volume de pages, affiché au survol, ne porte que sur les "
+            + nombre(pagesConnues) + " ouvrages dont la pagination est connue."
+          : ""));
+
+    if (complet) {
+      texte(document.getElementById("clePerso"), "Session ouverte");
+      texte(document.getElementById("cleAcces"), "Session ouverte");
+    }
+
+    texte(document.getElementById("noteBas"),
+      "Les résumés sont produits par un modèle de langage et vérifiés par recherche web ; "
+      + "chacun porte la mention de sa date et de son degré de certitude, et reste à recouper "
+      + "avant citation. Les couvertures proviennent d'Open Library et de Google Books. "
+      + (s.annee_min && s.annee_max
+          ? "Les ouvrages présentés vont de " + s.annee_min + " à " + s.annee_max + "."
+          : ""));
+
+    document.getElementById("chargement").hidden = true;
+    document.getElementById("contenu").hidden = false;
+
+    // Le pavage dépend de la largeur disponible : il doit être recalculé
+    // quand elle change. Le premier tracé a eu lieu pendant que le bloc
+    // était encore masqué — largeur nulle —, d'où ce second tracé une fois
+    // le contenu affiché.
+    dessinerMosaique();
+    let minuteur = null;
+    addEventListener("resize", () => {
+      clearTimeout(minuteur);
+      minuteur = setTimeout(dessinerMosaique, 120);
+    });
+  } catch (e) {
+    document.getElementById("chargement").hidden = true;
+    const err = document.getElementById("erreur");
+    err.hidden = false;
+    err.textContent = "Statistiques indisponibles : " + e.message
+      + ". Le serveur est-il démarré ?";
+  }
+})();
+
+</script>

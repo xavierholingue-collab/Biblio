@@ -86,6 +86,39 @@
 alter table public.tenants
   add column if not exists plafond_usd numeric(8,3) not null default 0.500;
 
+/* --------------------------------------------------------------------------
+   0,900 — ET CE CHIFFRE N'EST PLUS LIBRE : IL DÉCOULE DE L'AUTRE
+
+   25/08/2026. En écrivant la page d'accueil, il a fallu dire au visiteur ce
+   que l'offre gratuite lui donne. Et les deux plafonds ne disaient pas la
+   même chose :
+
+     quota_ia_mois = 10 appels
+     plafond_usd   = 0,500 $
+     un résumé     = 0,086 $   →  le portefeuille ferme au 6e, pas au 10e
+
+   Annoncer « une dizaine de demandes » aurait donc été faux dès qu'on
+   demande la fonction la plus utile. Non par mauvaise foi : parce que deux
+   bornes posées séparément, à quinze jours d'intervalle, avaient dérivé sans
+   que rien ne le signale.
+
+   LA RÈGLE, DÉSORMAIS :
+
+     plafond_usd  >=  quota_ia_mois  ×  coût du plus cher appel mesuré
+
+   10 × 0,086 = 0,86 $, arrondi à 0,900. Le quota devient la borne qui se
+   voit, le plafond d'argent redevient ce qu'il doit être : un garde-fou
+   contre l'imprévu, pas la limite réelle.
+
+   « test-plafonds-coherents.mjs » vérifie l'inégalité. Changer l'un des deux
+   sans l'autre fera désormais échouer la livraison, avec le calcul en clair.
+
+   « ALTER COLUMN SET DEFAULT » et non « ADD COLUMN » : la colonne existe
+   déjà en production, et « add column if not exists » ne toucherait pas son
+   défaut. Le rejeu resterait vert en ne changeant rien — un silence de plus.
+   -------------------------------------------------------------------------- */
+alter table public.tenants alter column plafond_usd set default 0.900;
+
 alter table public.tenants drop constraint if exists tenants_plafond_borne;
 alter table public.tenants add constraint tenants_plafond_borne
   check (plafond_usd >= 0 and plafond_usd <= 1000);
