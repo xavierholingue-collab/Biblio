@@ -2741,7 +2741,7 @@ avecVisiteur(bd, purgerLiens).catch(e => console.error("purge des liens :", e.me
    toute écriture. Hors contexte, le compte rendrait zéro et l'insertion
    serait refusée — on ré-amorcerait à chaque démarrage, dans le vide. */
 await avecContexte(bd, ID_TENANT_DEFAUT, (c) => amorcerSiVide(c));
-serveur.listen(PORT, () => console.log(`API prête sur le port ${PORT}`));
+serveur.listen(PORT, '127.0.0.1', () => console.log(`API prête sur le port ${PORT}`));
 
 for (const signal of ["SIGTERM", "SIGINT"]) {
   process.on(signal, () => {
