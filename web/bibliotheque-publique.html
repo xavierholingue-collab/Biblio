@@ -383,7 +383,18 @@ function dessinerMosaique() {
   pavage(rayons, W, H).forEach(t => {
     if (t.w < 1 || t.h < 1) return;
     const couleur = HEX[t.categorie] || "#444";
-    const partLue = t.n ? Math.round((t.lus ?? 0) / t.n * 100) : 0;
+    /* LA JAUGE A UN SUJET, OU N'EXISTE PAS — 05/09/2026, second passage.
+
+       « (t.lus ?? 0) » repliait un « je ne sais pas » sur un « zéro », et la
+       tuile affichait une barre vide avec « 0 % lus » dans son infobulle. Le
+       chiffre global était tu, celui-ci ne l'était pas : treize affirmations
+       fausses au lieu d'une, et plus crédibles parce que répétées.
+
+       C'est la chaîne de livraison qui l'a trouvé, pas moi — et elle l'a
+       trouvé sur un contrôle qui PASSAIT : il vérifiait que « lus » est un
+       nombre, ce qu'un zéro satisfait. */
+    const lueConnue = t.lus !== null && t.lus !== undefined;
+    const partLue = lueConnue && t.n ? Math.round(t.lus / t.n * 100) : 0;
 
     const a = document.createElement("a");
     a.className = "tuile" + (t.w < 96 || t.h < 62 ? " muette" : "");
@@ -396,7 +407,7 @@ function dessinerMosaique() {
     a.href = "/ma-bibliotheque.html?rayon=" + encodeURIComponent(t.sous_categorie);
     a.setAttribute("aria-label",
       t.sous_categorie + " : " + t.n + " ouvrage" + (t.n > 1 ? "s" : "")
-      + ", " + (t.lus || 0) + " lu" + ((t.lus || 0) > 1 ? "s" : "")
+      + (lueConnue ? ", " + t.lus + " lu" + (t.lus > 1 ? "s" : "") : "")
       + ". Ouvrir ce rayon.");
     /* Le volume du rayon vit dans l'infobulle, jamais dans la géométrie :
        l'aire encode le nombre d'ouvrages, et elle seule. Mêler les deux
@@ -404,7 +415,7 @@ function dessinerMosaique() {
        contient beaucoup de livres ou de gros livres. */
     const pagesRayon = t.pages_connues ?? 0;
     a.title = t.sous_categorie + " — " + t.n + " ouvrage" + (t.n > 1 ? "s" : "")
-      + ", " + partLue + " % lus"
+      + (lueConnue ? ", " + partLue + " % lus" : "")
       + (pagesRayon
           ? ` · ${Number(t.pages_volume ?? 0).toLocaleString("fr-FR")} pages connues `
             + `sur ${pagesRayon} ouvrage${pagesRayon > 1 ? "s" : ""}`
@@ -417,14 +428,19 @@ function dessinerMosaique() {
     nb.className = "n"; nb.textContent = t.n;
     haut.appendChild(nom); haut.appendChild(nb);
 
-    const jauge = document.createElement("div");
-    jauge.className = "jauge";
-    const rempli = document.createElement("i");
-    rempli.style.width = partLue + "%";
-    rempli.style.background = couleur;
-    jauge.appendChild(rempli);
+    a.appendChild(haut);
 
-    a.appendChild(haut); a.appendChild(jauge);
+    /* Pas de jauge du tout plutôt qu'une jauge à zéro : une barre vide se
+       lit comme « rien n'a été lu », pas comme « on ne sait pas ». */
+    if (lueConnue) {
+      const jauge = document.createElement("div");
+      jauge.className = "jauge";
+      const rempli = document.createElement("i");
+      rempli.style.width = partLue + "%";
+      rempli.style.background = couleur;
+      jauge.appendChild(rempli);
+      a.appendChild(jauge);
+    }
     el.appendChild(a);
   });
 }

@@ -846,7 +846,24 @@ async function statistiques(client, session, langue) {
     // de 2^53. Sans cette conversion, « volume + volume » concatenerait deux
     // textes au lieu d'additionner deux nombres.
     pages_volume: Number(general.rows[0].pages_volume ?? 0),
-    sous_categories: sousCats.rows.map(r => ({ ...r, pages_volume: Number(r.pages_volume ?? 0) })),
+    /* LE MÊME SILENCE PAR RAYON — trouvé par la chaîne de livraison le
+       05/09/2026, après que j'ai cru la corriger.
+
+       J'avais tu les chiffres de lecture au niveau global et oublié qu'ils
+       existent AUSSI par rayon : « lus » alimente la jauge de chaque tuile de
+       la mosaïque. Un visiteur aurait donc vu une jauge à zéro sur chacun des
+       treize rayons — treize affirmations fausses au lieu d'une, et plus
+       crédibles encore parce que répétées.
+
+       C'est le contrôle « statistiques : part lue fournie par rayon » qui l'a
+       dit, en PASSANT : il vérifiait que le champ est un nombre, ce qu'il
+       était toujours. Un contrôle peut être vert et signaler quelque chose —
+       encore faut-il lire ce qu'il mesure, pas seulement sa couleur. */
+    sous_categories: sousCats.rows.map(r => ({
+      ...r,
+      lus: general.rows[0].lecteur ? r.lus : null,
+      pages_volume: Number(r.pages_volume ?? 0),
+    })),
     decennies: decennies.rows,
     auteurs_recurrents: auteurs.rows,
     plus_recents: recents.rows,

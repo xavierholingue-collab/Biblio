@@ -104,8 +104,39 @@ try {
   verifier("statistiques cohérentes avec la liste publique",
     statsPub.total === publics.length, statsPub.total + " vs " + publics.length);
   verifier("statistiques : compteurs présents",
-    ["lus", "en_cours", "a_lire", "avec_resume", "auteurs", "rayons"]
+    ["avec_resume", "auteurs", "rayons"]
       .every(c => typeof statsPub[c] === "number"));
+
+  /* =====================================================================
+     LES CHIFFRES DE LECTURE NE SONT PAS RENDUS À UN VISITEUR — 05/09/2026
+
+     Depuis la migration 17, le statut de lecture appartient à la PERSONNE.
+     Un visiteur n'en a aucun : la vue lui rend « A lire » partout, et
+     compter ces lignes produirait « 0 lu, 348 à lire » sur la bibliothèque
+     de quelqu'un d'autre. Faux, et crédible.
+
+     CE CONTRÔLE EST PLUS EXIGEANT QUE CELUI QU'IL REMPLACE. L'ancien
+     demandait « c'est un nombre » — satisfait par un zéro mensonger.
+     Celui-ci demande « c'est explicitement null », ce que seul un serveur
+     qui a pris la décision peut rendre. Un oubli redonnerait des nombres,
+     et tomberait ici.
+
+     Les CINQ champs partent ensemble : en laisser un seul passer laisserait
+     une moitié de vérité, ce qui est la forme la plus commode de l'erreur.
+     ===================================================================== */
+  verifier("statistiques : AUCUN chiffre de lecture n'est rendu au visiteur",
+    ["lus", "en_cours", "a_lire", "notes", "note_moyenne"]
+      .every(c => statsPub[c] === null),
+    JSON.stringify(Object.fromEntries(
+      ["lus", "en_cours", "a_lire", "notes", "note_moyenne"]
+        .map(c => [c, statsPub[c]])))
+    + " — un zéro se lit comme un fait sur la bibliothèque d'autrui");
+
+  verifier("statistiques : ni par rayon",
+    Array.isArray(statsPub.sous_categories)
+      && statsPub.sous_categories.every(x => x.lus === null),
+    JSON.stringify(statsPub.sous_categories?.slice(0, 2))
+    + " — la jauge de chaque tuile afficherait zéro");
   verifier("statistiques : listes présentes",
     ["sous_categories", "decennies", "auteurs_recurrents", "plus_recents"]
       .every(c => Array.isArray(statsPub[c])));
@@ -113,22 +144,17 @@ try {
     statsPub.sous_categories.reduce((s, x) => s + x.n, 0) === statsPub.total,
     statsPub.sous_categories.reduce((s, x) => s + x.n, 0) + " vs " + statsPub.total);
 
-  // L'effectif sur lequel porte la note moyenne. avg() ignore les valeurs
-  // nulles sans le dire : sans ce compte, la page affiche « 4,32 » à côté de
-  // « 242 ouvrages » et personne ne peut savoir que 57 seulement sont notés.
-  verifier("statistiques : effectif des ouvrages notés fourni",
-    typeof statsPub.notes === "number", "notes = " + statsPub.notes);
-  verifier("statistiques : les notés ne dépassent pas le total",
-    statsPub.notes <= statsPub.total, statsPub.notes + " sur " + statsPub.total);
-  verifier("statistiques : une moyenne n'est donnée que s'il y a des notes",
-    (statsPub.notes > 0) === (statsPub.note_moyenne !== null),
-    "notes = " + statsPub.notes + ", moyenne = " + statsPub.note_moyenne);
+  /* CE QUI SUIT A DÉMÉNAGÉ VERS LA SESSION CONNECTÉE — 05/09/2026.
 
-  // Chaque rayon doit annoncer combien de ses ouvrages sont lus : c'est ce
-  // que remplit la jauge de la mosaïque.
-  verifier("statistiques : part lue fournie par rayon",
-    statsPub.sous_categories.every(x => typeof x.lus === "number" && x.lus <= x.n),
-    JSON.stringify(statsPub.sous_categories.find(x => typeof x.lus !== "number") ?? "—"));
+     L'effectif des ouvrages notés, la cohérence de la moyenne avec son
+     effectif, et la part lue par rayon restent des propriétés
+     indispensables : « avg() » ignore les valeurs nulles sans le dire, et
+     une moyenne sans son effectif est une affirmation qu'on ne peut pas
+     évaluer. Mais elles n'ont de sujet que pour quelqu'un qui LIT.
+
+     Elles sont donc vérifiées plus bas, sur la session connectée — voir
+     « statistiques élargies une fois connecté ». Rien n'est perdu ; le même
+     invariant est posé là où il a un sens. */
 
   /* ------------------------------------------- Ce qui reste fermé au public */
 
@@ -205,6 +231,36 @@ try {
   verifier("statistiques élargies une fois connecté",
     r.corps?.perimetre === "complet" && r.corps?.total === tous.length,
     `${r.corps?.perimetre} / ${r.corps?.total} vs ${tous.length}`);
+
+  /* LES CHIFFRES DE LECTURE EXISTENT POUR QUI EST IDENTIFIÉ. Sans cette
+     moitié, on aurait seulement prouvé qu'ils sont toujours absents — ce
+     qu'un serveur qui les aurait supprimés satisferait aussi. */
+  const statsMoi = r.corps ?? {};
+  verifier("statistiques : les chiffres de lecture reviennent une fois connecté",
+    ["lus", "en_cours", "a_lire", "notes"]
+      .every(c => typeof statsMoi[c] === "number"),
+    JSON.stringify(Object.fromEntries(
+      ["lus", "en_cours", "a_lire", "notes"].map(c => [c, statsMoi[c]]))));
+
+  verifier("statistiques : les trois statuts couvrent le total",
+    statsMoi.lus + statsMoi.en_cours + statsMoi.a_lire === statsMoi.total,
+    `${statsMoi.lus} + ${statsMoi.en_cours} + ${statsMoi.a_lire} `
+    + `vs ${statsMoi.total}`);
+
+  // L'effectif sur lequel porte la note moyenne. avg() ignore les valeurs
+  // nulles sans le dire : sans ce compte, la page affiche « 4,32 » à côté de
+  // « 242 ouvrages » et personne ne peut savoir que 57 seulement sont notés.
+  verifier("statistiques : les notés ne dépassent pas le total",
+    statsMoi.notes <= statsMoi.total, statsMoi.notes + " sur " + statsMoi.total);
+  verifier("statistiques : une moyenne n'est donnée que s'il y a des notes",
+    (statsMoi.notes > 0) === (statsMoi.note_moyenne !== null),
+    "notes = " + statsMoi.notes + ", moyenne = " + statsMoi.note_moyenne);
+
+  // Chaque rayon annonce combien de ses ouvrages sont lus : c'est ce que
+  // remplit la jauge de la mosaïque.
+  verifier("statistiques : part lue fournie par rayon",
+    statsMoi.sous_categories.every(x => typeof x.lus === "number" && x.lus <= x.n),
+    JSON.stringify(statsMoi.sous_categories.find(x => typeof x.lus !== "number") ?? "—"));
 
   /* ------------------------------------------------------------- Écriture */
 

@@ -527,6 +527,49 @@ comme un succès. Deux semaines de latence.
 
 ---
 
+## 11. Lire le code de sortie, pas la couleur de la sortie
+
+*Ajoutée le 05/09/2026, après avoir annoncé une livraison verte qui ne l'était
+pas.*
+
+J'ai fait tourner `test-api.mjs` en filtrant sa sortie ainsi :
+
+```
+grep -E "vérifications passées|echec"
+```
+
+Le fichier écrit `2 ÉCHECS` — majuscules, accent. Le motif ne l'a pas vu. J'ai
+lu « 51 vérifications passées », conclu au vert, et fait pousser. La chaîne de
+livraison a trouvé les deux échecs en trente et une secondes.
+
+Pire : mon enveloppe de contrôle attendait la fin du processus **sans
+propager son code de sortie**. Elle rendait donc zéro quoi qu'il arrive.
+L'instrument censé mesurer les contrôles ne mesurait rien — et c'est le
+défaut le plus embarrassant de la journée, parce qu'il porte sur l'outil
+avec lequel je vérifie tous les autres.
+
+**La règle est courte : un programme dit s'il a échoué par son code de
+sortie.** Le texte est pour l'humain qui lit ; le code est pour la machine
+qui décide. Filtrer le texte, c'est choisir d'avance ce qu'on accepte de
+voir.
+
+Corollaire du même échec, et il vaut pour tout le monde : **un contrôle VERT
+peut signaler quelque chose.** `statistiques : part lue fournie par rayon`
+passait — il vérifiait que le champ est un nombre, ce qu'un zéro mensonger
+satisfait parfaitement. C'est en lisant *ce qu'il mesure*, et non sa couleur,
+qu'on voit que la correction du chiffre global avait oublié les treize
+rayons.
+
+Et un troisième, plus petit : un contrôle qui cherche un motif dans du code
+doit **retirer les commentaires d'abord**. La première rédaction de
+`la page ne replie pas « je ne sais pas » sur zéro` s'est déclenchée sur sa
+propre explication — le texte qui décrit le piège contient le motif du piège.
+
+> Le vert n'est pas une preuve, c'est un résumé. La preuve est dans ce que le
+> contrôle regarde, et dans le code qu'il rend.
+
+---
+
 ## Ce qui ne s'automatise pas, et revient à Xavier
 
 Le seul défaut réellement dangereux du 24/08 n'a été trouvé par aucun

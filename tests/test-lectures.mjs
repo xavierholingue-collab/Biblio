@@ -292,6 +292,47 @@ await appel("/api/livres", { cookie: sAlice, methode: "PUT",
       !/sur la pile/i.test(texte), JSON.stringify(texte.slice(0, 200)));
     verifier("… et aucun « NaN » n'a été fabriqué en chemin",
       !/NaN/.test(texte), JSON.stringify(texte.slice(0, 200)));
+
+    /* LA MOSAÏQUE — mesurée sur les DONNÉES, faute de pouvoir l'être sur
+       le rendu. Ajouté le 05/09/2026, après que la chaîne de livraison ait
+       trouvé ce que ce contrôle avait manqué.
+
+       J'avais tu les chiffres de lecture en haut de page et oublié qu'ils
+       existent par RAYON : chaque tuile porte une jauge « part lue » et une
+       infobulle « x % lus ». Un visiteur voyait treize barres vides et
+       treize « 0 % lus » — la même affirmation fausse, répétée, et d'autant
+       plus crédible.
+
+       POURQUOI PAS SUR LE DOM. La mosaïque est un pavage calculé à partir de
+       la LARGEUR RÉELLE du conteneur ; sous jsdom elle vaut zéro, les tuiles
+       font moins d'un pixel et le code les écarte. Le contrôle écrit d'abord
+       ainsi n'a trouvé aucune tuile — et une absence constatée sur un écran
+       vide ne prouve rien.
+
+       On mesure donc ce que le serveur REND, qui est l'invariant réel, et
+       l'on vérifie séparément que la page ne replie pas un « je ne sais
+       pas » sur un zéro. */
+    const stats = (await appel("/api/statistiques")).corps ?? {};
+    verifier("la bibliothèque publique expose bien ses rayons",
+      Array.isArray(stats.sous_categories) && stats.sous_categories.length > 0,
+      "aucun rayon — l'absence de « lus » ne prouverait rien");
+
+    verifier("… et AUCUN rayon n'annonce de part lue au visiteur",
+      (stats.sous_categories ?? []).every(x => x.lus === null),
+      JSON.stringify(stats.sous_categories?.slice(0, 2))
+      + " — treize jauges à zéro sur la bibliothèque de quelqu'un d'autre");
+
+    /* LES COMMENTAIRES SONT RETIRÉS AVANT DE CHERCHER, et ce n'est pas un
+       détail : la première rédaction s'est déclenchée sur SA PROPRE
+       explication — le texte qui décrit le piège contient le motif du piège.
+       Un contrôle qui lit de la prose comme du code crie au loup, et un
+       garde-fou qui crie au loup finit par être désactivé.
+       Même précaution que test-plafonds-coherents.mjs, pour la même raison. */
+    const codeSeul = html.replace(/\/\*[\s\S]*?\*\//g, "");
+    verifier("la page ne replie pas « je ne sais pas » sur zéro",
+      !/t\.lus\s*(\?\?|\|\|)\s*0/.test(codeSeul),
+      "« t.lus ?? 0 » fabrique un zéro là où le serveur a dit « null »");
+
     dom.window.close();
   }
 }
