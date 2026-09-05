@@ -42,6 +42,20 @@ import { randomBytes, createHash, createHmac, timingSafeEqual } from "node:crypt
 export const DUREE_LIEN_MINUTES = 15;
 export const DUREE_SESSION_JOURS = 30;
 
+/* SEPT JOURS, ET NON QUINZE MINUTES. Un lien de connexion est demandé par
+   celui qui le reçoit : il est devant sa boîte, il attend. Une invitation
+   arrive sans avoir été demandée, souvent un vendredi soir, et se lit le
+   lundi. Quinze minutes en feraient un lien mort dans la quasi-totalité des
+   cas — et la personne invitée ne saurait pas si c'est elle qui a tardé ou
+   le service qui est en panne.
+
+   Ce que cela coûte : une adresse de courriel compromise pendant sept jours
+   donne accès à la bibliothèque où l'on invitait. C'est le même risque que
+   pour tout lien magique, étalé sur plus longtemps — et il est borné à UNE
+   bibliothèque, avec le rôle « membre », qui ne peut ni supprimer ni
+   inviter. */
+export const DUREE_INVITATION_JOURS = 7;
+
 /** Empreinte du jeton. C'est elle, et elle seule, qui va en base. */
 export const empreinte = (jeton) =>
   createHash("sha256").update(String(jeton), "utf8").digest("base64url");
@@ -125,6 +139,36 @@ export async function demanderLien(client, courrielBrut, { inscriptionOuverte = 
 
   return { envoye: true, jeton, inscription: !connu,
            compte_id: connu ? rows[0].id : null };
+}
+
+/* ===========================================================================
+   INVITER QUELQU'UN DANS LA BIBLIOTHÈQUE OUVERTE
+
+   ELLE NE DIT PAS SI L'ADRESSE EST CONNUE, et c'est la propriété qui compte
+   le plus ici. Le propriétaire d'une bibliothèque n'a aucune raison
+   d'apprendre, par un formulaire d'invitation, qui est déjà client du
+   service. Le lien porte donc l'adresse dans tous les cas, et la
+   consommation tranchera — c'est aussi ce qui rend cette fonction courte :
+   elle n'a rien à décider.
+
+   LE CONTRÔLE DE PROPRIÉTÉ EST EN BASE, dans « inviter_membre », et non ici.
+   Le refaire en JavaScript créerait une seconde version de la même règle,
+   et c'est ainsi qu'une condition finit par manquer d'un côté.
+   =========================================================================== */
+export async function inviterMembre(client, courrielBrut) {
+  const courriel = normaliserCourriel(courrielBrut);
+  if (!courrielPlausible(courriel)) {
+    const e = new Error("Adresse de courriel invalide.");
+    e.statut = 400;
+    throw e;
+  }
+
+  const jeton = randomBytes(32).toString("base64url");
+  await client.query(
+    "select public.inviter_membre($1, $2, ($3 || ' days')::interval)",
+    [courriel, empreinte(jeton), String(DUREE_INVITATION_JOURS)]);
+
+  return { jeton, courriel };
 }
 
 /* ------------------------------------------------------ Usage du lien */
@@ -215,13 +259,80 @@ export async function consommerLien(client, jeton, options = {}) {
       where empreinte = $1
         and utilise_le is null
         and expire_le > now()
-      returning compte_id, courriel`,
+      returning compte_id, courriel, rejoint`,
     [empreinte(jeton)]);
 
   if (!rows.length) return null;
 
   let compteId = rows[0].compte_id;
   let nouveau = false;
+
+  /* =========================================================================
+     LE LIEN D'INVITATION — il fabrique un COMPTE, jamais une BIBLIOTHÈQUE
+
+     C'est toute la différence avec le lien ordinaire, et elle tient en une
+     phrase : on est attendu quelque part. Créer au passage une bibliothèque
+     personnelle vide donnerait à la personne invitée exactement l'inverse de
+     ce qu'on lui a promis — elle arriverait chez elle, seule, devant rien.
+
+     DEUX GARDE-FOUS NE S'APPLIQUENT PAS ICI, et c'est délibéré.
+     « INSCRIPTION_OUVERTE » et le plafond journalier protègent contre
+     l'afflux d'inconnus. Une invitation n'est pas cela : quelqu'un qui a
+     déjà une bibliothèque répond de la personne qu'il y fait entrer. Les
+     appliquer rendrait l'invitation muette et incompréhensible — le lien
+     reçu ne marcherait pas, sans qu'on puisse dire pourquoi.
+     ========================================================================= */
+  if (rows[0].rejoint) {
+    /* LE LIEN D'INVITATION PORTE TOUJOURS L'ADRESSE, jamais l'identifiant du
+       compte — « inviter_membre » n'en connaît pas, et ne doit pas en
+       chercher : le faire lui dirait si l'adresse est déjà cliente.
+
+       On regarde donc ici, au moment où l'on a le droit de savoir. Et l'on
+       REGARDE AVANT D'INSÉRER plutôt que de lire « found » après un
+       « on conflict » : la réponse à « ce compte est-il nouveau ? » sert à
+       choisir ce qu'on affichera à la personne, et « on conflict do update »
+       aurait répondu « nouveau » à quelqu'un qui a un compte depuis six
+       mois. */
+    if (!compteId) {
+      const { rows: connu } = await client.query(
+        "select id from comptes where courriel = $1", [rows[0].courriel]);
+      if (connu.length) {
+        compteId = connu[0].id;
+      } else {
+        /* Course bénigne : deux liens pour la même adresse, ouverts
+           ensemble. « do update » rend la ligne dans les deux cas — c'est
+           le seul moyen d'obtenir l'identifiant sans second aller-retour. */
+        const { rows: cree } = await client.query(
+          `insert into comptes (courriel) values ($1)
+           on conflict (courriel) do update set courriel = excluded.courriel
+           returning id`, [rows[0].courriel]);
+        compteId = cree[0].id;
+        nouveau = true;
+      }
+    }
+
+    await client.query("select public.rejoindre_locataire($1, $2)",
+                       [compteId, rows[0].rejoint]);
+
+    /* ON OUVRE LA BIBLIOTHÈQUE OÙ L'ON VIENT D'ÊTRE INVITÉ, et non « la
+       dernière ouverte ». Quelqu'un qui clique un lien d'invitation veut
+       voir CE fonds-là ; le faire atterrir dans sa bibliothèque personnelle
+       parce qu'il l'a consultée plus récemment serait juste selon la règle
+       générale, et faux selon son intention.
+
+       « rejoindre_locataire » a posé « vu_le », si bien que la règle
+       générale et celle-ci disent la même chose au coup d'après. */
+    const { rows: langues } = await client.query(
+      "select langue from tenants where id = $1", [rows[0].rejoint]);
+    const { rows: comptes } = await client.query(
+      "select courriel from comptes where id = $1", [compteId]);
+    if (!comptes.length) return null;
+
+    await client.query("update comptes set vu_le = now() where id = $1", [compteId]);
+    return { compte_id: compteId, tenant_id: rows[0].rejoint,
+             courriel: comptes[0].courriel, langue: langues[0]?.langue,
+             nouveau, invitation: true };
+  }
 
   if (!compteId) {
     /* Course possible et bénigne : deux personnes demandent un lien pour la
@@ -246,14 +357,53 @@ export async function consommerLien(client, jeton, options = {}) {
     }
   }
 
-  const { rows: comptes } = await client.query(
-    `select c.id as compte_id, c.tenant_id, c.courriel, t.langue
-       from comptes c join tenants t on t.id = c.tenant_id
-      where c.id = $1`, [compteId]);
+  const ouverte = await ouvrirPour(client, compteId);
 
+  const { rows: comptes } = await client.query(
+    "select courriel from comptes where id = $1", [compteId]);
   if (!comptes.length) return null;
+
   await client.query("update comptes set vu_le = now() where id = $1", [compteId]);
-  return { ...comptes[0], nouveau };
+  return { compte_id: compteId, tenant_id: ouverte.locataire,
+           courriel: comptes[0].courriel, langue: ouverte.langue, nouveau };
+}
+
+/* ===========================================================================
+   QUELLE BIBLIOTHÈQUE S'OUVRE — un seul endroit le sait
+
+   Les trois chemins de connexion — lien magique, retour Google par « sub »,
+   retour Google par courriel — avaient chacun leur « join tenants on
+   t.id = c.tenant_id ». C'était juste tant qu'un compte appartenait à une
+   bibliothèque et une seule ; ce ne l'est plus, et trois copies d'une règle
+   de résolution auraient dérivé comme ont dérivé les deux plafonds.
+
+   La règle vit en base — « bibliotheque_a_ouvrir » — parce que la connexion
+   se fait en contexte VISITEUR : ni compte ni locataire posés, donc aucune
+   requête ordinaire sur « membres » ne rendrait quoi que ce soit.
+
+   Et l'on marque l'ouverture : sans cela « la dernière ouverte » ne changerait
+   jamais, et le tri porterait sur une colonne morte — ce qui aurait l'air de
+   marcher tant qu'on n'a qu'une bibliothèque.
+   =========================================================================== */
+async function ouvrirPour(client, compteId) {
+  const { rows } = await client.query(
+    "select locataire, langue from public.bibliotheque_a_ouvrir($1)", [compteId]);
+
+  /* ON LÈVE, ON NE REND PAS « null ». Un compte sans appartenance est
+     impossible en principe — « creer_locataire » en pose une, et la garde du
+     propriétaire empêche la dernière de partir. Si cela survient malgré tout,
+     c'est une donnée incohérente : rendre « null » ici la ferait traduire par
+     l'appelant en « ce lien n'est plus valable », et la personne chercherait
+     un défaut dans son courriel pendant que le vrai est en base. */
+  if (!rows.length) {
+    const e = new Error(`Le compte ${compteId} n'appartient à aucune bibliothèque.`);
+    e.statut = 500;
+    throw e;
+  }
+
+  await client.query("select public.marquer_ouverture($1, $2)",
+                     [compteId, rows[0].locataire]);
+  return rows[0];
 }
 
 /* ===========================================================================
@@ -292,7 +442,7 @@ export async function connexionParOidc(client, { sub, courriel: brut, verifie },
 
   /* 1. Le sub est connu. */
   const { rows: parSub } = await client.query(
-    "select id, tenant_id, courriel from comptes where oidc_sub = $1", [sub]);
+    "select id, courriel from comptes where oidc_sub = $1", [sub]);
   if (parSub.length) {
     const c = parSub[0];
     /* Le courriel a pu changer chez Google. On le suit — mais seulement s'il
@@ -303,18 +453,21 @@ export async function connexionParOidc(client, { sub, courriel: brut, verifie },
         [courriel, c.id]).catch(() => { /* déjà pris par un autre compte : on garde l'ancien */ });
     }
     await client.query("update comptes set vu_le = now() where id = $1", [c.id]);
-    return { compte_id: c.id, tenant_id: c.tenant_id, courriel: c.courriel, nouveau: false };
+    const o = await ouvrirPour(client, c.id);
+    return { compte_id: c.id, tenant_id: o.locataire, courriel: c.courriel,
+             nouveau: false };
   }
 
   /* 2. Le courriel est connu, le sub non. */
   const { rows: parCourriel } = await client.query(
-    "select id, tenant_id, courriel from comptes where courriel = $1", [courriel]);
+    "select id, courriel from comptes where courriel = $1", [courriel]);
   if (parCourriel.length) {
     if (!verifie) return { rattachementRefuse: true, courriel };
     const c = parCourriel[0];
     await client.query(
       "update comptes set oidc_sub = $1, vu_le = now() where id = $2", [sub, c.id]);
-    return { compte_id: c.id, tenant_id: c.tenant_id, courriel: c.courriel,
+    const o = await ouvrirPour(client, c.id);
+    return { compte_id: c.id, tenant_id: o.locataire, courriel: c.courriel,
              nouveau: false, rattache: true };
   }
 

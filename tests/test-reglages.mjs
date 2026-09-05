@@ -69,6 +69,18 @@ await q("update tenants set visibilite = 'publique', quota_ia_mois = 3 where id 
         [xavier.id]);
 const bob = await locataire("bob", "publique", "fr", 5);
 
+/* UN COMPTE DANS LA BIBLIOTHÈQUE PAR DÉFAUT — 05/09/2026.
+
+   Depuis la migration 17, le statut de lecture et la note appartiennent à
+   une PERSONNE. La session par mot de passe, elle, ouvre la bibliothèque
+   sans en nommer aucune : elle ne peut donc rien attribuer, sauf quand la
+   bibliothèque n'a qu'un membre — auquel cas il n'y a rien à départager.
+
+   Ce banc éprouvait jusqu'ici une bibliothèque SANS aucun compte, ce qui
+   n'existe pas en production : « creer_locataire » pose toujours un
+   propriétaire. On répare le décor plutôt que d'affaiblir la règle. */
+const compteX = await banc.compte(xavier.id, "xavier@controle.fr");
+
 /* Le jeu d'essai est construit pour que CHAQUE niveau de la cascade soit
    distinguable. Un rayon entier hérité, un rayon réglé, et deux exceptions
    par livre qui contredisent leur rayon — sans quoi on ne saurait pas si
@@ -423,9 +435,14 @@ verifier("modifier une note n'efface pas la visibilité choisie",
   (await q("select visibilite from possessions where tenant_id = $1 and id = 'x-philo-1'",
            [xavier.id]))[0].visibilite);
 
+/* LA NOTE A CHANGÉ DE TABLE, PAS DE SENS. Elle vit dans « lectures »,
+   attachée au compte qui la porte — ici l'unique membre de la bibliothèque,
+   que la session par mot de passe désigne sans ambiguïté. */
 verifier("… mais la note a bien été enregistrée (sinon on ne prouve rien)",
-  Number((await q("select note from possessions where tenant_id = $1 and id = 'x-philo-1'",
-                  [xavier.id]))[0].note) === 5);
+  Number((await q(`select note from lectures
+                    where tenant_id = $1 and possession = 'x-philo-1'
+                      and compte_id = $2`, [xavier.id, compteX]))[0]?.note) === 5,
+  JSON.stringify(await q("select * from lectures where tenant_id = $1", [xavier.id])));
 
 /* Un ouvrage NEUF, lui, doit recevoir le point de départ historique :
    Pro public, Perso privé. Sans quoi tout ce qu'on ajoute après la bascule

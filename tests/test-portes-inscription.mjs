@@ -120,12 +120,39 @@ verifier("… et elle LÈVE au lieu de rendre un témoin qu'on peut ignorer",
   /inscriptionFermee\s*=\s*true[\s\S]{0,120}throw\s+e/.test(auth),
   "le refus ne lève pas");
 
-/* Les deux portes connues doivent transmettre ce qu'on leur donne. */
+/* Les deux portes connues doivent transmettre ce qu'on leur donne.
+
+   LE CORPS EST DÉLIMITÉ PAR CE QUI SUIT, ET NON PAR UN NOMBRE DE CARACTÈRES
+   — corrigé le 05/09/2026.
+
+   La rédaction précédente cherchait « creerLocataire(…options) » dans les
+   4 000 premiers caractères après la signature. C'était une DISTANCE prise
+   pour une PORTÉE : le jour où « consommerLien » a gagné une branche
+   d'invitation et son commentaire, l'appel s'est retrouvé au-delà, et le
+   contrôle a déclaré que la porte ne transmettait plus rien. Elle
+   transmettait toujours.
+
+   Le sens du défaut compte : ici il criait à tort, ce qui se voit. La
+   version dangereuse est l'inverse — un appel FAUTIF placé au-delà du
+   4 000e caractère, que le contrôle n'aurait jamais regardé.
+
+   C'est le motif que ce dépôt traque depuis le premier jour : un contrôle
+   qui mesure un substitut de ce qu'il protège. On délimite donc le corps par
+   la déclaration suivante, qui est la vraie frontière. */
+const corpsDe = (nom) => {
+  const debut = auth.indexOf(`export async function ${nom}`);
+  if (debut < 0) return "";
+  const suite = auth.indexOf("\nexport ", debut + 1);
+  return auth.slice(debut, suite < 0 ? auth.length : suite);
+};
+
 for (const porte of ["consommerLien", "connexionParOidc"]) {
-  const corps = auth.slice(auth.indexOf(`export async function ${porte}`));
+  const corps = corpsDe(porte);
+  verifier(`« ${porte} » est trouvée dans le fichier`,
+    corps.length > 0, "signature introuvable — renommée ?");
   verifier(`« ${porte} » accepte et transmet le drapeau`,
     /options\s*=\s*\{\s*\}/.test(corps.slice(0, 400))
-    && /creerLocataire\([^)]*options/.test(corps.slice(0, 4000)),
+    && /creerLocataire\([^)]*options/.test(corps),
     `${porte} ne fait pas suivre ses options`);
 }
 

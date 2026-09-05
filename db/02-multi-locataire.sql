@@ -114,7 +114,32 @@ create table if not exists public.comptes (
   cree_le    timestamptz not null default now(),
   vu_le      timestamptz
 );
-create index if not exists comptes_tenant on public.comptes(tenant_id);
+/* --------------------------------------------------------------------------
+   CET INDEX EST CONDITIONNEL DEPUIS LE 05/09/2026 — voir 15-membres.sql
+
+   Il a été posé le 16/08, quand un compte appartenait à une bibliothèque et
+   une seule. La migration 15 a supprimé « comptes.tenant_id » : l'appartenance
+   vit désormais dans « membres », et un compte peut en avoir plusieurs.
+
+   POURQUOI MODIFIER UN FICHIER ANCIEN, ce que ce dépôt n'avait jamais fait.
+
+   Les migrations d'ici sont REJOUÉES à chaque livraison, et trois fois par
+   test-rejeu. Ce ne sont pas des archives, ce sont des instructions
+   permanentes : chacune doit rester VRAIE en permanence. Une ligne qui indexe
+   une colonne supprimée n'est pas de l'histoire préservée, c'est une
+   instruction devenue fausse qui fera échouer la livraison suivante.
+
+   La condition, plutôt que la suppression : une base d'avant la 15 garde son
+   index, une base d'après ne s'en occupe pas. Les deux restent justes.
+   -------------------------------------------------------------------------- */
+do $$
+begin
+  if exists (select 1 from information_schema.columns
+              where table_schema = 'public' and table_name = 'comptes'
+                and column_name = 'tenant_id') then
+    create index if not exists comptes_tenant on public.comptes(tenant_id);
+  end if;
+end $$;
 
 /* Liens magiques : pas de mot de passe stocké, donc rien à voler ni à
    réinitialiser. On ne garde qu'une EMPREINTE du jeton — un vol de la base

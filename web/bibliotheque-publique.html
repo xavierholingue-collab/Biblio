@@ -458,7 +458,23 @@ function dessinerListes(stats) {
     if (!r.ok) throw new Error("Le serveur a répondu " + r.status);
     const s = await r.json();
 
-    const partLus = s.total ? Math.round(s.lus / s.total * 100) : 0;
+    /* LA LECTURE A UN SUJET, OU N'EST PAS AFFICHÉE — 05/09/2026.
+
+       Depuis la migration 17, le statut de lecture appartient à la PERSONNE,
+       plus à l'étagère. Un visiteur n'en a aucun : l'API rend « null » pour
+       « lus », « en cours », « à lire » et la note, plutôt que zéro.
+
+       Sans le traitement ci-dessous, cette page afficherait « 0 lus (0 %) »
+       et « 0 sur la pile » — deux affirmations fausses sur la bibliothèque
+       de quelqu'un d'autre, écrites avec l'aplomb d'un chiffre. « null + null »
+       vaut d'ailleurs 0 en JavaScript, si bien que rien n'aurait signalé
+       l'anomalie.
+
+       C'est aussi un changement voulu : la page publique n'annonce plus à
+       qui passe combien d'ouvrages son propriétaire a lus. L'étagère est ce
+       qu'on montre ; la progression de lecture ne l'est pas. */
+    const avecLecture = s.lus !== null && s.lus !== undefined;
+    const partLus = avecLecture && s.total ? Math.round(s.lus / s.total * 100) : 0;
 
     // La note moyenne ne porte que sur les ouvrages NOTÉS. Le dire dans
     // l'étiquette, sinon « 4,32 » posé à côté de « 242 ouvrages » se lit
@@ -484,8 +500,13 @@ function dessinerListes(stats) {
 
     document.getElementById("chiffres").innerHTML = [
       chiffre(nombre(s.total), "ouvrages"),
-      chiffre(nombre(s.lus), "lus (" + partLus + " %)"),
-      chiffre(nombre(s.a_lire + s.en_cours), "sur la pile"),
+      /* Les deux vignettes de lecture DISPARAISSENT plutôt que d'afficher
+         zéro : une absence se lit comme une absence, un zéro se lit comme
+         un fait. */
+      ...(avecLecture ? [
+        chiffre(nombre(s.lus), "lus (" + partLus + " %)"),
+        chiffre(nombre(s.a_lire + s.en_cours), "sur la pile"),
+      ] : []),
       chiffre(nombre(s.avec_resume), "résumés"),
       chiffre(nombre(s.auteurs), "auteurs"),
       chiffre(s.note_moyenne !== null && notes ? s.note_moyenne.toFixed(2).replace(".", ",") : "—",

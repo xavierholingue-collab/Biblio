@@ -92,10 +92,8 @@ await semer({ tenant: restant, id: "r1", isbn: "9782070360024",
               titre: "Le Mythe de Sisyphe", auteur: "Camus" });
 await semer({ tenant: partant, id: "p2", titre: "Un livre à lui seul" });
 
-await q(`insert into comptes (tenant_id, courriel) values ($1, $2)`,
-  [partant, "part@exemple.fr"]);
-await q(`insert into comptes (tenant_id, courriel) values ($1, $2)`,
-  [restant, "reste@exemple.fr"]);
+const proprioPartant = await banc.compte(partant, "part@exemple.fr");
+await banc.compte(restant, "reste@exemple.fr");
 await q(`insert into appels_ia (tenant_id, route, modele, issue)
          values ($1, '/api/x', 'm', 'ok')`, [partant]);
 
@@ -134,12 +132,48 @@ verifier("le décor est planté", avant.partant === 2 && avant.restant === 1,
 }
 
 /* ===================================================================== */
+/* 3 bis. UN MEMBRE N'EST PAS UN PROPRIÉTAIRE — 05/09/2026                */
+/* ===================================================================== */
+
+/* AVANT CE LOT, LA QUESTION N'EXISTAIT PAS : un locataire valait une
+   personne, et demander la suppression depuis sa session, c'était forcément
+   être chez soi. Une bibliothèque partagée change cela — le fonds d'un
+   cabinet entier tient maintenant derrière un bouton que plusieurs personnes
+   voient.
+
+   Le contrôle vérifie les DEUX moitiés, parce qu'un refus qui laisse quand
+   même des dégâts n'est pas un refus : la fonction lève, ET la bibliothèque
+   est encore là après. */
+{
+  const cabinet = await locataire("le-cabinet");
+  await banc.compte(cabinet, "associe@exemple.fr");                 // propriétaire
+  const stagiaire = await banc.compte(cabinet, "stagiaire@exemple.fr", "membre");
+  await semer({ tenant: cabinet, id: "c1", titre: "Le fonds commun" });
+
+  let leve = false;
+  try {
+    await dans({ locataire: cabinet, compte: stagiaire },
+               "select * from public.supprimer_locataire()");
+  } catch (e) { leve = /Seul un propriétaire/.test(e.message); }
+
+  const [debout] = await q("select id from tenants where id = $1", [cabinet]);
+  const [{ n }] = await q(
+    "select count(*) as n from possessions where tenant_id = $1", [cabinet]);
+
+  verifier("un membre non propriétaire ne peut PAS supprimer la bibliothèque",
+    leve, "la suppression a été acceptée — le fonds du cabinet part sur un clic");
+  verifier("… et après le refus, la bibliothèque et son fonds sont intacts",
+    debout !== undefined && Number(n) === 1, `tenant=${!!debout} possessions=${n}`);
+}
+
+/* ===================================================================== */
 /* 4. LA SUPPRESSION ELLE-MÊME                                            */
 /* ===================================================================== */
 
 let tally = null;
 await enChaine("la suppression s'exécute sans lever", async () => {
-  [tally] = await dans(partant, "select * from public.supprimer_locataire()");
+  [tally] = await dans({ locataire: partant, compte: proprioPartant },
+    "select * from public.supprimer_locataire()");
 });
 
 verifier("elle rend le décompte de ce qu'elle a détruit",
@@ -162,13 +196,21 @@ verifier("après suppression, AUCUNE table ne garde une ligne du locataire",
 /* UNE SESSION QUI SURVIT À SA BIBLIOTHÈQUE. Le cas arrive pour de vrai :
    double clic sur le bouton, ou onglet resté ouvert. Le cookie est valide et
    signé, mais le locataire n'existe plus. La politique n'efface alors aucune
-   ligne — et sans le contrôle de « row_count », la fonction rendrait « 0
-   effacé » comme un succès. La personne verrait « c'est fait » deux fois.
+   ligne — et sans garde-fou, la fonction rendrait « 0 effacé » comme un
+   succès. La personne verrait « c'est fait » deux fois.
 
-   Ce contrôle manquait : une mutation retirant ce garde-fou a survécu. */
+   Ce contrôle manquait : une mutation retirant ce garde-fou a survécu.
+
+   CE QUI LE TIENT A CHANGÉ LE 05/09/2026. C'était « row_count » ; c'est
+   désormais la vérification d'existence, placée AVANT celle de propriété.
+   Il fallait la déplacer : la cascade emporte aussi la ligne « membres », si
+   bien que le contrôle de propriété répondait « vous n'êtes pas
+   propriétaire » à celui qui l'était une seconde plus tôt. Le refus était
+   juste, le motif faux — et ce contrôle-ci, qui lit le motif, le voyait. */
 {
   let leve = false;
-  try { await dans(partant, "select * from public.supprimer_locataire()"); }
+  try { await dans({ locataire: partant, compte: proprioPartant },
+                   "select * from public.supprimer_locataire()"); }
   catch (e) { leve = /Suppression refusée/.test(e.message); }
   verifier("une bibliothèque déjà effacée ne rend pas un second faux succès",
     leve, "succès rendu pour une suppression qui n'a rien effacé");
@@ -189,7 +231,8 @@ verifier("… et la fiche du livre PARTAGÉ survit",
   "l'ouvrage commun a été emporté — l'étagère du voisin pointe dans le vide");
 
 const [compteVoisin] = await q(
-  "select courriel from comptes where tenant_id = $1", [restant]);
+  `select c.courriel from comptes c join membres m on m.compte_id = c.id
+      where m.tenant_id = $1`, [restant]);
 verifier("… et son compte aussi",
   compteVoisin?.courriel === "reste@exemple.fr", JSON.stringify(compteVoisin));
 

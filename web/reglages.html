@@ -202,6 +202,88 @@
     </section>
 
     <!-- ================================================================
+         QUI PARTAGE CETTE BIBLIOTHÈQUE
+
+         ELLE EST AU-DESSUS DE LA PORTE DE SORTIE, ET CE N'EST PAS UN
+         HASARD : quelqu'un qui vient pour partir doit d'abord voir qu'il
+         peut simplement QUITTER une bibliothèque d'équipe, sans supprimer
+         son compte. Ce sont deux gestes très différents, et les mettre
+         côte à côte est ce qui permet de ne pas se tromper.
+
+         LE BLOC N'APPARAÎT QUE S'IL Y A QUELQU'UN — voir
+         « peindreMembres ». Une personne seule dans sa bibliothèque n'a pas
+         d'équipe à gérer, et lui montrer une liste d'un nom pose une
+         question sans objet. Le bouton « inviter », lui, reste offert au
+         propriétaire : c'est ainsi qu'une équipe commence.
+         ================================================================ -->
+    <section id="sectionEquipe" hidden>
+      <h2>Qui partage cette bibliothèque</h2>
+      <p class="aide" id="aideEquipe"></p>
+      <ul id="listeMembres"
+          style="list-style:none;padding:0;margin:0 0 14px;font-size:14px"></ul>
+
+      <div id="blocInvitation" hidden>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          <input type="email" id="courrielInvite" autocomplete="off"
+                 placeholder="Adresse de la personne à inviter"
+                 aria-label="Adresse de courriel de la personne à inviter"
+                 style="font:inherit;font-size:14px;padding:7px 9px;background:var(--paper-2);border:1px solid var(--rule);color:var(--ink);border-radius:2px;min-width:min(320px,100%)">
+          <button id="inviterMembre"
+                  style="font-size:14px;padding:8px 14px;background:var(--paper-2);color:var(--ink);border:1px solid var(--rule);border-radius:2px">
+            Envoyer une invitation
+          </button>
+        </div>
+        <p class="aide">
+          Elle recevra un lien valable sept jours. En l'ouvrant, elle rejoint
+          cette bibliothèque comme <strong>membre</strong> : elle y voit et
+          y ajoute des ouvrages, mais ne peut ni inviter ni supprimer.
+        </p>
+      </div>
+
+      <!-- EMPORTER EST AU-DESSUS DE PARTIR, ET DANS CET ORDRE.
+
+           C'est la séquence réelle : on emporte, PUIS on décide. L'inverse
+           obligerait à revenir en arrière, ce qu'un départ ne permet pas.
+
+           Les deux gestes restent SÉPARÉS. Les fondre en un seul bouton
+           rendrait impossible de copier sans partir — or c'est le cas le
+           plus fréquent : on prend une copie de travail, on reste. -->
+      <div id="blocEmporter" hidden style="margin-top:14px">
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          <select id="cibleCopie"
+                  aria-label="Bibliothèque où emporter une copie"
+                  style="font:inherit;font-size:14px;padding:7px 9px;background:var(--paper-2);border:1px solid var(--rule);color:var(--ink);border-radius:2px"></select>
+          <button id="emporterCopie"
+                  style="font-size:14px;padding:8px 14px;background:var(--paper-2);color:var(--ink);border:1px solid var(--rule);border-radius:2px">
+            Emporter une copie
+          </button>
+        </div>
+        <p class="aide">
+          Vous emportez une <strong>copie</strong> : le fonds commun n'est
+          pas amputé. Les ouvrages que vous possédez déjà sont ignorés, vos
+          statuts de lecture et vos notes vous suivent, et les résumés déjà
+          produits n'ont pas à l'être une seconde fois.
+          Les choix de visibilité de l'équipe, eux, ne suivent pas — vos
+          copies arrivent au réglage de vos propres rayons.
+        </p>
+      </div>
+
+      <div id="blocDepart" hidden style="margin-top:14px">
+        <button id="quitterBibliotheque"
+                style="font-size:14px;padding:8px 14px;background:var(--paper-2);color:var(--ink);border:1px solid var(--rule);border-radius:2px">
+          Quitter cette bibliothèque
+        </button>
+        <p class="aide">
+          Vous n'y aurez plus accès. <strong>Rien n'est effacé</strong> : ni
+          le fonds commun, ni votre compte, ni vos autres bibliothèques.
+          Emportez d'abord ce que vous voulez garder.
+        </p>
+      </div>
+
+      <p class="etat" id="etatEquipe"></p>
+    </section>
+
+    <!-- ================================================================
          LA PORTE DE SORTIE
 
          Elle est EN BAS, et volontairement sans raccourci : on ne tombe
@@ -433,6 +515,7 @@ function peindre(r) {
      qu'aucun plafond ne s'applique en pratique. Le décompte, lui, tourne
      exactement pareil : c'est ce qui permettra de choisir un vrai plafond
      pour les invités à partir de ce qui aura été observé. */
+  dernierQuota = r.quota;
   const { consomme, plafond } = r.quota;
   const sansPlafond = plafond >= 1000;
   const part = plafond > 0 ? Math.min(100, Math.round(consomme / plafond * 100)) : 0;
@@ -442,11 +525,45 @@ function peindre(r) {
   $("quotaJauge").hidden = sansPlafond;
   $("quotaJauge").classList.toggle("pleine", consomme >= plafond);
   $("quotaJauge").firstElementChild.style.width = part + "%";
+  peindreQuotaTexte();
+}
+
+/* --------------------------------------------------------------------------
+   LE TEXTE DU QUOTA, À PART — parce qu'il dépend de DEUX chargements
+
+   Le chiffre vient de « /api/reglages » ; le nombre de membres vient de
+   « /api/membres », qui arrive après et sans bloquer l'écran. Le texte doit
+   donc pouvoir être repeint quand la seconde réponse arrive, sans redessiner
+   le reste.
+
+   LE COMPTEUR EST COMMUN, ET IL FAUT LE DIRE — 05/09/2026. Depuis la
+   migration 19 le quota suit le nombre de sièges : il grandit quand on
+   invite, il redescend quand quelqu'un part. Mais il reste UN SEUL compteur
+   pour toute la bibliothèque, pas un par personne. Quelqu'un qui verrait
+   « 40 » sans savoir qu'il le partage à quatre s'étonnerait de le voir
+   descendre sans avoir rien demandé, et soupçonnerait un défaut là où il n'y
+   en a pas.
+
+   La phrase n'apparaît qu'à partir de deux membres : à une, elle poserait
+   une question sans objet.
+   -------------------------------------------------------------------------- */
+let dernierQuota = null;
+let equipe = 1;
+
+function peindreQuotaTexte() {
+  if (!dernierQuota) return;
+  const { consomme, plafond } = dernierQuota;
+  const sansPlafond = plafond >= 1000;
   $("quotaTexte").textContent = sansPlafond
     ? `Aucun plafond ne s'applique en pratique à cette bibliothèque (${plafond.toLocaleString("fr-FR")}). Le compte est tenu quand même : c'est lui qui permettra de fixer un plafond juste pour les invités.`
     : consomme >= plafond
       ? "Plafond atteint. Les résumés et recommandations reprendront le 1er du mois prochain. Les résumés déjà écrits restent lisibles et ne consomment rien."
-      : "Un résumé, une recommandation ou une recherche de fiche compte pour un appel. Relire un résumé déjà écrit ne compte pas. Remise à zéro le 1er du mois.";
+      : "Un résumé, une recommandation ou une recherche de fiche compte pour un appel. "
+        + "Relire un résumé déjà écrit ne compte pas. Remise à zéro le 1er du mois."
+        + (equipe > 1
+            ? ` Ce compteur est commun aux ${equipe} membres, et il grandit `
+              + "à chaque personne invitée."
+            : "");
 }
 
 /* ------------------------------------- Régler un ouvrage en particulier
@@ -542,10 +659,237 @@ $("supprimerCompte").addEventListener("click", async () => {
   }
 });
 
+/* ==========================================================================
+   L'ÉQUIPE
+
+   TOUT EST POSÉ EN « textContent », JAMAIS EN « innerHTML ». Ce qui s'affiche
+   ici — des adresses de courriel — vient d'autres personnes. C'est la
+   première liste de cette application dont le contenu est écrit par
+   quelqu'un d'autre que celui qui la lit, et c'est exactement la situation
+   où une injection sert à quelque chose.
+   ========================================================================== */
+
+const ROLES = { proprietaire: "propriétaire", membre: "membre", invite: "invité" };
+
+/* --------------------------------------------------------------------------
+   LA RÈGLE D'AFFICHAGE, ISOLÉE ET SANS EFFET DE BORD
+
+   ELLE EST SÉPARÉE DU DESSIN POUR POUVOIR ÊTRE ÉPROUVÉE — 05/09/2026.
+
+   Cette page est un script « type=module », et jsdom n'exécute pas les
+   modules. Le contrôle qui monte la vraie page, comme il le fait pour
+   ma-bibliotheque.html, ne voit donc rien ici : il a affiché « Lecture des
+   réglages… » pendant deux secondes et demie et conclu que la section était
+   cachée. Le diagnostic était faux ; la limite est écrite depuis le
+   21/08 dans test-environnement.mjs, et je ne l'avais pas relue.
+
+   Plutôt que de renoncer au contrôle, on sort la partie qui décide. Elle ne
+   touche pas au DOM, ne fait aucun appel, et répond à la seule question qui
+   peut être fausse sans que rien ne casse : QU'EST-CE QUI EST OFFERT.
+
+   Les trois règles, et pourquoi :
+
+     section    — visible s'il y a une équipe, OU si l'on peut en créer une.
+                  Sans la seconde branche, aucune équipe ne pourrait jamais
+                  commencer : le seul endroit d'où l'on invite serait caché à
+                  tous ceux qui n'ont encore invité personne.
+
+     invitation — au propriétaire seul. La base refuse aux autres ; montrer
+                  le bouton donnerait un geste qui échoue toujours, et la
+                  personne croirait s'y prendre mal.
+
+     depart     — jamais quand on est seul, jamais au dernier propriétaire.
+                  Même raison : « membres_garde_proprietaire » refuse, et un
+                  bouton qui échoue à chaque fois est pire que son absence.
+   -------------------------------------------------------------------------- */
+function visibiliteEquipe(membres) {
+  const moi  = membres.find(m => m.moi);
+  const seul = membres.length < 2;
+  const proprietaire = moi?.role === "proprietaire";
+  const autresProprietaires = membres
+    .filter(m => m.role === "proprietaire" && !m.moi).length;
+
+  return {
+    section:    !(seul && !proprietaire),
+    invitation: proprietaire,
+    depart:     !seul && !(proprietaire && autresProprietaires === 0),
+
+    /* EMPORTER N'A DE SENS QUE DEPUIS UNE BIBLIOTHÈQUE PARTAGÉE. Chez soi,
+       copier son étagère vers soi-même ne ferait rien — la base le refuse
+       d'ailleurs. Offrir le bouton donnerait un geste qui échoue toujours.
+
+       Il est proposé même au dernier propriétaire, qui ne peut pas partir :
+       les deux gestes sont distincts, et prendre une copie de travail est
+       légitime quand on reste. */
+    emporter:   !seul,
+  };
+}
+
+function peindreMembres(membres) {
+  const section = $("sectionEquipe");
+  const liste   = $("listeMembres");
+  const seul    = membres.length < 2;
+  const vu      = visibiliteEquipe(membres);
+
+  section.hidden = !vu.section;
+  if (section.hidden) return;
+
+  $("aideEquipe").textContent = seul
+    ? "Vous êtes seul ici. Invitez quelqu'un pour partager ce fonds : "
+      + "les ouvrages et les résumés déjà produits deviennent communs."
+    : `${membres.length} personnes partagent cette bibliothèque. `
+      + "Chacune y voit les mêmes ouvrages.";
+
+  liste.innerHTML = "";
+  for (const m of membres) {
+    const li = document.createElement("li");
+    li.style.padding = "5px 0";
+    li.style.borderBottom = "1px solid var(--rule)";
+
+    const qui = document.createElement("span");
+    qui.textContent = m.courriel;            // écrit par une autre personne
+    if (m.moi) qui.style.fontWeight = "600";
+
+    const role = document.createElement("span");
+    role.style.color = "var(--ink-soft)";
+    role.style.fontSize = "12px";
+    role.style.marginLeft = "10px";
+    role.textContent = ROLES[m.role] ?? m.role;
+
+    li.append(qui, role);
+    if (m.moi) {
+      const vous = document.createElement("span");
+      vous.style.color = "var(--ink-soft)";
+      vous.style.fontSize = "12px";
+      vous.style.marginLeft = "6px";
+      vous.textContent = "— vous";
+      li.append(vous);
+    }
+    liste.appendChild(li);
+  }
+
+  $("blocInvitation").hidden = !vu.invitation;
+  $("blocDepart").hidden     = !vu.depart;
+  $("blocEmporter").hidden   = !vu.emporter;
+}
+
+/* --------------------------------------------------------------------------
+   OÙ EMPORTER
+
+   La liste vient de « /api/session », donc du SERVEUR : la page n'invente
+   jamais une destination, elle choisit dans ce qu'on lui a donné. Une valeur
+   fabriquée par le navigateur ne s'y trouverait pas — et la base la
+   refuserait de toute façon, puisque « copier_dans » vérifie l'appartenance.
+
+   « une nouvelle bibliothèque » EST TOUJOURS PROPOSÉE, et en premier quand
+   c'est la seule option. Sans elle, quelqu'un qui n'appartient qu'à l'équipe
+   n'a nulle part où poser ses livres : « vous pouvez partir avec vos
+   ouvrages » serait une phrase, pas une porte.
+   -------------------------------------------------------------------------- */
+async function peindreDestinations() {
+  const sel = $("cibleCopie");
+  if (!sel) return;
+  let bibliotheques = [], courante = null;
+  try {
+    /* LES DEUX VIENNENT DE LA MÊME RÉPONSE, et c'est ce qui garantit qu'on
+       exclut la bonne. Lire la bibliothèque courante ailleurs — un second
+       appel, une variable posée plus tôt — laisserait la possibilité qu'elle
+       ne corresponde plus à la liste, et l'on proposerait de copier une
+       bibliothèque sur elle-même : un geste que la base refuse toujours. */
+    const s = await api("/session");
+    bibliotheques = s.bibliotheques ?? [];
+    courante = s.bibliotheque ?? null;
+  } catch { /* la liste manque : il reste « une nouvelle bibliothèque » */ }
+
+  sel.innerHTML = "";
+  for (const b of bibliotheques.filter(b => b.locataire !== courante)) {
+    const o = document.createElement("option");
+    o.value = b.locataire;
+    o.textContent = b.nom;          // écrit par une personne : jamais innerHTML
+    sel.appendChild(o);
+  }
+  const neuve = document.createElement("option");
+  neuve.value = "";
+  neuve.textContent = "— une nouvelle bibliothèque";
+  sel.appendChild(neuve);
+}
+
+$("emporterCopie")?.addEventListener("click", async () => {
+  const bouton = $("emporterCopie");
+  const cible = $("cibleCopie").value || null;
+  bouton.disabled = true;
+  dire("etatEquipe", "copie en cours…");
+  try {
+    const r = await api("/bibliotheque/copie", "POST",
+      cible ? { cible } : { nom: "Ma bibliothèque" });
+    /* ON DIT LES DEUX NOMBRES. « 12 copiés » seul laisserait croire à une
+       perte quand la destination possédait déjà le reste. */
+    dire("etatEquipe",
+      `${r.copies} ouvrage(s) emporté(s)`
+      + (r.ignores ? `, ${r.ignores} déjà présent(s)` : "")
+      + (r.creee ? " dans une nouvelle bibliothèque." : "."));
+    await peindreDestinations();
+  } catch (e) {
+    dire("etatEquipe", e.message, true);
+  } finally {
+    bouton.disabled = false;
+  }
+});
+
+async function chargerMembres() {
+  peindreMembres(await api("/membres"));
+  await peindreDestinations();
+}
+
+$("inviterMembre")?.addEventListener("click", async () => {
+  const champ = $("courrielInvite");
+  const bouton = $("inviterMembre");
+  const adresse = champ.value.trim();
+  if (!adresse) { dire("etatEquipe", "Indiquez une adresse.", true); return; }
+
+  bouton.disabled = true;
+  dire("etatEquipe", "envoi…");
+  try {
+    await api("/membres", "POST", { courriel: adresse });
+    champ.value = "";
+    /* ON NE DIT PAS SI L'ADRESSE ÉTAIT DÉJÀ CONNUE. Le serveur ne le dit pas
+       non plus — sans quoi ce formulaire deviendrait un moyen de savoir qui
+       est client de Lisia. */
+    dire("etatEquipe", "Invitation envoyée. Elle est valable sept jours.");
+  } catch (e) {
+    dire("etatEquipe", e.message, true);
+  } finally {
+    bouton.disabled = false;
+  }
+});
+
+$("quitterBibliotheque")?.addEventListener("click", async () => {
+  const bouton = $("quitterBibliotheque");
+  /* UNE CONFIRMATION, PARCE QUE LE BOUTON EST À CÔTÉ DE LA SUPPRESSION.
+     Elle ne demande pas de recopier une adresse — partir est réversible,
+     on peut être réinvité — mais elle demande un second geste. */
+  if (!confirm("Quitter cette bibliothèque ? Vous n'y aurez plus accès, "
+             + "mais rien ne sera effacé.")) return;
+
+  bouton.disabled = true;
+  try {
+    await api("/membres", "DELETE");
+    location.href = "/";
+  } catch (e) {
+    bouton.disabled = false;
+    dire("etatEquipe", e.message, true);
+  }
+});
+
 /* ------------------------------------------------------------ Démarrage */
 
 try {
   peindre(await api("/reglages"));
+  /* Sans « await », comme la liste des ouvrages : la page est utilisable
+     sans connaître l'équipe, et l'attendre retarderait ce qu'on vient
+     voir. */
+  chargerMembres().catch(
+    () => dire("etatEquipe", "Liste des membres indisponible.", true));
   // Sans « await » : la page est utilisable sans cette liste, et l'attendre
   // retarderait l'affichage de ce qu'on est venu voir.
   chargerLivres().catch(() => dire("etatExceptions", "Liste des ouvrages indisponible.", true));

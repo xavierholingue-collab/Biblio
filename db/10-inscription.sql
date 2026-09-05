@@ -99,9 +99,28 @@ alter table public.liens_connexion drop constraint if exists liens_une_seule_cib
 alter table public.liens_connexion add constraint liens_une_seule_cible
   check ((compte_id is not null) <> (courriel is not null));
 
-/* ------------------------------------------ Une bibliothèque, une personne */
-create unique index if not exists comptes_un_par_locataire
-  on public.comptes (tenant_id);
+/* ------------------------------------------ Une bibliothèque, une personne
+
+   CETTE RÈGLE A ÉTÉ LEVÉE LE 05/09/2026 — voir 15-membres.sql.
+
+   Elle était vraie et voulue : une bibliothèque, une personne. La version
+   collaborative l'a rendue fausse — les formateurs d'un cabinet partagent un
+   même fonds —, et la 15 supprime cet index en même temps que la colonne
+   qu'il indexe.
+
+   Il reste ici, conditionné, pour la même raison que dans la 02 : les
+   migrations sont rejouées à chaque livraison. Une base d'avant la 15 garde
+   sa contrainte ; une base d'après ne s'en occupe pas. Les deux restent
+   justes, et la livraison ne tombe pas au second passage. */
+do $$
+begin
+  if exists (select 1 from information_schema.columns
+              where table_schema = 'public' and table_name = 'comptes'
+                and column_name = 'tenant_id') then
+    create unique index if not exists comptes_un_par_locataire
+      on public.comptes (tenant_id);
+  end if;
+end $$;
 
 /* ---------------------------------------------------------- La porte nommée
 

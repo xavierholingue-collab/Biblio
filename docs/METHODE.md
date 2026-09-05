@@ -284,6 +284,249 @@ elle, le contrôle aurait pu passer au vert en ne regardant plus rien.
 
 ---
 
+## 6. Un commentaire qui explique *pourquoi* ça marche est une affirmation
+
+*Ajoutée le 05/09/2026, sur la migration des bibliothèques partagées.*
+
+J'ai écrit deux fonctions de connexion en `security definer`, avec ce
+commentaire au-dessus :
+
+> « `security definer`, parce que les politiques de `membres` ne montreraient
+> rien à un visiteur. »
+
+C'était faux. `security definer` exécute le corps avec les droits du
+**propriétaire des tables** — et `force row level security` soumet
+précisément le propriétaire aux politiques. Les fonctions ne voyaient rien.
+Elles rendaient zéro ligne, sans la moindre erreur, et toute connexion
+échouait sur « ce compte n'appartient à aucune bibliothèque ».
+
+Ce n'est pas l'erreur qui est intéressante — le dépôt connaît ce piège, il
+est écrit noir sur blanc quinze lignes plus haut dans le même fichier, à
+propos de la reprise des données. C'est **le commentaire**. En énonçant un
+mécanisme, il a rendu le code délibéré : quelque chose qui a l'air justifié
+ne se relit plus. Un `security definer` posé sans explication aurait sans
+doute déclenché la question ; expliqué, il l'a éteinte.
+
+Même famille que la règle 4, un cran plus haut : là-bas c'était une promesse
+sans contrôle, ici c'est **une explication sans vérification**. Et une
+explication fausse est pire qu'absente, parce qu'elle immunise.
+
+**Le remède, et il est court.** Quand un commentaire dit *pourquoi* un
+mécanisme fonctionne, la phrase se vérifie comme du code — trois lignes dans
+le bac à sable suffisaient ici :
+
+```
+en contexte VISITEUR, via la fonction security definer : []
+```
+
+Ce jour-là, une seconde vérification a suivi la première, et elle compte
+autant : la politique corrigée a été **mutée en `using (true)`** pour voir si
+quelque chose s'en apercevrait. Les vingt-sept vérifications du banc HTTP et
+les dix-neuf du cloisonnement sont **restées vertes**. La table
+`membres` — qui dit qui travaille avec qui — pouvait être ouverte à tous sans
+qu'aucun contrôle bronche. Six vérifications ont été ajoutées pour cela.
+
+> Une explication qui n'a pas été éprouvée n'explique rien : elle rassure.
+> Et un mécanisme qu'on vient de corriger doit être cassé exprès, pour savoir
+> si sa correction est tenue par autre chose que l'intention.
+
+---
+
+## 7. Sous RLS, toute question devient « qu'est-ce qu'on me montre ? »
+
+*Ajoutée le 05/09/2026. Trois occurrences le même jour, sur trois mécanismes
+qui n'ont rien à voir entre eux — c'est ce qui en fait une règle et non trois
+anecdotes.*
+
+**Le matin.** `security definer` posé sur les fonctions de connexion, avec le
+commentaire « parce que les politiques ne montreraient rien à un visiteur ».
+`security definer` exécute avec les droits du propriétaire des tables, et
+`force row level security` soumet le propriétaire aux politiques. Les
+fonctions rendaient zéro ligne. Sans erreur.
+
+**L'après-midi.** Le déclencheur « une bibliothèque garde au moins un
+propriétaire » comptait les propriétaires restants — sous RLS. Dans le
+contexte de connexion, seules les lignes du compte concerné sont visibles :
+pour un membre simple, la requête ne voyait AUCUN propriétaire, concluait au
+départ du dernier, et refusait. Un membre ne pouvait pas ouvrir la
+bibliothèque de son équipe.
+
+**Le soir.** `insert … on conflict (compte_id, tenant_id) do nothing` a
+répondu `new row violates row-level security policy`. La clause `with check`
+était pourtant satisfaite. Ce qui manquait était la LECTURE : pour appliquer
+`ON CONFLICT`, le moteur doit regarder la ligne en conflit, et regarder est
+soumis aux politiques.
+
+Trois fois la même confusion : **prendre ce qui m'est montré pour ce qui
+existe.** Elle est difficile à voir parce que le résultat n'est jamais une
+erreur franche — c'est un ensemble vide, un décompte à zéro, un message qui
+désigne la mauvaise clause.
+
+**Le remède, en trois questions à poser devant tout code qui touche une table
+sous RLS :**
+
+1. **Qui exécute, et sous quel contexte ?** Pas « qui appelle » — quel rôle,
+   et quelles variables `app.*` sont posées à cet instant précis.
+2. **Cette requête compte-t-elle, ou vérifie-t-elle une absence ?** Un
+   `count`, un `not exists`, un `on conflict` répondent tous « je ne vois
+   pas » quand la vraie réponse serait « il y en a ».
+3. **La question porte-t-elle sur ce que je veux protéger ?** Un invariant
+   sur la propriété ne se pose pas quand on met à jour une date de dernière
+   ouverture. La bonne correction a souvent été de NE PAS POSER la question,
+   plutôt que d'élargir la vue pour y répondre.
+
+Et un corollaire du même jour, sur un contrôle cette fois : `test-portes-inscription.mjs`
+cherchait un appel « dans les 4 000 premiers caractères après la signature ».
+Une distance prise pour une portée. L'ajout d'une branche commentée l'a
+poussé au-delà, et le contrôle a crié à tort — la version bénigne. La version
+grave est l'inverse : un appel fautif placé plus loin, jamais regardé.
+
+> Une vue restreinte répond toujours quelque chose, et ce quelque chose a
+> l'air d'un fait. Avant de croire un décompte, demander qui le fait et ce
+> qu'on lui laisse voir.
+
+---
+
+## 8. Deux remparts pour un défaut : lequel des deux mesure-t-on ?
+
+*Ajoutée le 05/09/2026, en écrivant `test-lectures.mjs`.*
+
+La vue `livres` borne sa jointure sur `compte_effectif()`, **et** la politique
+`lectures_lecture` dit la même chose. C'est délibéré : la vue reste juste si
+l'on relâche la politique, la politique reste juste si l'on modifie la vue.
+
+En éprouvant le fichier, la mutation qui retire la condition de la jointure a
+**survécu** — les vingt-six vérifications sont restées vertes, parce que la
+politique rattrapait. La mutation symétrique, elle, était bien attrapée.
+
+Le réflexe serait de conclure « c'est normal, ils se doublent ». C'est vrai,
+et c'est insuffisant : **un rempart que rien ne distingue n'est pas un
+rempart, c'est une intention.** Le jour où quelqu'un allège la vue en se
+disant « la politique suffit », rien ne le dira ; et la fois d'après, quand
+la politique bougera à son tour, il n'y aura plus rien du tout.
+
+**Le remède.** Trouver l'instrument qui isole. Ici c'était l'observateur du
+banc d'essai — superutilisateur, donc au-dessus des politiques : ce qui reste
+alors est exactement la jointure de la vue. Deux vérifications ajoutées, et
+la mutation tombe.
+
+Quand aucun instrument n'isole les deux, la question devient franche :
+faut-il vraiment les deux ? Si la réponse est oui, elle s'écrit — sinon le
+second rempart est du code que personne ne relit et que rien ne tient.
+
+Corollaire pratique du même jour, sur une expression régulière : le contrôle
+cherchait `\blus\b` dans le texte concaténé des vignettes. Or `0lus` n'offre
+aucune frontière de mot entre le chiffre et la lettre — la mutation passait,
+et c'est la vérification d'à côté qui l'a attrapée. **Une frontière de mot
+suppose un séparateur ; du texte concaténé n'en a pas.**
+
+> Éprouver un contrôle, ce n'est pas vérifier qu'il devient rouge. C'est
+> vérifier qu'il devient rouge POUR LA RAISON QU'IL ANNONCE.
+
+---
+
+## 9. Une reprise de données ne s'éprouve que sur des données qui existaient
+
+*Ajoutée le 05/09/2026, sur la migration 17. C'est l'entrée la plus chère de
+ce registre : sans le contrôle décrit ici, la livraison effaçait le statut de
+lecture et la note de 348 ouvrages.*
+
+Le banc d'essai applique toutes les migrations d'un bloc sur une base **vide**.
+Une reprise qui ne reprend rien y est donc indiscernable d'une reprise
+réussie : il n'y avait rien à reprendre. Le rejeu, de son côté, vérifie
+qu'une migration s'applique deux fois — pas qu'elle déplace correctement ce
+qui était là.
+
+**Ce qui s'est passé.** La 17 déplace `statut` et `note` de `possessions`
+vers `lectures`, puis supprime les colonnes d'origine. J'avais levé les
+politiques sur `lectures` — la table où l'on écrit — en oubliant
+`possessions` et `membres`, les tables qu'on lit. La migration s'exécutait
+comme un visiteur anonyme, la lecture ne rendait rien, **zéro ligne reprise**,
+et la suppression des colonnes s'exécutait quand même. Les vingt-quatre
+suites étaient vertes.
+
+**Le remède, en deux temps.**
+
+1. **Un contrôle qui monte la base à l'état d'avant.** `ouvrirBanc({ jusqua })`
+   arrête les migrations avant celle qu'on veut éprouver ; on sème alors des
+   données comme elles existent en production, on applique la suite, et on
+   regarde. C'est `test-reprise-lectures.mjs`, et c'est lui — et lui seul —
+   qui a vu le défaut.
+
+2. **Un garde-fou DANS la migration.** Un contrôle extérieur peut être retiré,
+   ou ne pas tourner ; celui-ci part avec le fichier. Il refuse de supprimer
+   les colonnes si la reprise n'a rien repris, et `raise exception` annule la
+   transaction — donc la suppression avec elle. Le déploiement échoue
+   bruyamment, la base reste intacte.
+
+**Et le garde-fou lui-même s'est trompé d'abord.** Sa première rédaction
+comptait « combien y a-t-il à reprendre » avec la même requête, donc à
+travers les mêmes politiques : politiques oubliées, il rendait zéro lui
+aussi. Zéro attendu, zéro repris, tout allait bien. Il vérifie désormais la
+**précondition** — la levée a-t-elle eu lieu, question posée à `pg_class`, que
+la RLS ne masque pas — et non le résultat.
+
+C'est mot pour mot ce que `03-catalogue.sql` écrit depuis le 15/08 : *un
+contrôle qui partage l'aveuglement de ce qu'il contrôle ne contrôle rien.* Je
+l'ai réécrit sans le reconnaître, dans un fichier voisin, le même jour que
+trois autres instances de la règle 7.
+
+> Quand une migration détruit après avoir déplacé, l'ordre des deux gestes
+> est une promesse. Elle se contrôle sur des données réelles, et depuis
+> l'intérieur du fichier.
+
+---
+
+## 10. Une écriture qui n'écrit rien ne lève pas
+
+*Ajoutée le 05/09/2026, en fin de journée. C'est la même racine que la règle
+7, mais du côté de l'écriture — et il a fallu six occurrences pour que je
+cesse de la traiter comme six accidents.*
+
+`select` sous RLS répond « rien » quand il ne voit rien. `update` et `insert`
+font pire : ils rapportent un succès. **Zéro ligne touchée n'est pas une
+erreur pour PostgreSQL.**
+
+Les six du jour, dans l'ordre :
+
+| ce qui écrivait | ce qui manquait | ce qu'on aurait vu |
+|---|---|---|
+| `bibliotheque_a_ouvrir` | `security definer` ne franchit pas `force` | plus aucune connexion |
+| `membres_garde_proprietaire` | décompte sous RLS | un membre ne peut pas ouvrir sa bibliothèque |
+| `rejoindre_locataire` | `on conflict` a besoin de VOIR | invitation impossible |
+| reprise de la 17 | politiques levées sur la destination seulement | **348 lectures effacées** |
+| `dimensionner_sieges` (update) | `tenants_reglages` borne sur `app.tenant_id` | quota jamais recalculé |
+| `dimensionner_sieges` (count) | décompte sous RLS | toute équipe dimensionnée pour une personne |
+
+Quatre des six ne produisaient **aucune erreur**. Deux d'entre elles
+auraient été trouvées par un utilisateur ; deux seraient restées invisibles.
+
+Et un défaut dormant, découvert au passage : `regler_tarification`, écrite le
+24/08, n'a jamais fonctionné que parce qu'on l'a toujours lancée en
+superutilisateur. Appelée par le compte applicatif, elle rendait zéro ligne
+comme un succès. Deux semaines de latence.
+
+**Les trois réflexes, dans cet ordre.**
+
+1. **Toute écriture sous RLS se relit.** `get diagnostics ... = row_count`,
+   ou un `returning` qu'on compte. Un `update` dont on ne vérifie pas
+   l'effet est une intention, pas une écriture.
+
+2. **Lever les politiques sur TOUT ce que la requête touche, pas seulement
+   sur ce qu'elle écrit.** Une insertion qui lit deux tables en a trois à
+   lever. C'est la faute la plus chère de la journée.
+
+3. **Éprouver sous le compte APPLICATIF, jamais seulement sous
+   l'observateur.** Le banc d'essai a un superutilisateur, et il traverse
+   tout en silence : c'est ce qui a laissé `regler_tarification` fausse
+   pendant deux semaines. Chaque porte nommée mérite une vérification
+   appelée par `dans(...)`, et non par `q(...)`.
+
+> Un `select` qui ne voit rien se remarque. Un `update` qui n'écrit rien se
+> félicite.
+
+---
+
 ## Ce qui ne s'automatise pas, et revient à Xavier
 
 Le seul défaut réellement dangereux du 24/08 n'a été trouvé par aucun

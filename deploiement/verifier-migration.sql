@@ -207,11 +207,28 @@ begin
         from public.books b
         join public.possessions p on p.tenant_id = b.tenant_id and p.id = b.id
         join public.ouvrages o on o.id = p.ouvrage_id
+       /* « statut » ET « note » ONT QUITTÉ CETTE COMPARAISON — 05/09/2026.
+        *
+        * La migration 17 les a déplacés de « possessions » vers
+        * « lectures » : ils appartiennent désormais à une PERSONNE, plus à
+        * l'étagère. « books » est un instantané gelé du temps où une
+        * bibliothèque valait une personne ; il porte UNE valeur par ouvrage,
+        * là où il peut maintenant y en avoir autant que de membres.
+        *
+        * Les comparer obligerait à choisir de quel membre parler — c'est-à-
+        * dire à réintroduire l'arbitraire que tout ce lot élimine. On retire
+        * donc ces deux champs plutôt que d'inventer une équivalence.
+        *
+        * CE QUE CELA COÛTE, ET JE NE VEUX PAS L'ENJOLIVER : plus rien ici ne
+        * dirait qu'une migration future déforme un statut de lecture. C'est
+        * « test-reprise-lectures.mjs » qui tient cette promesse désormais —
+        * il monte la base à l'état d'avant, sème, applique la suite et
+        * compare champ par champ. Contrairement à ce contrôle-ci, il compare
+        * la même donnée à elle-même, ce qui est la seule façon de rendre la
+        * question décidable — exactement ce que la note ci-dessus réclamait. */
        where b.titre          is distinct from o.titre
           or b.auteur         is distinct from o.auteur
           or b.annee          is distinct from o.annee
-          or b.statut         is distinct from p.statut
-          or b.note           is distinct from p.note
           or b.categorie      is distinct from p.categorie
           or b.sous_categorie is distinct from p.sous_categorie
           or b.sphere         is distinct from p.sphere

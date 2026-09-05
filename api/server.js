@@ -11,13 +11,14 @@ import pg from "pg";
 import { avecContexte, avecVisiteur } from "./locataire.mjs";
 import {
   demanderLien, consommerLien, purgerLiens, connexionParOidc,
-  signerTransit, verifierTransit,
+  signerTransit, verifierTransit, inviterMembre,
   courrielPlausible, normaliserCourriel, DUREE_LIEN_MINUTES,
+  DUREE_INVITATION_JOURS,
 } from "./authentification.mjs";
 import { commencer as oidcCommencer, terminer as oidcTerminer,
          etatOidc } from "./oidc.mjs";
 import { envoyerCourriel, messageDeConnexion, messageDInscription,
-         etatCourriel } from "./courriel.mjs";
+         messageDInvitation, etatCourriel } from "./courriel.mjs";
 import { chercherParIsbn, chercherParTexte, isbn13, etatCatalogues,
          couvertureDeSecours, chercherParDoi, chercherArticleParTexte,
          normaliserDoi, LIBELLES_SUPPORT } from "./bibliographie.mjs";
@@ -727,7 +728,23 @@ async function listerLivres(client, langue) {
 // Statistiques de la page d'accueil, calculées sur le périmètre visible.
 async function statistiques(client, session, langue) {
   const [general, resumes, sousCats, decennies, auteurs, recents] = await Promise.all([
+    /* « lecteur » DIT SI CES CHIFFRES ONT UN SUJET — 05/09/2026.
+     *
+     * Depuis la migration 17, le statut de lecture appartient à la personne.
+     * Un visiteur sur une bibliothèque publique n'en a aucun : la vue rend
+     * « A lire » partout, et les comptes ci-dessous diraient « 0 lu, 348 à
+     * lire ». Ce serait FAUX, et faux d'une façon crédible.
+     *
+     * On rend donc la question avec la réponse. L'appelant tait les chiffres
+     * de lecture quand il n'y a personne pour les porter — une absence se
+     * lit comme une absence, un zéro se lit comme un fait.
+     *
+     * C'est aussi un changement de produit assumé : la page publique
+     * n'annonce plus à qui passe combien d'ouvrages son propriétaire a lus.
+     * L'étagère est ce qu'on montre ; la progression de lecture ne l'est
+     * pas. */
     client.query(`select
+        (public.compte_effectif() is not null)                 as lecteur,
         count(*)::int                                          as total,
         count(*) filter (where statut = 'Lu')::int              as lus,
         count(*) filter (where statut = 'En cours')::int        as en_cours,
@@ -814,7 +831,17 @@ async function statistiques(client, session, langue) {
     langue,
     ...general.rows[0],
     avec_resume: resumes.rows[0].n,
-    note_moyenne: general.rows[0].note_moyenne === null ? null : Number(general.rows[0].note_moyenne),
+
+    /* SANS LECTEUR, LES CHIFFRES DE LECTURE N'EXISTENT PAS — ils ne valent
+       pas zéro. « 0 lu » se lit comme un fait sur la bibliothèque ; « null »
+       se lit comme ce que c'est, une question sans sujet.
+       Les cinq champs partent ensemble : en garder un seul laisserait une
+       moitié de vérité, ce qui est la forme la plus commode de l'erreur. */
+    ...(general.rows[0].lecteur ? {} : {
+      lus: null, en_cours: null, a_lire: null, notes: null,
+    }),
+    note_moyenne: !general.rows[0].lecteur || general.rows[0].note_moyenne === null
+      ? null : Number(general.rows[0].note_moyenne),
     // pg rend les BIGINT en CHAINE, pour ne pas perdre de precision au-dela
     // de 2^53. Sans cette conversion, « volume + volume » concatenerait deux
     // textes au lieu d'additionner deux nombres.
@@ -1045,12 +1072,11 @@ async function enregistrerLivres(client, livres) {
    * que ce n'est ni une panne (500) ni une faute de saisie (400), mais un état
    * du monde — et qu'il y a quelque chose à proposer plutôt qu'à réessayer. */
   await client.query(
-    `insert into possessions (tenant_id, id, ouvrage_id, statut, note,
+    `insert into possessions (tenant_id, id, ouvrage_id,
                               categorie, sous_categorie, sphere, visibilite, maj_le)
      select ${MOI}, e.id,
             case when e.doi is not null or e.isbn is not null then o.id
                  else coalesce(p.ouvrage_id, o.id) end,
-            coalesce(e.statut, 'A lire'), e.note,
             e.categorie, e.sous_categorie, e.sphere,
             /* L'ordre de ce coalesce EST la règle : une demande explicite,
                sinon le réglage existant, sinon le point de départ. La
@@ -1064,11 +1090,46 @@ async function enregistrerLivres(client, livres) {
        left join ouvrages o on o.cle = ${CLE}
       where o.id is not null or p.ouvrage_id is not null
      on conflict (tenant_id, id) do update set
-       ouvrage_id = excluded.ouvrage_id, statut = excluded.statut,
-       note = excluded.note, categorie = excluded.categorie,
+       ouvrage_id = excluded.ouvrage_id, categorie = excluded.categorie,
        sous_categorie = excluded.sous_categorie, sphere = excluded.sphere,
        visibilite = excluded.visibilite, maj_le = now()`, [charge])
     .catch((e) => { throw traduireConflit(e); });
+
+  /* 2 bis. LA LECTURE, QUI N'EST PLUS SUR L'ÉTAGÈRE MAIS SUR LA PERSONNE
+   *        — 05/09/2026, migration 17.
+   *
+   * « statut » et « note » ont quitté « possessions ». Dans une bibliothèque
+   * partagée, marquer un ouvrage « Lu » le marquait pour tout le cabinet, et
+   * la note — un jugement sur cinq — devenait celle du dernier qui avait
+   * cliqué. Rien n'échouait ; les données étaient simplement fausses.
+   *
+   * ON N'ÉCRIT QUE CE QUI A ÉTÉ DEMANDÉ. Un enregistrement qui ne mentionne
+   * ni statut ni note — corriger un rayon, changer une visibilité — ne doit
+   * pas remettre la lecture à zéro. C'est la différence entre « absent » et
+   * « vide », et elle se perd vite dans un JSON.
+   *
+   * « enregistrer_lecture » LÈVE si la session n'identifie personne. On la
+   * laisse remonter : l'appelant traduira en 403. Écrire dans le vide en
+   * rendant un succès est le défaut le plus cher de ce dépôt. */
+  /* ON LIT L'INTENTION DANS L'ENTRÉE BRUTE, PAS DANS « entrees ».
+   *
+   * Piège évité de justesse : « entrees » normalise « statut » à « A lire »
+   * quand il est absent — c'est ce qu'il fallait tant que la colonne était
+   * NOT NULL sur la possession. Filtrer sur cette liste-là aurait donc trouvé
+   * un statut PARTOUT, et chaque enregistrement d'un rayon ou d'une
+   * visibilité aurait remis la lecture de la personne à zéro.
+   *
+   * Personne ne s'en serait plaint tout de suite : on aurait vu son ouvrage
+   * repasser « à lire » de temps en temps, sans comprendre. La valeur par
+   * défaut avait un sens sur l'étagère ; elle n'en a plus sur la personne. */
+  const avecLecture = livres.filter(
+    (l) => l && (l.statut !== undefined || l.note !== undefined));
+  for (const l of avecLecture) {
+    await client.query(
+      "select public.enregistrer_lecture($1, $2, $3)",
+      [String(l.id), l.statut ?? null,
+       l.note === undefined || l.note === null || l.note === "" ? null : l.note]);
+  }
 
   /* 3. La correction du catalogue, pour les ouvrages qu'on possède.
    *
@@ -2320,8 +2381,15 @@ const serveur = createServer(async (req, rep) => {
        C'est la propriété qui rend la bascule sûre — l'oubli est visible
        immédiatement, au lieu de fuir en silence.
        ===================================================================== */
+    /* LE COMPTE VOYAGE AVEC LE LOCATAIRE — 05/09/2026.
+
+       La session porte les deux depuis toujours : « c » le compte, « t » le
+       locataire actif. Jusqu'ici seul « t » était posé, parce qu'un locataire
+       valait une personne. Avec les bibliothèques à plusieurs membres, savoir
+       QUI agit devient une question distincte de savoir OÙ — et c'est elle qui
+       décide si l'on a le droit de supprimer la bibliothèque de tous. */
     const dans = (travail) => session
-      ? avecContexte(bd, session.t, travail)
+      ? avecContexte(bd, { locataire: session.t, compte: session.c }, travail)
       : avecVisiteur(bd, travail);
 
     /* La langue des résumés. Résolue UNE fois par requête, à l'intérieur
@@ -2340,10 +2408,81 @@ const serveur = createServer(async (req, rep) => {
     }
 
     /* --- Routes ouvertes : ce que le locataire a rendu public --- */
+    /* =====================================================================
+       CHANGER DE BIBLIOTHÈQUE
+
+       LE COOKIE EST RÉÉMIS, ET C'EST TOUT LE MÉCANISME. Le locataire courant
+       ne vit nulle part ailleurs : ni en base, ni en mémoire du serveur. Le
+       changer, c'est signer un nouveau jeton — donc rien à invalider, rien à
+       synchroniser, et une bascule qui ne peut pas laisser deux vérités.
+
+       L'APPARTENANCE EST VÉRIFIÉE EN BASE, PAS ICI. « mes_bibliotheques() »
+       est bornée par « app.compte_id », que « dans() » vient de poser depuis
+       la session signée. Le locataire demandé n'est donc jamais qu'un choix
+       DANS une liste que le serveur a fabriquée : une valeur inventée par le
+       navigateur ne peut pas s'y trouver.
+
+       C'est le point à ne pas manquer : on ne DEMANDE PAS à la base « ce
+       compte est-il membre de ce locataire-là ? » — une question qu'on
+       pourrait oublier de poser. On lui demande ce à quoi le compte a droit,
+       et l'on cherche dedans. La différence est celle entre un contrôle et
+       une énumération.
+       ===================================================================== */
+    if (chemin === "/api/session/bibliotheque" && req.method === "POST") {
+      if (!session?.c) {
+        return json(rep, { error: "Cette session n'identifie aucun compte." }, 403);
+      }
+      const { locataire: vise } = await lireCorps(req);
+
+      const choisie = await dans(async (c) => {
+        const { rows } = await c.query(
+          "select locataire, identifiant, nom from public.mes_bibliotheques()");
+        const cible = rows.find(b => b.locataire === vise);
+        if (!cible) return null;
+
+        /* « la dernière ouverte » n'a de sens que si on la marque. Sans cela
+           la reconnexion rouvrirait toujours la même, et le tri porterait sur
+           une colonne morte — ce qui aurait l'air de marcher tant qu'on n'a
+           qu'une bibliothèque. */
+        await c.query("select public.marquer_ouverture($1, $2)",
+                      [session.c, cible.locataire]);
+        return cible;
+      });
+
+      /* MÊME RÉPONSE POUR « n'existe pas » ET « pas la vôtre ». Les
+         distinguer dirait à qui essaie des identifiants lesquels désignent
+         une vraie bibliothèque. */
+      if (!choisie) {
+        return json(rep, { error: "Cette bibliothèque n'est pas la vôtre." }, 403);
+      }
+
+      const jetonBascule = signer({
+        c: session.c, t: choisie.locataire, expire: Date.now() + DUREE_SESSION,
+      });
+      return json(rep, { ok: true, bibliotheque: choisie }, 200, {
+        "Set-Cookie": `${COOKIE_SESSION}=${jetonBascule}; HttpOnly;${COOKIE_SECURE} SameSite=Strict; Path=/; Max-Age=${DUREE_SESSION / 1000}`,
+      });
+    }
+
     if (chemin === "/api/session") {
+      /* LA LISTE N'EST SERVIE QU'À UNE SESSION QUI DIT QUI ELLE EST.
+
+         Celle du mot de passe ne porte qu'un locataire : elle ouvre la
+         bibliothèque sans nommer personne, et « mes bibliothèques » n'a alors
+         pas de référent. Elle reçoit une liste vide, ce que l'écran traduit
+         par l'absence de sélecteur — et non par un sélecteur vide, qui
+         donnerait à croire à une perte. */
+      const bibliotheques = session?.c
+        ? await dans((c) => c.query(
+            `select locataire, identifiant, nom, role, membres
+               from public.mes_bibliotheques()`).then(r => r.rows))
+        : [];
+
       return json(rep, {
         connecte: !!session, ia_publique: IA_PUBLIQUE, langue,
         environnement: ENVIRONNEMENT,
+        bibliotheques,
+        bibliotheque: session?.t ?? null,
         // Une recette sans clef ne peut pas produire de résumé. Le dire
         // évite d'attendre une réponse qui ne viendra pas.
         ia_disponible: Boolean(CLE_ANTHROPIC),
@@ -2495,7 +2634,21 @@ const serveur = createServer(async (req, rep) => {
       if (livres.length > 1000) {
         return json(rep, { error: "Lot trop volumineux : 1000 ouvrages au maximum." }, 413);
       }
-      return json(rep, { enregistres: await dans((c) => enregistrerLivres(c, livres)) });
+      try {
+        return json(rep, { enregistres: await dans((c) => enregistrerLivres(c, livres)) });
+      } catch (e) {
+        /* « 42501 » vient d'« enregistrer_lecture » : la session n'identifie
+           personne, et une lecture doit appartenir à quelqu'un. Le cas
+           n'existe que sur la porte du MOT DE PASSE, et seulement si la
+           bibliothèque compte zéro ou plusieurs membres — jamais sur une
+           connexion par courriel ou par Google.
+
+           Sans cette traduction, la personne lit « Erreur interne » et
+           conclut que le service est cassé. Le 403 dit ce qu'il en est, et
+           surtout ce qu'il y a à faire. */
+        if (e.code === "42501") return json(rep, { error: e.message }, 403);
+        throw e;
+      }
     }
 
     // Mise à jour partielle : uniquement les couvertures résolues par le navigateur.
@@ -2567,16 +2720,42 @@ const serveur = createServer(async (req, rep) => {
        on ne s'appuie pas sur un seul rempart.
 
        LA FONCTION EN BASE NE PREND AUCUN PARAMÈTRE : elle lit le locataire
-       dans « app.tenant_id », que « dans() » vient de poser depuis la
-       session signée. Aucune valeur calculée ici ne peut désigner la
-       bibliothèque de quelqu'un d'autre.
+       dans « app.tenant_id » et le compte dans « app.compte_id », que
+       « dans() » vient de poser depuis la session signée. Aucune valeur
+       calculée ici ne peut désigner la bibliothèque de quelqu'un d'autre.
+
+       LA SESSION PAR MOT DE PASSE NE PEUT PAS SUPPRIMER — 05/09/2026, et
+       c'est un choix, pas un oubli.
+
+       Elle ouvre la bibliothèque par défaut sans dire QUI entre : le jeton
+       ne porte qu'un locataire. Tant qu'un locataire valait une personne,
+       cela suffisait. Avec les bibliothèques partagées, supprimer est réservé
+       au propriétaire, et « votre adresse » n'a plus de référent.
+
+       L'AUTRE VOIE A ÉTÉ ENVISAGÉE PUIS ÉCARTÉE : faire adopter au mot de
+       passe « le propriétaire » de la bibliothèque par défaut. Il faudrait en
+       choisir un parmi plusieurs — c'est-à-dire réécrire le « limit 1 » sans
+       « order by » qui a déjà coûté deux défauts à ce dépôt, dont un trouvé
+       en production. Un mot de passe est un secret partagé, pas une personne ;
+       on préfère le dire.
+
+       ET ON LE DIT VRAIMENT. Laisser tomber ce cas dans le refus ordinaire
+       renverrait « recopiez exactement l'adresse de votre compte » à
+       quelqu'un dont AUCUNE adresse ne conviendrait jamais. Il chercherait sa
+       faute pendant que la nôtre est ailleurs.
        ===================================================================== */
     if (chemin === "/api/compte" && req.method === "DELETE") {
+      if (!session?.c) {
+        return json(rep, { error: "Cette session ouvre la bibliothèque sans "
+          + "identifier de compte. Reconnectez-vous par courriel ou par Google "
+          + "pour pouvoir supprimer." }, 403);
+      }
       const { confirmation } = await lireCorps(req);
 
       const bilan = await dans(async (c) => {
-        /* « where tenant_id = … » N'EST PAS UNE PRÉCAUTION, C'EST LA SEULE
-           BORNE — corrigé le 25/08/2026, après un essai réel.
+        /* « where id = app.compte_id » N'EST PAS UNE PRÉCAUTION, C'EST LA
+           SEULE BORNE — corrigé le 25/08/2026 après un essai réel, et
+           REFORMULÉ le 05/09/2026.
 
            « comptes » est la seule table métier SANS politique de
            cloisonnement, et c'est voulu : se connecter exige de chercher une
@@ -2589,12 +2768,24 @@ const serveur = createServer(async (req, rep) => {
            AUTRE : impossible de supprimer son propre compte, et une
            « confirmation » qui ne confirmait rien.
 
+           LE FILTRE ÉTAIT ENSUITE DEVENU « where tenant_id = app.tenant_id ».
+           C'était juste tant qu'un locataire valait une personne. Deux choses
+           l'ont rendu faux le même jour : la colonne « comptes.tenant_id »
+           n'existe plus — la migration 15 la retire —, et une bibliothèque
+           partagée compte plusieurs adresses, si bien que « limit 1 » aurait
+           de nouveau désigné n'importe qui.
+
+           On borne donc sur QUI DEMANDE, pas sur OÙ il est. C'est aussi ce
+           que la confirmation veut dire : recopiez VOTRE adresse. Le droit de
+           supprimer, lui, est vérifié plus bas par « supprimer_locataire »,
+           qui exige d'être propriétaire.
+
            Toute lecture de « comptes » depuis une connexion de locataire doit
-           porter ce filtre. « test-http-cloisonnement.mjs » le vérifie
-           désormais avec deux locataires. */
+           porter l'une de ces bornes. « test-http-cloisonnement.mjs » le
+           vérifie avec deux locataires. */
         const { rows } = await c.query(
           `select courriel from comptes
-            where tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid`);
+            where id = nullif(current_setting('app.compte_id', true), '')::uuid`);
         const attendue = rows[0]?.courriel ?? null;
 
         /* Sans adresse au dossier — cas théorique — on refuse plutôt que de
@@ -2615,6 +2806,205 @@ const serveur = createServer(async (req, rep) => {
          cela, l'onglet resté ouvert continuerait d'interroger un locataire
          disparu, et l'écran parlerait d'erreurs plutôt que d'un départ. */
       return json(rep, { supprime: true, ...bilan }, 200, {
+        "Set-Cookie": COOKIES_ACCEPTES.map(n =>
+          `${n}=; HttpOnly;${COOKIE_SECURE} SameSite=Strict; Path=/; Max-Age=0`),
+      });
+    }
+
+    /* =====================================================================
+       QUI EST DANS CETTE BIBLIOTHÈQUE
+
+       LA POLITIQUE FAIT LE TRAVAIL. « membres_lecture » montre les lignes du
+       locataire posé ; la requête n'a donc pas de « where » sur le
+       locataire, et ne peut pas en oublier un. C'est le contraire de la
+       lecture de « comptes » quelques routes plus bas, où l'absence de
+       politique fait que la clause « where » EST la seule borne — et où son
+       oubli a coûté un défaut en production.
+
+       L'ADRESSE DE CHACUN EST MONTRÉE À TOUS LES MEMBRES, et c'est un choix
+       de produit, pas un oubli : on ne partage pas un fonds documentaire
+       avec des inconnus. Les mentions de confidentialité le disent.
+       ===================================================================== */
+    if (chemin === "/api/membres" && req.method === "GET") {
+      if (!session) return json(rep, { error: "Non autorisé." }, 401);
+      const membres = await dans((c) => c.query(
+        `select c.courriel, m.role, m.rejoint_le, m.vu_le,
+                (m.compte_id = nullif(current_setting('app.compte_id', true), '')::uuid)
+                  as moi
+           from membres m join comptes c on c.id = m.compte_id
+          order by m.role, m.rejoint_le`).then(r => r.rows));
+      return json(rep, membres);
+    }
+
+    /* =====================================================================
+       INVITER
+
+       LE CONTRÔLE DE PROPRIÉTÉ N'EST PAS ÉCRIT ICI. « inviter_membre » le
+       fait en base, sur « app.compte_id » et « app.tenant_id ». Le refaire
+       dans cette route créerait une seconde version de la même règle : deux
+       endroits à modifier, dont un qu'on oublie. La route se contente de
+       traduire le refus de la base en statut HTTP.
+
+       LE LIMITEUR EST CELUI DU LIEN MAGIQUE, et pour la même raison : cette
+       route envoie un courriel à une adresse choisie par l'appelant. Sans
+       limiteur, un propriétaire pourrait s'en servir pour expédier des
+       messages à des adresses qui ne lui ont rien demandé — le service
+       deviendrait un relais.
+       ===================================================================== */
+    if (chemin === "/api/membres" && req.method === "POST") {
+      if (!session?.c) {
+        return json(rep, { error: "Cette session n'identifie aucun compte." }, 403);
+      }
+      const etatC = etatCourriel();
+      if (!etatC.pret) {
+        return json(rep, { error: "L'envoi de courriel est indisponible ici." }, 503);
+      }
+
+      const { courriel } = await lireCorps(req);
+      if (!courrielPlausible(courriel)) {
+        return json(rep, { error: "Cette adresse ne ressemble pas à un courriel." }, 400);
+      }
+      if (tropDeDemandesLien(ip, courriel)) {
+        return json(rep, { error: "Trop de demandes. Réessayez dans un quart d'heure." },
+                    429, { "Retry-After": "900" });
+      }
+
+      let invitation;
+      try {
+        invitation = await dans(async (c) => {
+          const faite = await inviterMembre(c, courriel);
+          /* Le nom est lu DANS LA MÊME transaction, sous le même locataire :
+             il ne peut donc pas être celui d'une autre bibliothèque. */
+          const { rows } = await c.query(
+            `select nom from tenants
+              where id = nullif(current_setting('app.tenant_id', true), '')::uuid`);
+          return { ...faite, nom: rows[0]?.nom };
+        });
+      } catch (e) {
+        if (e.code === "42501") return json(rep, { error: e.message }, 403);
+        throw e;
+      }
+
+      const lien = `${adressePublique(req)}/ma-bibliotheque.html`
+                 + `?jeton=${encodeURIComponent(invitation.jeton)}`;
+      const { sujet, texte, html } =
+        messageDInvitation(lien, invitation.nom, DUREE_INVITATION_JOURS);
+      try {
+        const envoi = await envoyerCourriel({ a: invitation.courriel, sujet, texte, html });
+        // Sans l'adresse : le journal d'un serveur n'a pas à dire qui est invité où.
+        console.log(`invitation envoyée (${envoi.mode})`);
+      } catch (e) {
+        /* LE LIEN EXISTE DÉJÀ EN BASE À CE STADE. On le dit plutôt que de
+           laisser croire à un envoi : sinon le propriétaire attendrait une
+           arrivée qui ne viendra pas, et réinviterait indéfiniment. */
+        console.error("envoi de l'invitation impossible :", e.message);
+        return json(rep, { error: "L'envoi a échoué. Réessayez dans un moment." }, 502);
+      }
+      return json(rep, { invite: true });
+    }
+
+    /* =====================================================================
+       EMPORTER UNE COPIE
+
+       ELLE EST UNE ROUTE À PART, ET NON UNE OPTION DE « QUITTER ». Les deux
+       gestes ont des conséquences opposées — l'un ajoute chez vous, l'autre
+       retire votre accès — et les fondre en un seul appel rendrait
+       impossible de copier sans partir, ce qui est pourtant le cas le plus
+       fréquent : on emporte AVANT de décider.
+
+       « cible » PEUT ÊTRE ABSENTE. Quelqu'un qui n'appartient qu'à l'équipe
+       n'a nulle part où poser ses livres ; on lui crée alors une
+       bibliothèque, dont il est propriétaire. C'est ce qui rend la sortie
+       réellement praticable — sans quoi « vous pouvez partir avec vos
+       livres » serait une phrase, pas une porte.
+       ===================================================================== */
+    if (chemin === "/api/bibliotheque/copie" && req.method === "POST") {
+      if (!session?.c) {
+        return json(rep, { error: "Cette session n'identifie aucun compte." }, 403);
+      }
+      const { cible, nom } = await lireCorps(req);
+
+      /* LA FORME EST VÉRIFIÉE ICI, AVEC LA MÊME SÉVÉRITÉ QU'AILLEURS.
+       *
+       * Sans cela, une valeur qui n'est pas un identifiant — « ' or 1=1 -- »
+       * envoyée par curiosité — atteint la base, où la conversion en uuid
+       * lève « 22P02 », traduit en « Erreur interne » : un 500 pour une
+       * saisie fautive. Rien n'était en danger, la requête est paramétrée ;
+       * mais un 500 dit « le service est cassé » quand la vérité est
+       * « cette valeur n'en est pas une ».
+       *
+       * C'est le motif d'« avecContexte », qui refuse en 400 un identifiant
+       * de locataire mal formé plutôt que de le laisser filer. Un défaut
+       * trouvé le 05/09/2026 par test-emporter.mjs. */
+      if (cible !== undefined && cible !== null
+          && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+                .test(String(cible))) {
+        return json(rep, { error: "Identifiant de bibliothèque invalide." }, 400);
+      }
+
+      try {
+        const bilan = await dans(async (c) => {
+          /* LA CRÉATION EST DANS LA MÊME TRANSACTION QUE LA COPIE. Si la
+             copie échoue, la bibliothèque neuve n'existe pas non plus —
+             plutôt qu'une étagère vide et orpheline dont personne ne
+             saurait d'où elle vient. */
+          const destination = cible ?? (await c.query(
+            "select public.creer_bibliotheque($1) as id",
+            [typeof nom === "string" ? nom : ""])).rows[0].id;
+
+          const { rows } = await c.query(
+            "select * from public.copier_dans($1)", [destination]);
+          return { bibliotheque: destination,
+                   copies: Number(rows[0].copies),
+                   ignores: Number(rows[0].ignores),
+                   creee: !cible };
+        });
+        return json(rep, bilan);
+      } catch (e) {
+        if (e.code === "42501" || e.code === "22004") {
+          return json(rep, { error: e.message }, 403);
+        }
+        /* « 53400 » vient du plafond journalier de la 14 : créer une
+           bibliothèque en consomme un, quel que soit le chemin. On le dit
+           comme on le dit à l'inscription. */
+        if (e.code === "53400") {
+          return json(rep, { error: "Trop de bibliothèques créées aujourd'hui. "
+            + "Réessayez demain, ou choisissez une bibliothèque existante." }, 429);
+        }
+        throw e;
+      }
+    }
+
+    /* =====================================================================
+       PARTIR D'UNE BIBLIOTHÈQUE
+
+       ELLE N'EFFACE RIEN — ni les ouvrages, ni le compte. C'est ce qui la
+       distingue de « /api/compte », et la distinction doit rester nette :
+       quitter le cabinet où l'on travaillait ne supprime pas le fonds du
+       cabinet, et ne supprime pas non plus sa propre bibliothèque.
+
+       LE DERNIER PROPRIÉTAIRE NE PEUT PAS PARTIR : le déclencheur
+       « membres_garde_proprietaire » refuse, et c'est bien à lui de le faire
+       — la règle vaut quel que soit le chemin. Une bibliothèque sans
+       propriétaire continuerait de coûter sans que personne ait le droit d'y
+       toucher.
+       ===================================================================== */
+    if (chemin === "/api/membres" && req.method === "DELETE") {
+      if (!session?.c) {
+        return json(rep, { error: "Cette session n'identifie aucun compte." }, 403);
+      }
+      try {
+        await dans((c) => c.query("select public.quitter_locataire()"));
+      } catch (e) {
+        if (e.code === "42501" || e.code === "23514") {
+          return json(rep, { error: e.message }, 403);
+        }
+        throw e;
+      }
+      /* La session désignait cette bibliothèque : elle ne vaut plus rien.
+         On la retire plutôt que de laisser un onglet interroger un endroit
+         d'où l'on vient de sortir. */
+      return json(rep, { parti: true }, 200, {
         "Set-Cookie": COOKIES_ACCEPTES.map(n =>
           `${n}=; HttpOnly;${COOKIE_SECURE} SameSite=Strict; Path=/; Max-Age=0`),
       });
@@ -2741,7 +3131,7 @@ avecVisiteur(bd, purgerLiens).catch(e => console.error("purge des liens :", e.me
    toute écriture. Hors contexte, le compte rendrait zéro et l'insertion
    serait refusée — on ré-amorcerait à chaque démarrage, dans le vide. */
 await avecContexte(bd, ID_TENANT_DEFAUT, (c) => amorcerSiVide(c));
-serveur.listen(PORT, '127.0.0.1', () => console.log(`API prête sur le port ${PORT}`));
+serveur.listen(PORT, () => console.log(`API prête sur le port ${PORT}`));
 
 for (const signal of ["SIGTERM", "SIGINT"]) {
   process.on(signal, () => {

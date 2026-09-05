@@ -46,7 +46,21 @@ import pg from "pg";
 const fichiersMigration = (dossier) =>
   fs.readdirSync(dossier).filter(f => f.endsWith(".sql")).sort();
 
-export async function ouvrirBanc({ port = 55501 } = {}) {
+/* « jusqua » — s'arrêter avant une migration, pour éprouver ce qu'elle fait
+ *
+ * Le rejeu vérifie qu'une migration peut être appliquée deux fois. Il ne
+ * vérifie pas qu'elle DÉPLACE CORRECTEMENT LES DONNÉES EXISTANTES : au banc,
+ * tout est appliqué d'un bloc sur une base vide, si bien qu'une reprise qui
+ * ne reprend rien passe au vert.
+ *
+ * Ce n'est pas théorique. La migration 17 déplace le statut de lecture et la
+ * note de 348 ouvrages réels. Une reprise silencieusement vide les rendrait
+ * tous « à lire », sans erreur, et on ne s'en apercevrait qu'en regardant.
+ *
+ * On peut donc monter la base À L'ÉTAT D'AVANT, y semer des données, puis
+ * appliquer la suite — c'est-à-dire reproduire ce que le serveur vivra.
+ */
+export async function ouvrirBanc({ port = 55501, jusqua = null } = {}) {
   const DB = ["db", path.join("..", "db")]
     .find(c => fs.existsSync(path.join(c, "01-schema.sql")));
   if (!DB) throw new Error("db/ introuvable");
@@ -84,9 +98,23 @@ export async function ouvrirBanc({ port = 55501 } = {}) {
      propriétaire des tables, comme sur le serveur. Appliqué par un
      superutilisateur, les tables appartiendraient à quelqu'un d'autre et
      « force row level security » ne porterait pas sur le même rôle. */
-  for (const f of fichiersMigration(DB)) {
+  const toutes = fichiersMigration(DB);
+  const posees = jusqua ? toutes.filter(f => f < jusqua) : toutes;
+  if (jusqua && posees.length === toutes.length) {
+    throw new Error(
+      `ouvrirBanc({ jusqua: "${jusqua}" }) : aucune migration n'a été écartée. `
+      + `Le contrôle croirait éprouver une reprise et ne l'éprouverait pas.`);
+  }
+  for (const f of posees) {
     await appli.query(fs.readFileSync(path.join(DB, f), "utf8"));
   }
+
+  /* Appliquer la suite, une fois les données d'avant semées. */
+  const appliquerLaSuite = async () => {
+    for (const f of toutes.filter(f => !posees.includes(f))) {
+      await appli.query(fs.readFileSync(path.join(DB, f), "utf8"));
+    }
+  };
 
   const oeil = new pg.Client(process.env.PGURL_OEIL ?? {
     host: u.hostname, port: u.port, database: u.pathname.slice(1),
@@ -99,9 +127,23 @@ export async function ouvrirBanc({ port = 55501 } = {}) {
   /* Une requête vue par l'application, avec un locataire posé — ou aucun,
      ce qui est le cas du visiteur anonyme. Transaction-local, comme
      avecContexte() : le réglage ne survit pas au COMMIT. */
-  const dans = async (tenant, texte, params) => {
+  /* DEUX FORMES, comme avecContexte() — 05/09/2026.
+   *
+   *   dans(uuid, texte)                     le locataire seul
+   *   dans({ locataire, compte }, texte)    et l'identité qui agit
+   *
+   * La seconde est née avec les bibliothèques à plusieurs membres :
+   * « supprimer_locataire » demande maintenant QUI le demande, pas seulement
+   * OÙ. Garder la première forme évite de réécrire les dizaines d'appels qui
+   * n'ont que faire de l'identité — et le banc reste le miroir exact de ce
+   * que fait l'application. */
+  const dans = async (qui, texte, params) => {
+    const objet  = qui !== null && typeof qui === "object";
+    const tenant = objet ? (qui.locataire ?? null) : qui;
+    const compte = objet ? (qui.compte ?? null)    : null;
     await appli.query("begin");
     await appli.query("select set_config('app.tenant_id', $1, true)", [tenant ?? ""]);
+    await appli.query("select set_config('app.compte_id', $1, true)", [compte ?? ""]);
     try { return (await appli.query(texte, params)).rows; }
     finally { await appli.query("commit").catch(() => appli.query("rollback")); }
   };
@@ -109,11 +151,30 @@ export async function ouvrirBanc({ port = 55501 } = {}) {
   /* Semer directement en base, par l'observateur : le catalogue puis la
      possession, dans cet ordre. Les contrôles décrivent ce qu'ils veulent
      éprouver, pas la mécanique d'insertion. */
+  /* « statut » ET « note » ONT QUITTÉ LA POSSESSION — 05/09/2026.
+   *
+   * Ils vivent dans « lectures », attachés à une personne : dans une
+   * bibliothèque partagée, marquer un ouvrage « Lu » le marquait pour toute
+   * l'équipe. Le banc les accepte encore, mais il faut alors lui dire POUR
+   * QUI — « lecteur ». Sans lecteur, aucune ligne de lecture n'est posée, et
+   * l'ouvrage est « A lire » pour tout le monde : c'est la vérité, pas un
+   * pis-aller.
+   *
+   * Passer « statut » sans « lecteur » serait en revanche une demande qu'on
+   * ne peut pas satisfaire — on le dit plutôt que de l'ignorer. Un contrôle
+   * qui croit avoir semé un « Lu » et n'en a pas semé mesurerait autre chose
+   * que ce qu'il annonce. */
   const semer = async ({ tenant, id, isbn = null, titre = "Titre " + id,
                          auteur = "Auteur", categorie = "Savoirs",
                          sous_categorie = "Philosophie", sphere = "Pro",
-                         visibilite = "heritee", statut = "A lire",
-                         note = null, annee = null, pages = null }) => {
+                         visibilite = "heritee", statut = null,
+                         note = null, annee = null, pages = null,
+                         lecteur = null }) => {
+    if ((statut !== null || note !== null) && !lecteur) {
+      throw new Error(
+        `semer(${id}) : « statut » ou « note » sans « lecteur ». Depuis la `
+        + `migration 17 une lecture appartient à quelqu'un.`);
+    }
     const propre = String(isbn ?? "").replace(/[^0-9Xx]/g, "");
     const valide = propre.length === 13 ? propre : null;
     const cle = valide ? `isbn:${valide}` : `local:${tenant}:${id}`;
@@ -123,12 +184,30 @@ export async function ouvrirBanc({ port = 55501 } = {}) {
        on conflict (cle) do update set cle = excluded.cle
        returning id`, [cle, valide, titre, auteur, annee, pages]);
     await q(
-      `insert into possessions (tenant_id, id, ouvrage_id, statut, note,
+      `insert into possessions (tenant_id, id, ouvrage_id,
                                 categorie, sous_categorie, sphere, visibilite)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-      [tenant, id, o.id, statut, note, categorie, sous_categorie, sphere, visibilite]);
+       values ($1,$2,$3,$4,$5,$6,$7)`,
+      [tenant, id, o.id, categorie, sous_categorie, sphere, visibilite]);
+
+    if (lecteur) {
+      await q(
+        `insert into lectures (tenant_id, possession, compte_id, statut, note)
+         values ($1,$2,$3,$4,$5)
+         on conflict (tenant_id, possession, compte_id) do update
+            set statut = excluded.statut, note = excluded.note`,
+        [tenant, id, lecteur, statut ?? "A lire", note]);
+    }
     return o.id;
   };
+
+  /* Poser une lecture après coup — le cas courant quand le compte n'existe
+     pas encore au moment où l'on sème l'étagère. */
+  const lire = (tenant, possession, compte, statut = "Lu", note = null) => q(
+    `insert into lectures (tenant_id, possession, compte_id, statut, note)
+     values ($1,$2,$3,$4,$5)
+     on conflict (tenant_id, possession, compte_id) do update
+        set statut = excluded.statut, note = excluded.note`,
+    [tenant, possession, compte, statut, note]);
 
   /* points et themes suivent la langue : sans eux, un contrôle qui vérifie
      « les points suivent la langue demandée » lirait null des deux côtés et
@@ -161,13 +240,32 @@ export async function ouvrirBanc({ port = 55501 } = {}) {
     return t.id;
   };
 
+  /* Un compte ET son appartenance — 05/09/2026.
+   *
+   * Les contrôles écrivaient « insert into comptes (tenant_id, courriel) » à
+   * dix endroits. La migration 15 a retiré cette colonne : l'appartenance vit
+   * dans « membres ». Dix corrections identiques auraient été dix occasions
+   * d'en oublier une, et la onzième serait écrite à la main le mois prochain.
+   *
+   * « proprietaire » par défaut, parce que c'est ce qu'un compte d'essai est
+   * presque toujours — celui qui a créé la bibliothèque. Les contrôles qui
+   * éprouvent un simple membre le disent explicitement. */
+  const compte = async (tenant, courriel, role = "proprietaire") => {
+    const [c] = await q(
+      "insert into comptes (courriel) values ($1) returning id", [courriel]);
+    await q(`insert into membres (compte_id, tenant_id, role, vu_le)
+             values ($1, $2, $3, now())`, [c.id, tenant, role]);
+    return c.id;
+  };
+
   const fermer = async () => {
     await appli.end().catch(() => {});
     await oeil.end().catch(() => {});
     if (moteur) await moteur.stop().catch(() => {});
   };
 
-  return { url, u, appli, oeil, q, dans, semer, resumer, locataire, fermer,
+  return { url, u, appli, oeil, q, dans, semer, lire, resumer, locataire, compte,
+           appliquerLaSuite, fermer,
            env: {
              PGHOST: u.hostname, PGPORT: u.port,
              PGUSER: decodeURIComponent(u.username),

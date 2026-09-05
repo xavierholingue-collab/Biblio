@@ -75,6 +75,36 @@ jobs:
             psql -h localhost -U biblio -d biblio -v ON_ERROR_STOP=1 -f "${f}"
           done
 
+      # ==================================================================
+      # UN COMPTE DANS LA BIBLIOTHEQUE PAR DEFAUT — 05/09/2026
+      #
+      # Depuis la migration 17, le statut de lecture et la note
+      # appartiennent a une PERSONNE, plus a l'etagere : dans un cabinet
+      # partage, marquer un ouvrage « Lu » le marquait pour tout le monde.
+      #
+      # La session par MOT DE PASSE ouvre la bibliotheque sans nommer
+      # personne. Elle ne peut donc rien attribuer — sauf quand la
+      # bibliotheque n'a QU'UN membre, auquel cas il n'y a rien a
+      # departager. Sans ce compte, la base de controle serait une
+      # bibliotheque a ZERO membre : un etat qui n'existe pas en
+      # production, ou « creer_locataire » pose toujours un proprietaire.
+      #
+      # On repare donc le decor plutot que d'affaiblir la regle. Le compte
+      # est cree APRES le schema, avant que l'API ne demarre.
+      # ==================================================================
+      - name: Donner un proprietaire a la bibliotheque de controle
+        env: { PGPASSWORD: controle }
+        run: |
+          psql -h localhost -U biblio -d biblio -v ON_ERROR_STOP=1 -c "
+            with c as (
+              insert into comptes (courriel) values ('controle@exemple.fr')
+              on conflict (courriel) do update set courriel = excluded.courriel
+              returning id)
+            insert into membres (compte_id, tenant_id, role)
+            select c.id, t.id, 'proprietaire'
+              from c, tenants t where t.identifiant = 'xavier'
+            on conflict (compte_id, tenant_id) do nothing;"
+
       - name: Installer les dépendances de l API
         working-directory: api
         run: npm install --omit=dev --no-audit --no-fund
@@ -181,7 +211,11 @@ jobs:
       - name: Cloisonnement, visibilite, catalogue, contexte, reglages, durcissement
         env: { PGPASSWORD: controle }
         run: |
-          npm install pg fast-xml-parser --no-audit --no-fund --silent
+          # jsdom : test-bascule.mjs execute la vraie page pour verifier que
+          # le selecteur de bibliotheque apparait quand il y a un choix, et
+          # SEULEMENT alors. Une verification par expression reguliere sur le
+          # HTML dirait que le bloc existe, pas qu'il finit visible.
+          npm install pg fast-xml-parser jsdom --no-audit --no-fund --silent
           # Une base par fichier : chacun cree ses propres locataires, et deux
           # jeux de donnees dans la meme base se marcheraient dessus. Elle est
           # creee ICI, au moment de s'en servir — c'est ce qui supprime la
@@ -206,6 +240,12 @@ jobs:
           lancer usag  test-usage-ia.mjs
           lancer bibl  test-bibliographie.mjs
           lancer supp  test-suppression.mjs
+          lancer basc  test-bascule.mjs
+          lancer invit test-invitation.mjs
+          lancer lect  test-lectures.mjs
+          lancer repr  test-reprise-lectures.mjs
+          lancer empo  test-emporter.mjs
+          lancer sieg  test-sieges.mjs
 
       # ------------------------------------------------------------------
       # AUTHENTIFICATION PAR LIEN MAGIQUE

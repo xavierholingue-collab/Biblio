@@ -211,7 +211,19 @@ export async function envoyerCourriel({ a, sujet, texte, html }) {
    que ce soit de la bibliothèque. Un courriel traverse des serveurs qu'on ne
    choisit pas et reste dans des boîtes qu'on ne maîtrise pas. Il ne porte
    donc que ce qui est strictement nécessaire : un lien, et sa durée.
+
+   UNE EXCEPTION, ET ELLE EST ARGUMENTÉE : l'invitation porte le NOM de la
+   bibliothèque. Voir « messageDInvitation » plus bas.
    ========================================================================= */
+
+/* Le seul texte de ces messages qui ne soit pas écrit ici est le nom d'une
+   bibliothèque, choisi par une personne et lu par une autre. Il est donc
+   échappé — un courrielleur qui interprète le HTML est un navigateur de
+   plus, avec les mêmes conséquences et moins de garde-fous. */
+const echapper = (s) => String(s)
+  .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
+  .replaceAll('"', "&quot;").replaceAll("'", "&#39;");
+
 export function messageDeConnexion(lien, minutes) {
   const texte =
 `Voici votre lien de connexion à la bibliothèque :
@@ -275,4 +287,51 @@ vous n'en décidez pas autrement.</p>
 ce lien personne ne peut rien créer avec votre adresse.</p>`;
 
   return { sujet: "Ouvrez votre bibliothèque", texte, html };
+}
+
+/* ===========================================================================
+   L'INVITATION
+
+   LE NOM DE LA BIBLIOTHÈQUE Y FIGURE, ET C'EST NÉCESSAIRE. Un courriel qui
+   dirait seulement « on vous invite » demanderait à la personne de faire
+   confiance à un lien sans savoir où il mène — exactement ce qu'on apprend
+   à ne pas faire. Il est ÉCHAPPÉ dans la version HTML : il vient de la base,
+   donc d'une personne, et il ne s'exécute pas dans le courrielleur d'une
+   autre.
+
+   ON NE NOMME PAS QUI INVITE. Le propriétaire connaît l'adresse qu'il a
+   saisie ; l'inverse n'est pas vrai, et rien n'oblige à révéler l'adresse de
+   l'un à l'autre avant qu'ils ne se retrouvent dans la même bibliothèque.
+
+   CE QUE LE MESSAGE PROMET EST CE QUI SE PASSE : on rejoint une bibliothèque
+   existante, on n'en crée pas une. C'est la promesse que le champ « rejoint »
+   de la migration 16 rend vraie.
+   =========================================================================== */
+export function messageDInvitation(lien, nomBibliotheque, jours) {
+  const nom = String(nomBibliotheque ?? "").trim() || "une bibliothèque";
+  const texte =
+`Vous êtes invité à rejoindre la bibliothèque « ${nom} ».
+
+${lien}
+
+Ce lien est valable ${jours} jours et ne fonctionne qu'une seule fois. En
+l'ouvrant, vous rejoignez cette bibliothèque : vous y verrez les ouvrages
+partagés et pourrez en ajouter. Aucune bibliothèque personnelle n'est créée.
+
+Vous pourrez la quitter quand vous voudrez.
+
+Si cette invitation ne vous dit rien, ignorez ce message. Sans ce lien,
+personne ne peut rattacher votre adresse à quoi que ce soit.`;
+
+  const html =
+`<p>Vous êtes invité à rejoindre la bibliothèque « ${echapper(nom)} ».</p>
+<p><a href="${lien}">Rejoindre cette bibliothèque</a></p>
+<p>Ce lien est valable ${jours} jours et ne fonctionne qu'une seule fois. En
+l'ouvrant, vous rejoignez cette bibliothèque : vous y verrez les ouvrages
+partagés et pourrez en ajouter. Aucune bibliothèque personnelle n'est créée.</p>
+<p>Vous pourrez la quitter quand vous voudrez.</p>
+<p>Si cette invitation ne vous dit rien, ignorez ce message. Sans ce lien,
+personne ne peut rattacher votre adresse à quoi que ce soit.</p>`;
+
+  return { sujet: `Rejoindre la bibliothèque « ${nom} »`, texte, html };
 }

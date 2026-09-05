@@ -91,6 +91,44 @@ verifier("le plafond de dépense d'un compte neuf est déclaré",
 const quota   = quotas[0];
 const plafond = plafonds[plafonds.length - 1];
 
+/* ---------------------------------------- LA TROISIÈME ET LA QUATRIÈME
+   DÉCLARATION — ajoutées au contrôle le 05/09/2026
+
+   La migration 19 dimensionne le quota sur le nombre de sièges, et déclare
+   pour cela « quota_par_siege() » et « plafond_par_siege() ». Ce sont deux
+   NOUVELLES écritures des mêmes chiffres — exactement ce que ce fichier
+   existe pour empêcher.
+
+   Les laisser sans lien serait refaire la faute d'origine sous une forme
+   plus large : non plus deux bornes qui dérivent, mais quatre. Et la dérive
+   serait pire, parce qu'elle ne se verrait qu'à partir de deux membres :
+   une bibliothèque personnelle continuerait d'annoncer le bon chiffre
+   pendant que les équipes en auraient un autre.
+
+   Les fonctions sont donc comparées aux défauts des colonnes. Changer l'un
+   sans l'autre fait échouer la livraison, avec les deux valeurs en clair. */
+const parSiege = (nom) => {
+  const m = new RegExp(
+    `function public\\.${nom}\\(\\)[\\s\\S]{0,200}?select\\s+([\\d.]+)`).exec(tout);
+  return m ? Number(m[1]) : NaN;
+};
+const QUOTA_SIEGE   = parSiege("quota_par_siege");
+const PLAFOND_SIEGE = parSiege("plafond_par_siege");
+
+verifier("les valeurs par siège sont déclarées et lisibles",
+  Number.isFinite(QUOTA_SIEGE) && Number.isFinite(PLAFOND_SIEGE),
+  `quota_par_siege=${QUOTA_SIEGE} plafond_par_siege=${PLAFOND_SIEGE}`);
+
+verifier("le quota d'UN SIÈGE est celui d'un compte neuf",
+  QUOTA_SIEGE === quotas[0],
+  `${QUOTA_SIEGE} par siège contre ${quotas[0]} par défaut — une équipe et `
+  + "une personne seule n'auraient pas la même règle, et seule la seconde "
+  + "est annoncée sur la page d'accueil");
+
+verifier("… et le plafond d'UN SIÈGE est celui d'un compte neuf",
+  PLAFOND_SIEGE === plafonds[plafonds.length - 1],
+  `${PLAFOND_SIEGE} par siège contre ${plafonds[plafonds.length - 1]} par défaut`);
+
 /* ------------------------------------------------ Le plus cher appel mesuré
 
    Relevé en production le 19/08/2026 sur /api/recherche-livre : 1,4677 $

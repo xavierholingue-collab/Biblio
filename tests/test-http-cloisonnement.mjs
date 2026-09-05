@@ -274,7 +274,7 @@ verifier("supprimer SON PROPRE ouvrage fonctionne toujours",
    rien.
    ========================================================================== */
 
-await q("delete from comptes where tenant_id in ($1, $2)", [xavier.id, bob]);
+await q("delete from comptes where id in (select compte_id from membres where tenant_id in ($1, $2))", [xavier.id, bob]);
 
 /* L'ORDRE D'INSERTION N'EST PAS INDIFFÉRENT, ET C'EST TOUT L'INTÉRÊT.
 
@@ -286,10 +286,29 @@ await q("delete from comptes where tenant_id in ($1, $2)", [xavier.id, bob]);
    l'ordre d'insertion : « limit 1 » rend l'adresse de Bob pendant que la
    session est celle de Xavier, ce qui est exactement la situation de
    production — un compte créé le 14 août, un autre le 24. */
-await q("insert into comptes (tenant_id, courriel) values ($1, 'bob@controle.fr')",
-  [bob]);
-await q("insert into comptes (tenant_id, courriel) values ($1, 'xavier@controle.fr')",
-  [xavier.id]);
+await banc.compte(bob, "bob@controle.fr");
+const compteXavier = await banc.compte(xavier.id, "xavier@controle.fr");
+
+/* UNE SESSION QUI DIT QUI ELLE EST — 05/09/2026.
+
+   Jusqu'ici tout ce fichier travaillait avec le cookie du mot de passe. Il
+   ne porte QUE le locataire : il ouvre la bibliothèque sans nommer personne.
+   Supprimer est désormais réservé au propriétaire, et « votre adresse » n'a
+   pas de référent dans une session anonyme — la route la refuse donc, ce que
+   le contrôle 0 ci-dessous vérifie.
+
+   On fabrique ici la session que produit une vraie connexion, par courriel
+   ou par Google : locataire ET compte. Le contrôle connaît le secret, comme
+   pour le jeton sans locataire plus haut ; un attaquant, lui, ne saurait pas
+   signer. */
+const signerJeton = (charge) => {
+  const brut = Buffer.from(JSON.stringify(charge)).toString("base64url");
+  return "session=" + brut + "." +
+    createHmac("sha256", "un-secret-de-controle-suffisamment-long-pour-passer")
+      .update(brut).digest("base64url");
+};
+const cookieIdentifie = signerJeton(
+  { t: xavier.id, c: compteXavier, expire: Date.now() + 1e9 });
 
 /* Ce que la suppression doit annoncer, LU en base plutôt que deviné. Une
    première rédaction affirmait « 2 » ; il y en avait 3, et l'assertion
@@ -297,11 +316,34 @@ await q("insert into comptes (tenant_id, courriel) values ($1, 'xavier@controle.
 const attenduOuvrages = Number((await q(
   "select count(*) as n from possessions where tenant_id = $1", [xavier.id]))[0].n);
 
+/* 0. LE MOT DE PASSE N'EST PAS UNE PERSONNE — et le refus doit le DIRE.
+
+      Le laisser tomber dans le refus ordinaire renverrait « recopiez
+      exactement l'adresse de votre compte » à quelqu'un dont aucune adresse
+      ne conviendrait jamais. On vérifie donc le statut ET le fait que le
+      message ne parle pas de recopier une adresse : c'est la moitié du
+      contrôle qui distingue « refusé » de « refusé pour la bonne raison ». */
+{
+  const anonyme = await appel("/api/compte",
+    { cookie, methode: "DELETE", corps: { confirmation: "xavier@controle.fr" } });
+  verifier("une session par mot de passe ne peut pas supprimer la bibliothèque",
+    anonyme.statut === 403, `statut ${anonyme.statut} — ${JSON.stringify(anonyme.corps)}`);
+  verifier("… et le refus dit pourquoi, au lieu de réclamer une adresse",
+    /identifi/i.test(anonyme.corps?.error ?? "")
+      && !/recopiez/i.test(anonyme.corps?.error ?? ""),
+    JSON.stringify(anonyme.corps));
+
+  const [debout] = await q("select id from tenants where id = $1", [xavier.id]);
+  verifier("… et la bibliothèque est toujours là après ce refus",
+    debout !== undefined, "elle a disparu sur une session anonyme");
+}
+
 /* 1. L'ADRESSE DU VOISIN NE CONFIRME RIEN. C'est la vérification qui
       attrape le défaut : avec « limit 1 », c'est précisément celle-là qui
       était acceptée. */
 const avecVoisine = await appel("/api/compte",
-  { cookie, methode: "DELETE", corps: { confirmation: "bob@controle.fr" } });
+  { cookie: cookieIdentifie, methode: "DELETE",
+    corps: { confirmation: "bob@controle.fr" } });
 verifier("l'adresse d'un AUTRE compte ne confirme pas la suppression",
   avecVoisine.statut === 400,
   `statut ${avecVoisine.statut} — ${JSON.stringify(avecVoisine.corps)}`);
@@ -313,13 +355,15 @@ verifier("… et rien n'a été effacé au passage",
 /* 2. UNE SAISIE VIDE NON PLUS — sinon la confirmation serait décorative. */
 verifier("une confirmation vide est refusée",
   (await appel("/api/compte",
-    { cookie, methode: "DELETE", corps: { confirmation: "" } })).statut === 400);
+    { cookie: cookieIdentifie, methode: "DELETE",
+      corps: { confirmation: "" } })).statut === 400);
 
 /* 3. SA PROPRE ADRESSE SUPPRIME — et la casse ne doit pas y faire obstacle :
       quelqu'un qui recopie depuis son courrielleur peut hériter d'une
       majuscule. */
 const sienne = await appel("/api/compte",
-  { cookie, methode: "DELETE", corps: { confirmation: "Xavier@Controle.FR" } });
+  { cookie: cookieIdentifie, methode: "DELETE",
+    corps: { confirmation: "Xavier@Controle.FR" } });
 verifier("sa propre adresse supprime, quelle qu'en soit la casse",
   sienne.statut === 200 && sienne.corps?.supprime === true,
   `statut ${sienne.statut} — ${JSON.stringify(sienne.corps)}`);

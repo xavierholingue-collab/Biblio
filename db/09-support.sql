@@ -80,26 +80,53 @@ alter table public.ouvrages add constraint ouvrages_support_forme
    désormais la présence de chaque colonne d'article au lieu de compter sur
    une erreur de PostgreSQL pour la signaler.
    -------------------------------------------------------------------------- */
-begin;
-drop view if exists public.livres;
-create view public.livres
-with (security_invoker = true) as
-select p.tenant_id,
-       p.id,
-       o.id as ouvrage_id,
-       o.isbn, o.titre, o.auteur, o.editeur, o.annee, o.pages,
-       o.cover_url, o.cover_statut,
-       p.statut, p.note, p.categorie, p.sous_categorie, p.sphere, p.visibilite,
-       p.ajoute_le, p.maj_le,
-       o.avec_sources,
-       o.type, o.doi, o.revue, o.volume, o.numero,
-       o.citations, o.citations_le, o.resume_editeur,
-       o.support, o.pagination
-  from public.possessions p
-  join public.ouvrages o on o.id = p.ouvrage_id
- where case
-         when nullif(current_setting('app.tenant_id', true), '') is null
-           then public.possession_publique(p)
-         else p.tenant_id = current_setting('app.tenant_id', true)::uuid
-       end;
-commit;
+/* ------------------------------------------------------------------------
+   CETTE DÉFINITION NE VAUT QUE TANT QUE « possessions » PORTE LE STATUT
+   — conditionnée le 05/09/2026, par 17-lectures.sql.
+
+   La 17 déplace « statut » et « note » vers la table « lectures » et
+   SUPPRIME les colonnes d'origine. Or les migrations sont REJOUÉES à chaque
+   livraison, dans l'ordre des noms : ce fichier repasserait donc APRÈS que
+   la colonne a disparu, et « create view … p.statut » échouerait — la
+   livraison tomberait sur une base pourtant saine.
+
+   La garde ne protège pas d'une erreur ; elle dit ce qui est vrai. Cette
+   vue-ci est celle d'un schéma où la lecture appartient à la bibliothèque.
+   Quand ce n'est plus le cas, c'est la 17 qui définit la vue, et elle seule.
+
+   Sur une installation NEUVE, la colonne existe encore ici : le bloc
+   s'exécute, puis 17 le remplace. Rien ne dépend de la vue entre les deux.
+   ------------------------------------------------------------------------ */
+do $garde$
+begin
+  if not exists (select 1 from information_schema.columns
+                  where table_schema = 'public' and table_name = 'possessions'
+                    and column_name = 'statut') then
+    return;
+  end if;
+
+  execute 'drop view if exists public.livres';
+  execute $vue$
+    create view public.livres
+    with (security_invoker = true) as
+    select p.tenant_id,
+           p.id,
+           o.id as ouvrage_id,
+           o.isbn, o.titre, o.auteur, o.editeur, o.annee, o.pages,
+           o.cover_url, o.cover_statut,
+           p.statut, p.note, p.categorie, p.sous_categorie, p.sphere, p.visibilite,
+           p.ajoute_le, p.maj_le,
+           o.avec_sources,
+           o.type, o.doi, o.revue, o.volume, o.numero,
+           o.citations, o.citations_le, o.resume_editeur,
+           o.support, o.pagination
+      from public.possessions p
+      join public.ouvrages o on o.id = p.ouvrage_id
+     where case
+             when nullif(current_setting('app.tenant_id', true), '') is null
+               then public.possession_publique(p)
+             else p.tenant_id = current_setting('app.tenant_id', true)::uuid
+           end;
+  $vue$;
+end $garde$;
+

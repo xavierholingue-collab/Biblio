@@ -57,8 +57,10 @@ const { q, semer } = banc;
 
 const [xavier] = await q("select id from tenants where identifiant = 'xavier'");
 await semer({ tenant: xavier.id, id: "l-prive", isbn: "9780000000401", visibilite: "privee" });
-await q(`insert into comptes (tenant_id, courriel) values ($1, 'xavier@exemple.fr')
-         on conflict (courriel) do nothing`, [xavier.id]);
+await q(`with c as (insert into comptes (courriel) values ('xavier@exemple.fr')
+                     on conflict (courriel) do nothing returning id)
+          insert into membres (compte_id, tenant_id, role)
+          select c.id, $1, 'proprietaire' from c`, [xavier.id]);
 
 /* ------------------------------------------------- Le faux service d'envoi */
 
@@ -522,7 +524,8 @@ let jetonNeuf = null, locatairesAvantDemande = 0;
 
   const [neuf] = await q(
     `select t.identifiant, t.visibilite, t.quota_ia_mois, t.nom
-       from tenants t join comptes c on c.tenant_id = t.id
+       from tenants t join membres m on m.tenant_id = t.id
+                 join comptes c on c.id = m.compte_id
       where c.courriel = 'nouvelle@exemple.fr'`);
   verifier("… privé par défaut", neuf?.visibilite === "privee", JSON.stringify(neuf));
   verifier("… avec le quota d'un compte neuf, pas celui de personne d'autre",
@@ -546,7 +549,8 @@ let jetonNeuf = null, locatairesAvantDemande = 0;
 /* --- Le nouveau venu est cloisonné comme les autres --------------------- */
 {
   const [neuf] = await q(
-    `select t.id from tenants t join comptes c on c.tenant_id = t.id
+    `select t.id from tenants t join membres m on m.tenant_id = t.id
+                 join comptes c on c.id = m.compte_id
       where c.courriel = 'nouvelle@exemple.fr'`);
 
   /* ÉCHOUER PAR UN NOM, PAS PAR UN PLANTAGE. Ce garde-fou est né d'une

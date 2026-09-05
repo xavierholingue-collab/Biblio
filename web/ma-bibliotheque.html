@@ -74,6 +74,28 @@
     text-decoration: underline; padding: 0 0 0 10px;
   }
 
+  /* ---------- Sélecteur de bibliothèque ----------
+
+     IL N'APPARAÎT QU'À PARTIR DE DEUX. Avec une seule bibliothèque — le cas
+     de presque tout le monde — un menu déroulant à une entrée n'offre aucun
+     choix et pose une question : « qu'est-ce que je suis censé choisir ? ».
+     La règle est dans « majSelecteurBibliotheques() », pas ici.
+
+     IL EST SOUS LE TITRE, ET C'EST VOULU. Le nom de la bibliothèque ouverte
+     est ce qui donne son sens à tout le reste de l'écran : se tromper de
+     fonds sans le voir, c'est ajouter le livre d'un client chez un autre. */
+  .biblio-choix {
+    display: flex; align-items: center; gap: 8px;
+    margin: 6px 0 0; font-family: var(--mono); font-size: 12px;
+  }
+  .biblio-choix select {
+    font-family: var(--mono); font-size: 12px; letter-spacing: 0.04em;
+    color: var(--ink); background: var(--paper-2);
+    border: 1px solid var(--rule); border-radius: 3px; padding: 4px 8px;
+    max-width: 260px;
+  }
+  .biblio-choix .etat { color: var(--ink-soft); font-size: 11px; }
+
   /* ---------- Connexion ---------- */
   .connexion { max-width: 380px; margin: 12vh auto; }
   .connexion h1 { margin-bottom: 6px; }
@@ -534,7 +556,17 @@
 <!-- ====================== APPLICATION ====================== -->
 <div class="wrap" id="app" hidden>
   <header>
-    <h1><a href="/" style="text-decoration:none;color:inherit">Ma bibliothèque</a></h1>
+    <div>
+      <h1><a href="/" style="text-decoration:none;color:inherit">Ma bibliothèque</a></h1>
+      <!-- Masqué par défaut : voir « majSelecteurBibliotheques ». Une page
+           qui afficherait un sélecteur vide le temps du chargement ferait
+           croire, une fraction de seconde, qu'on a perdu quelque chose. -->
+      <div class="biblio-choix" id="choixBibliotheque" hidden>
+        <label for="selBibliotheque">Bibliothèque</label>
+        <select id="selBibliotheque"></select>
+        <span class="etat" id="etatBibliotheque"></span>
+      </div>
+    </div>
     <div class="compte" id="compte"></div>
   </header>
 
@@ -822,6 +854,79 @@ let ficheEnCours = null;
 let connecte = false;
 let iaPublique = false;
 
+/* Les bibliothèques auxquelles ce compte appartient, telles que le SERVEUR
+   les a listées, et celle qui est ouverte. La page ne fabrique jamais cette
+   liste : elle n'affiche que ce qui lui a été donné, si bien qu'aucune
+   valeur inventée ici ne peut désigner un fonds. */
+let bibliotheques = [];
+let bibliothequeOuverte = null;
+
+/* --------------------------------------------------------------------------
+   LE SÉLECTEUR — visible seulement quand il y a un choix à faire
+
+   « bibliotheques.length > 1 » et non « connecte » : une personne seule dans
+   sa bibliothèque — presque tout le monde — n'a rien à choisir, et un menu à
+   une entrée lui poserait une question sans objet. C'est aussi ce qui fait
+   que l'application reste une application personnelle tant qu'on n'a pas
+   d'équipe, sans qu'il faille deux versions de l'écran.
+
+   LA SESSION PAR MOT DE PASSE reçoit une liste vide et ne voit donc rien —
+   même règle, sans cas particulier à écrire.
+   -------------------------------------------------------------------------- */
+function majSelecteurBibliotheques() {
+  const bloc = document.getElementById("choixBibliotheque");
+  const sel  = document.getElementById("selBibliotheque");
+  if (!bloc || !sel) return;
+
+  bloc.hidden = bibliotheques.length < 2;
+  if (bloc.hidden) return;
+
+  sel.innerHTML = "";
+  for (const b of bibliotheques) {
+    const o = document.createElement("option");
+    o.value = b.locataire;
+    /* « textContent » et non « innerHTML » : le nom vient de la base, donc
+       d'une personne. Il s'affiche, il ne s'exécute pas. */
+    o.textContent = b.membres > 1
+      ? `${b.nom} — ${b.membres} membres`
+      : b.nom;
+    o.selected = b.locataire === bibliothequeOuverte;
+    sel.appendChild(o);
+  }
+
+  sel.onchange = () => basculerVers(sel.value);
+}
+
+/* LA PAGE EST RECHARGÉE, ET C'EST DÉLIBÉRÉ.
+
+   Changer de bibliothèque change TOUT : les ouvrages, les rayons, les
+   réglages, les quotas, ce que la recommandation a le droit de dépenser.
+   Rafraîchir chaque morceau à la main, c'est se donner autant d'occasions
+   d'en oublier un — et un écran qui garde le rayon de l'ancienne
+   bibliothèque pendant qu'il affiche les livres de la nouvelle est
+   exactement le genre de mélange qu'on ne veut pas ici.
+
+   Le rechargement coûte une seconde et ne peut rien laisser derrière. */
+async function basculerVers(cible) {
+  const etat = document.getElementById("etatBibliotheque");
+  const sel  = document.getElementById("selBibliotheque");
+  if (cible === bibliothequeOuverte) return;
+
+  sel.disabled = true;
+  etat.textContent = "ouverture…";
+  try {
+    await api("/session/bibliotheque", { corps: { locataire: cible } });
+    location.reload();
+  } catch (e) {
+    /* ON REMET LE SÉLECTEUR OÙ IL ÉTAIT. Sans cela, il montrerait la
+       bibliothèque qu'on n'a PAS ouverte : l'écran mentirait sur l'endroit
+       où l'on se trouve, ce qui est pire que le refus lui-même. */
+    sel.value = bibliothequeOuverte;
+    sel.disabled = false;
+    etat.textContent = e.message || "Impossible d'ouvrir cette bibliothèque.";
+  }
+}
+
 async function demarrer() {
   /* LE JETON EST ÉCHANGÉ AVANT TOUT LE RESTE.
      Avant même de demander l'état de session : sinon on lirait « non
@@ -834,6 +939,9 @@ async function demarrer() {
     const s = await api("/session");
     connecte = s.connecte;
     iaPublique = s.ia_publique;
+    bibliotheques = Array.isArray(s.bibliotheques) ? s.bibliotheques : [];
+    bibliothequeOuverte = s.bibliotheque ?? null;
+    majSelecteurBibliotheques();
 
     /* Le bouton Google n'existe que si Google est configuré. */
     const bg = document.getElementById("blocGoogle");

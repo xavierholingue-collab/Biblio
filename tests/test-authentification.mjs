@@ -72,8 +72,11 @@ for (const f of fs.readdirSync(DB).filter(f => f.endsWith(".sql")).sort()) {
 
 const [alice] = (await db.query(
   `insert into tenants (identifiant, nom) values ('alice','Alice') returning id`)).rows;
+const [compteAlice] = (await db.query(
+  `insert into comptes (courriel) values ('alice@exemple.fr') returning id`)).rows;
 await db.query(
-  `insert into comptes (tenant_id, courriel) values ($1, 'alice@exemple.fr')`, [alice.id]);
+  `insert into membres (compte_id, tenant_id, role) values ($1, $2, 'proprietaire')`,
+  [compteAlice.id, alice.id]);
 
 const client = { query: (t, p) => db.query(t, p) };
 

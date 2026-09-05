@@ -149,10 +149,16 @@ verifier("bob non plus ne lit pas le résumé privé d'alice",
 
 /* ---------------------------------------------- Écrire chez le voisin */
 
-await dans(bob, "update possessions set statut = 'Lu' where id = 'a-pub'");
-const [intact] = await q("select statut from possessions where id = 'a-pub'");
+/* LA COLONNE A CHANGÉ, PAS LE CONTRÔLE — 05/09/2026.
+
+   C'était « statut = 'Lu' ». La migration 17 l'a déplacé vers « lectures » :
+   le statut n'appartient plus à l'étagère mais au lecteur. On éprouve donc
+   la même chose sur une colonne qui appartient toujours à la possession —
+   « sphere », que la personne choisit et que le voisin ne doit pas toucher. */
+await dans(bob, "update possessions set sphere = 'Perso' where id = 'a-pub'");
+const [intact] = await q("select sphere from possessions where id = 'a-pub'");
 verifier("bob ne peut pas modifier une possession d'alice",
-  intact?.statut === "A lire", JSON.stringify(intact));
+  intact?.sphere === "Pro", JSON.stringify(intact));
 
 await dans(bob, "delete from possessions where id = 'a-priv'");
 const restant = await q("select id from possessions where id = 'a-priv'");
@@ -166,6 +172,73 @@ try {
              [alice, ouvragePublic.ouvrage_id]);
 } catch { refuse = true; }
 verifier("bob ne peut pas écrire une possession AU NOM d'alice", refuse);
+
+/* =========================================================================
+   L'APPARTENANCE SE CLOISONNE COMME LE RESTE — 05/09/2026
+
+   POURQUOI CE BLOC EXISTE. J'ai écrit la table « membres » et ses politiques,
+   puis j'ai muté « membres_connexion » en « using (true) » — c'est-à-dire
+   ouvert la table entière à qui la lit. LES VINGT-SEPT VÉRIFICATIONS DU BANC
+   HTTP ET LES DIX-NEUF D'ICI SONT TOUTES RESTÉES VERTES. Rien, nulle part, ne
+   mesurait ce que je venais de promettre.
+
+   CE QUI FUIRAIT, ET CE N'EST PAS RIEN : « membres » porte le lien entre une
+   personne et une bibliothèque. L'ouvrir, c'est publier qui travaille avec
+   qui — l'annuaire des cabinets, des équipes, des clients. Les ouvrages
+   resteraient cloisonnés ; le carnet d'adresses, non.
+
+   TROIS ANGLES, parce qu'il y a trois façons légitimes de voir une ligne et
+   qu'il faut que chacune s'arrête où elle doit.
+   ========================================================================= */
+{
+  const compteAlice = await banc.compte(alice, "alice@controle.fr");
+  const compteBob   = await banc.compte(bob,   "bob@controle.fr");
+
+  /* 1. LE VISITEUR NE VOIT RIEN. Ni compte ni locataire posés : les deux
+        comparaisons valent NULL, et NULL n'est jamais vrai. C'est la
+        vérification que la mutation « using (true) » fait tomber. */
+  const vuVisiteur = await dans(null, "select count(*)::int n from membres");
+  verifier("un visiteur ne voit AUCUNE appartenance",
+    vuVisiteur[0].n === 0,
+    `${vuVisiteur[0].n} ligne(s) — le carnet d'adresses des équipes est public`);
+
+  /* 2. UN LOCATAIRE NE VOIT QUE SA BIBLIOTHÈQUE. Bob est chez lui, avec son
+        compte : il doit voir sa propre appartenance et rien d'alice. */
+  const vuBob = await dans({ locataire: bob, compte: compteBob },
+    "select compte_id, tenant_id from membres");
+  verifier("bob voit sa propre appartenance",
+    vuBob.length === 1 && vuBob[0].compte_id === compteBob,
+    JSON.stringify(vuBob));
+  verifier("… et AUCUNE de celles d'alice",
+    !vuBob.some(m => m.tenant_id === alice || m.compte_id === compteAlice),
+    JSON.stringify(vuBob));
+
+  /* 3. LA PORTE DE LA CONNEXION NE S'OUVRE QUE SUR LE COMPTE NOMMÉ.
+        « bibliotheque_a_ouvrir » pose « app.connexion » pour se lire
+        elle-même. Si ce réglage survivait à l'appel, tout ce qui suit dans
+        la même transaction verrait les lignes de ce compte — on vérifie donc
+        qu'il est bien retiré. */
+  const apres = await dans(null, `select (select count(*) from
+      public.bibliotheque_a_ouvrir($1)) as ouvertes,
+      (select count(*) from membres) as visibles`, [compteAlice]);
+  verifier("la porte de connexion trouve bien la bibliothèque du compte",
+    Number(apres[0].ouvertes) === 1, JSON.stringify(apres[0]));
+  verifier("… et le réglage qu'elle pose ne survit pas à l'appel",
+    Number(apres[0].visibles) === 0,
+    `${apres[0].visibles} ligne(s) visibles après coup — « app.connexion » a débordé`);
+
+  /* 4. ON N'ENTRE PAS CHEZ LES AUTRES EN S'INSCRIVANT SOI-MÊME. L'écriture
+        passe par les portes nommées ; en direct, elle doit être refusée —
+        sans quoi n'importe qui se déclarerait membre du cabinet d'à côté. */
+  let intrusion = false;
+  try {
+    await dans({ locataire: bob, compte: compteBob },
+      `insert into membres (compte_id, tenant_id, role)
+       values ($1, $2, 'proprietaire')`, [compteBob, alice]);
+  } catch { intrusion = true; }
+  verifier("bob ne peut pas se déclarer membre de la bibliothèque d'alice",
+    intrusion, "l'insertion directe est passée — les portes nommées sont contournables");
+}
 
 /* --------------------------------------------------------------- Bilan */
 
