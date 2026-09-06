@@ -2,7 +2,7 @@ name: biblio
 
 services:
   db:
-    image: postgres:15-alpine
+    image: postgres:18-alpine
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${PGUSER:-biblio}
@@ -12,7 +12,7 @@ services:
       POSTGRES_INITDB_ARGS: "--locale=fr_FR.UTF-8 --encoding=UTF8"
       LANG: fr_FR.utf8
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql
       - ./db:/docker-entrypoint-initdb.d:ro
     # La base n'est pas exposée à l'extérieur : seule l'API y accède.
     expose:
