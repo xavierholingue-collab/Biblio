@@ -38,11 +38,11 @@ jobs:
     name: Contrôles
     runs-on: ubuntu-latest
 
-    # PostgreSQL 17, comme en production. Une version différente ferait
+    # PostgreSQL 15, comme en production. Une version différente ferait
     # passer en CI ce qui échouerait sur le serveur.
     services:
       db:
-        image: postgres:17-alpine
+        image: postgres:15-alpine
         env:
           POSTGRES_USER: biblio
           POSTGRES_PASSWORD: controle
