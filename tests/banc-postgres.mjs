@@ -105,6 +105,34 @@ export async function ouvrirBanc({ port = 55501, jusqua = null } = {}) {
       `ouvrirBanc({ jusqua: "${jusqua}" }) : aucune migration n'a été écartée. `
       + `Le contrôle croirait éprouver une reprise et ne l'éprouverait pas.`);
   }
+
+  /* LA BASE DOIT ÊTRE VIERGE POUR ÉPROUVER UNE REPRISE — 05/09/2026.
+   *
+   * Sans PGURL, chaque appel monte SON PostgreSQL dans un dossier neuf :
+   * deux « ouvrirBanc » dans le même fichier sont donc isolés. Avec PGURL —
+   * c'est-à-dire dans la chaîne de livraison — ils partagent la MÊME base.
+   *
+   * « test-sieges.mjs » appelait « ouvrirBanc() » puis
+   * « ouvrirBanc({ jusqua }) ». En local, le second repartait de zéro et le
+   * contrôle passait. En intégration, il rejouait 01→18 sur une base où la
+   * 17 avait déjà supprimé « possessions.statut » — et la reprise de 03
+   * échouait sur une colonne absente.
+   *
+   * L'isolation était une SUPPOSITION, vraie sur mon poste et fausse là où
+   * ça compte. On la vérifie donc, plutôt que d'y compter : un fichier qui
+   * éprouve une reprise doit avoir sa propre base, donc sa propre ligne
+   * « lancer » dans la chaîne. */
+  if (jusqua) {
+    const { rows } = await appli.query(
+      "select to_regclass('public.tenants') is not null as deja");
+    if (rows[0].deja) {
+      throw new Error(
+        `ouvrirBanc({ jusqua: "${jusqua}" }) : la base porte déjà un schéma. `
+        + `Une reprise ne s'éprouve que sur une base vierge — donnez à ce `
+        + `fichier sa propre base (sa propre ligne « lancer »), ou ne faites `
+        + `qu'un seul ouvrirBanc par fichier.`);
+    }
+  }
   for (const f of posees) {
     await appli.query(fs.readFileSync(path.join(DB, f), "utf8"));
   }

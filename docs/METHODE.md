@@ -570,6 +570,44 @@ propre explication — le texte qui décrit le piège contient le motif du pièg
 
 ---
 
+## 12. Un banc plus confortable que la chaîne ne prouve rien de la chaîne
+
+*Ajoutée le 05/09/2026, second échec de livraison du même jour.*
+
+`ouvrirBanc()` monte, sur le poste, **son propre PostgreSQL dans un dossier
+neuf**. Deux appels dans le même fichier sont donc parfaitement isolés. Dans
+la chaîne, `PGURL` est posé : les deux appels partagent **la même base**.
+
+`test-sieges.mjs` faisait `ouvrirBanc()` puis `ouvrirBanc({ jusqua })`. En
+local, le second repartait de zéro : vingt-huit vérifications au vert. En
+intégration, il rejouait les migrations 01→18 sur une base où la 17 avait
+déjà supprimé `possessions.statut` — et la reprise de 03 échouait sur une
+colonne absente.
+
+**Le banc était plus généreux que la production de contrôles.** Une
+supposition d'isolation, vraie là où je regardais, fausse là où ça compte.
+
+**Deux remèdes, et il faut les deux.**
+
+1. **Reproduire la disposition de la chaîne avant de conclure.** Un petit
+   script qui pose `PGURL` sur une base unique par fichier suffit — c'est
+   trente lignes, et c'est ce qui a permis de reproduire le défaut en une
+   minute au lieu d'attendre le prochain `push`.
+
+2. **Rendre la supposition impossible.** `ouvrirBanc({ jusqua })` refuse
+   désormais une base qui porte déjà un schéma : éprouver une reprise sur
+   des données déjà migrées ne mesure rien, et cela doit lever plutôt que
+   passer.
+
+Le fichier a été scindé — `test-sieges.mjs` et `test-reprise-sieges.mjs` —
+parce qu'un fichier qui éprouve une reprise a besoin de sa propre base, donc
+de sa propre ligne `lancer`.
+
+> Un banc d'essai qui diffère de la production ne dit pas si le code marche.
+> Il dit s'il marche au banc d'essai.
+
+---
+
 ## Ce qui ne s'automatise pas, et revient à Xavier
 
 Le seul défaut réellement dangereux du 24/08 n'a été trouvé par aucun

@@ -246,6 +246,7 @@ jobs:
           lancer repr  test-reprise-lectures.mjs
           lancer empo  test-emporter.mjs
           lancer sieg  test-sieges.mjs
+          lancer rsie  test-reprise-sieges.mjs
 
       # ------------------------------------------------------------------
       # AUTHENTIFICATION PAR LIEN MAGIQUE

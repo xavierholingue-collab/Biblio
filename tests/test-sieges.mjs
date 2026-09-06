@@ -265,59 +265,6 @@ await q("select * from public.regler_tarification($1, 50000, 10.000)", [perso]);
 
 await banc.fermer();
 
-{
-  const avant = await ouvrirBanc({ port: 55517, jusqua: "19-" });
-
-  const reglee = await avant.locataire("deja-reglee", "privee");
-  const neuve  = await avant.locataire("au-tarif",    "privee");
-
-  await avant.q("update tenants set quota_ia_mois = 100000, plafond_usd = 20.000 "
-                + "where id = $1", [reglee]);
-  await avant.q("update tenants set quota_ia_mois = $1, plafond_usd = $2 "
-                + "where id = $3", [PAR_SIEGE, PLAFOND_SIEGE, neuve]);
-
-  const compteA = await avant.compte(reglee, "a@controle.fr");
-  await avant.compte(neuve, "b@controle.fr");
-
-  await avant.appliquerLaSuite();
-
-  const lire = async (t) => (await avant.q(
-    "select quota_ia_mois, plafond_usd::text as plafond, tarification "
-    + "from tenants where id = $1", [t]))[0];
-
-  const r = await lire(reglee);
-  verifier("après la livraison, une bibliothèque déjà réglée est « manuelle »",
-    r.tarification === "manuelle", JSON.stringify(r));
-  verifier("… et elle a gardé ses valeurs",
-    r.quota_ia_mois === 100000 && Number(r.plafond) === 20, JSON.stringify(r));
-
-  const n = await lire(neuve);
-  verifier("… tandis qu'une bibliothèque au tarif reste « sieges »",
-    n.tarification === "sieges", JSON.stringify(n));
-
-  /* ET LA SUITE LE PROUVE : inviter quelqu'un chez la première ne bouge
-     rien, chez la seconde ajoute un siège. */
-  await avant.compte(reglee, "a2@controle.fr", "membre");
-  await avant.compte(neuve,  "b2@controle.fr", "membre");
-
-  const r2 = await lire(reglee);
-  verifier("une invitation ne touche pas la bibliothèque réglée",
-    r2.quota_ia_mois === 100000, JSON.stringify(r2));
-
-  const n2 = await lire(neuve);
-  verifier("… et ajoute bien un siège à celle qui est au tarif",
-    n2.quota_ia_mois === 2 * Number(PAR_SIEGE), JSON.stringify(n2));
-
-  /* On se sert de « compteA » pour que la variable ne soit pas un décor
-     inutile : la bibliothèque réglée a bien deux membres à la fin. */
-  const membres = await avant.q(
-    "select count(*)::int n from membres where tenant_id = $1", [reglee]);
-  verifier("le décor a bien deux membres, dont celui d'avant la livraison",
-    membres[0].n === 2 && Boolean(compteA), JSON.stringify(membres[0]));
-
-  await avant.fermer();
-}
-
 /* --------------------------------------------------------------- Bilan */
 
 console.log("\n=== Le quota suit les sièges ===\n");
