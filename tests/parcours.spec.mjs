@@ -78,8 +78,29 @@ test.describe("Page d'accueil publique", () => {
 
     const etiquettes = (await page.locator("#chiffres .quoi").allTextContents())
       .join(" | ").toLowerCase();
-    for (const attendue of ["ouvrages", "lus", "sur la pile", "résumés", "auteurs", "note"]) {
+    for (const attendue of ["ouvrages", "résumés", "auteurs", "note", "pages"]) {
       expect(etiquettes, `mesure disparue : ${attendue}`).toContain(attendue);
+    }
+
+    /* « lus » ET « sur la pile » ONT DISPARU, ET C'EST VOULU — 06/09/2026.
+
+       Depuis la migration 17, le statut de lecture appartient à la PERSONNE.
+       Un visiteur n'en a aucun : la vue lui rendrait « A lire » partout, et
+       compter ces lignes afficherait « 0 lu, 254 sur la pile » sur la
+       bibliothèque de quelqu'un d'autre. Faux, et crédible.
+
+       ON N'A PAS SEULEMENT RETIRÉ CES DEUX NOMS DE LA LISTE. Les retirer
+       aurait rendu le contrôle indifférent : il aurait accepté aussi bien
+       leur absence que leur retour sous forme de zéros. On exige donc
+       explicitement qu'ils NE SOIENT PAS LÀ — ce qui est plus fort que ce
+       que ce contrôle demandait avant.
+
+       C'est ce contrôle-ci qui a arrêté la livraison du 06/09, et il avait
+       raison de le faire : il tenait une promesse qu'on venait de changer.
+       Le changer sans le renforcer aurait été le désarmer. */
+    for (const partie of ["lus (", "sur la pile"]) {
+      expect(etiquettes, `chiffre de lecture rendu à un visiteur : ${partie}`)
+        .not.toContain(partie);
     }
 
     // Aucun « — » ni case vide : une vignette sans valeur signale que la
@@ -87,8 +108,15 @@ test.describe("Page d'accueil publique", () => {
     const valeurs = await page.locator("#chiffres .chiffre .n").allTextContents();
     for (const v of valeurs) expect(v.trim().length, "vignette vide").toBeGreaterThan(0);
 
-    // La note moyenne doit dire sur combien d'ouvrages elle porte.
-    await expect(page.locator("#chiffres")).toContainText(/not[ée]s\)/);
+    /* LA NOTE MOYENNE DOIT DIRE SUR COMBIEN D'OUVRAGES ELLE PORTE — quand
+       elle est donnée. Pour un visiteur elle ne l'est pas : la vignette
+       affiche « — », et il n'y a alors rien qui puisse induire en erreur.
+       La règle vaut pour un chiffre affiché, pas pour une absence. */
+    const note = (await page.locator("#chiffres .chiffre").filter(
+      { hasText: /note/i }).first().textContent()) ?? "";
+    if (!/—/.test(note)) {
+      expect(note, "une moyenne sans son effectif").toMatch(/not[ée]s\)/);
+    }
   });
 
   test("l'aire rendue de chaque tuile correspond à l'effectif du rayon", async ({ page, request }) => {
