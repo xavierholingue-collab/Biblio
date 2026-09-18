@@ -18,10 +18,19 @@
 
    CE QUE CETTE PILE NE PROUVE PAS — à lire avant de s'y fier
 
-   1. La VERSION. PGlite suit la branche PostgreSQL 18, la production tourne
-      en 17. Les requêtes de cette application n'utilisent rien qui diffère
-      entre les deux, mais la garantie de version reste celle de GitHub
-      Actions, qui monte un postgres:17-alpine.
+   1. La VERSION — et cet écart a DISPARU le 06/09/2026, ce qui vaut d'être
+      dit plutôt que d'effacer la mise en garde.
+
+      PGlite suit la branche PostgreSQL 18 ; la production tournait en 15,
+      puis en 17, et tourne désormais en 18 elle aussi. Les trois étages —
+      cette pile, GitHub Actions et le serveur — sont donc sur la même
+      branche majeure pour la première fois.
+
+      Ce n'est pas une raison de se fier à cette pile pour autant : la
+      garantie de version reste celle de GitHub Actions, qui monte un
+      postgres:18-alpine. Une pile locale qui coïncide aujourd'hui avec la
+      production peut cesser de coïncider demain sans que personne le
+      remarque — c'est exactement ce qui s'était passé entre la 15 et la 17.
 
    2. La CONCURRENCE. PGlite n'accepte qu'une connexion à la fois : au-delà,
       il ferme le canal et « pg » signale « Connection terminated

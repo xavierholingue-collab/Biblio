@@ -124,7 +124,7 @@
   <tr><td><strong>API</strong></td>
       <td>Node.js 22, serveur HTTP <em>sans framework</em>. Une seule dépendance : <code>pg</code></td></tr>
   <tr><td><strong>Base</strong></td>
-      <td>PostgreSQL 17, avec cloisonnement par <em>row level security</em></td></tr>
+      <td>PostgreSQL 18, avec cloisonnement par <em>row level security</em></td></tr>
   <tr><td><strong>Pages</strong></td>
       <td>HTML et JavaScript natifs, servis en fichiers statiques. Aucun cadriciel, aucune compilation</td></tr>
   <tr><td><strong>Modèle</strong></td>
@@ -613,8 +613,13 @@ enregistrer_usage_ia(id, issue, entrée, sortie, recherches)
   <tr><th>Étage</th><th>Ce qui s'y passe</th><th>Si ça casse</th></tr>
   <tr>
     <td><strong>Contrôles</strong></td>
-    <td>Syntaxe, schéma appliqué sur un PostgreSQL 17 neuf, API démarrée,
-        241 vérifications, tests de front. Aucun appel payant.</td>
+    <td>Syntaxe, schéma appliqué sur un PostgreSQL 18 neuf, API démarrée,
+        une trentaine de fichiers de vérification, tests de front.
+        Aucun appel payant.<br>
+        <em>Le nombre exact de vérifications n'est plus écrit ici : il
+        changeait à chaque ajout, et un chiffre périmé finit par être cru.
+        C'est la même raison qui l'a fait retirer de la chaîne de
+        livraison.</em></td>
     <td>Rien n'est déployé</td>
   </tr>
   <tr>

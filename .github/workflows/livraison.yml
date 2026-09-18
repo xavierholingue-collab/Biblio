@@ -38,8 +38,10 @@ jobs:
     name: Contrôles
     runs-on: ubuntu-latest
 
-    # PostgreSQL 18, comme en production. Une version différente ferait
-    # passer en CI ce qui échouerait sur le serveur.
+    # PostgreSQL 18, comme en production depuis le 06/09/2026. Une version
+    # différente ferait passer en CI ce qui échouerait sur le serveur — c'est
+    # la seule raison pour laquelle ce numéro est écrit ici, et la seule
+    # raison de le changer.
     services:
       db:
         image: postgres:18-alpine

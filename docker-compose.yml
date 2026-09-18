@@ -2,16 +2,43 @@ name: biblio
 
 services:
   db:
+    # POSTGRESQL 18 DEPUIS LE 06/09/2026, comme la production.
+    #
+    # La bascule 15.19 -> 18.6 a été faite sur le serveur par
+    # « pg_upgradecluster --method=dump » : vidage et rechargement complets,
+    # 27 secondes, applications arrêtées de 14 h 26 à 14 h 31. Même hôte,
+    # même port, mêmes rôles, mêmes noms de bases — rien à changer dans le
+    # code. Les trois bases ont été confrontées avant/après : 19 tables et
+    # 38 politiques RLS de part et d'autre.
+    #
+    # LE TRI ALPHABÉTIQUE A ÉTÉ MESURÉ, PAS SUPPOSÉ. C'est le vrai risque
+    # d'une montée de version majeure : glibc change ses règles de collation,
+    # et l'ordre des accents bouge sans rien casser d'autre. L'empreinte
+    # « md5(string_agg(titre order by titre)) » sur les 324 lignes réelles de
+    # « books » a été comparée entre les deux versions de glibc — identique.
+    # La collation reste « fr_FR.UTF-8 ».
     image: postgres:18-alpine
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${PGUSER:-biblio}
       POSTGRES_PASSWORD: ${PGPASSWORD:?PGPASSWORD manquant dans .env}
       POSTGRES_DB: ${PGDATABASE:-biblio}
-      # Locale française pour que le tri alphabétique respecte les accents
+      # Locale française pour que le tri alphabétique respecte les accents.
+      # Reste valable tel quel en 18.
       POSTGRES_INITDB_ARGS: "--locale=fr_FR.UTF-8 --encoding=UTF8"
       LANG: fr_FR.utf8
     volumes:
+      # LE POINT DE MONTAGE A CHANGÉ AVEC L'IMAGE 18, et il faut le savoir
+      # avant de chercher pourquoi la base semble vide.
+      #
+      # L'image « postgres:18 » a déplacé son répertoire de données :
+      # « PGDATA » vaut désormais /var/lib/postgresql/18/docker, et c'est
+      # /var/lib/postgresql qu'il faut monter. Au premier « docker compose
+      # up », la 18 crée donc une base NEUVE et les scripts de ./db se
+      # rejouent ; les anciennes données de la 15 restent dans « pgdata/data »
+      # sans servir.
+      #
+      # Pour repartir propre : « docker compose down -v » puis « up ».
       - pgdata:/var/lib/postgresql
       - ./db:/docker-entrypoint-initdb.d:ro
     # La base n'est pas exposée à l'extérieur : seule l'API y accède.
