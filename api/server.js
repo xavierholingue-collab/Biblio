@@ -1125,9 +1125,41 @@ async function enregistrerLivres(client, livres) {
    * pas remettre la lecture à zéro. C'est la différence entre « absent » et
    * « vide », et elle se perd vite dans un JSON.
    *
-   * « enregistrer_lecture » LÈVE si la session n'identifie personne. On la
-   * laisse remonter : l'appelant traduira en 403. Écrire dans le vide en
-   * rendant un succès est le défaut le plus cher de ce dépôt. */
+   * ===========================================================================
+   * ON N'ANNULE PLUS TOUT L'ENREGISTREMENT QUAND LA LECTURE EST INATTRIBUABLE
+   * — corrigé le 18/09/2026, après une régression en production.
+   *
+   * La première rédaction laissait « enregistrer_lecture » lever, et la route
+   * traduisait en 403. Le raisonnement était juste — « écrire dans le vide en
+   * rendant un succès est le défaut le plus cher de ce dépôt » — mais sa
+   * PORTÉE était fausse : l'exception annule la transaction ENTIÈRE, donc
+   * aussi l'écriture de l'étagère, qui n'a rien de personnel.
+   *
+   * Conséquence, mesurée par la vérification d'après-déploiement : sur une
+   * bibliothèque à plusieurs membres, une session par MOT DE PASSE ne pouvait
+   * plus ajouter ni modifier AUCUN ouvrage. Pas seulement une lecture — rien.
+   * Parce que la page envoie toujours « statut » dans son objet livre.
+   *
+   * Et mon contrôle ne l'avait pas vu : « test-lectures.mjs » vérifiait
+   * qu'une charge SANS statut passe encore. C'est un cas que l'application ne
+   * produit jamais. Le contrôle éprouvait une charge de laboratoire.
+   *
+   * CE QU'ON FAIT MAINTENANT, et pourquoi c'est la bonne moitié :
+   *
+   *   — l'étagère s'écrit, parce qu'elle n'appartient à personne en
+   *     particulier : un rayon, un titre, une visibilité ;
+   *   — la lecture est SAUTÉE, pas devinée, parce qu'on ne sait pas à qui
+   *     l'attribuer ;
+   *   — et la réponse LE DIT (« lecture_ignoree »). Une écriture
+   *     silencieusement partielle serait pire que le refus ; une écriture qui
+   *     annonce ce qu'elle n'a pas fait est honnête.
+   *
+   * ON DEMANDE AVANT, PLUTÔT QUE DE RATTRAPER UNE EXCEPTION. « compte_effectif() »
+   * répond en une requête ; conduire le programme par une exception rendrait
+   * indiscernables « pas de lecteur » et « la porte a refusé pour une autre
+   * raison ». La porte nommée continue de lever — c'est elle qui a raison —
+   * mais on ne l'appelle plus quand on sait qu'elle refusera.
+   * =========================================================================== */
   /* ON LIT L'INTENTION DANS L'ENTRÉE BRUTE, PAS DANS « entrees ».
    *
    * Piège évité de justesse : « entrees » normalise « statut » à « A lire »
@@ -1141,11 +1173,28 @@ async function enregistrerLivres(client, livres) {
    * défaut avait un sens sur l'étagère ; elle n'en a plus sur la personne. */
   const avecLecture = livres.filter(
     (l) => l && (l.statut !== undefined || l.note !== undefined));
-  for (const l of avecLecture) {
-    await client.query(
-      "select public.enregistrer_lecture($1, $2, $3)",
-      [String(l.id), l.statut ?? null,
-       l.note === undefined || l.note === null || l.note === "" ? null : l.note]);
+
+  let lectureIgnoree = false;
+  if (avecLecture.length) {
+    const { rows: [{ lecteur }] } = await client.query(
+      "select public.compte_effectif() is not null as lecteur");
+
+    if (lecteur) {
+      for (const l of avecLecture) {
+        await client.query(
+          "select public.enregistrer_lecture($1, $2, $3)",
+          [String(l.id), l.statut ?? null,
+           l.note === undefined || l.note === null || l.note === "" ? null : l.note]);
+      }
+    } else {
+      lectureIgnoree = true;
+      /* Le journal le dit aussi : sans cela, « pourquoi mes statuts ne
+         tiennent-ils pas ? » n'a aucune trace à consulter. Sans nommer la
+         bibliothèque ni l'adresse — le journal d'un serveur n'a pas à dire
+         qui lit quoi. */
+      console.warn(`lecture non attribuée : ${avecLecture.length} ouvrage(s) `
+        + "enregistrés sans statut, la session n'identifie personne");
+    }
   }
 
   /* 3. La correction du catalogue, pour les ouvrages qu'on possède.
@@ -1221,7 +1270,13 @@ async function enregistrerLivres(client, livres) {
        from ${SOURCE}
       where o.cle = ${CLE} and e.isbn is not null`, [charge]);
 
-  return livres.length;
+  /* DEUX NOMBRES PLUTÔT QU'UN — 18/09/2026.
+   *
+   * « enregistres » reste en tête et garde son sens : c'est ce que les
+   * appelants lisent. « lecture_ignoree » dit ce qui N'A PAS été fait, et
+   * c'est la seule façon pour l'écran de ne pas mentir à quelqu'un qui vient
+   * de cliquer « Lu ». */
+  return { enregistres: livres.length, lecture_ignoree: lectureIgnoree };
 }
 
 // Amorçage au premier démarrage, depuis l'export JSON de l'ancienne application.
@@ -2495,11 +2550,32 @@ const serveur = createServer(async (req, rep) => {
                from public.mes_bibliotheques()`).then(r => r.rows))
         : [];
 
+      /* Y A-T-IL QUELQU'UN POUR PORTER UNE LECTURE — ET C'EST LE SERVEUR QUI
+         RÉPOND, PAS LA PAGE.
+
+         La première rédaction de l'écran déduisait cette réponse de
+         « bibliotheques.length > 0 ». C'était un SUBSTITUT, et il était faux
+         dans un cas précis : la session par mot de passe ne nomme aucun
+         compte — sa liste est donc vide — mais le serveur sait désigner
+         l'unique membre quand la bibliothèque n'en a qu'un. L'écran aurait
+         caché le statut et la note à l'installation personnelle, celle-là
+         même qu'on s'était donné du mal à préserver.
+
+         « compte_effectif() » est la règle ; on la publie telle quelle plutôt
+         que d'en laisser deviner une approximation. Une page qui décide sur
+         un substitut finit toujours par décider autrement que le serveur. */
+      const lecteur = session
+        ? await dans((c) => c.query(
+            "select public.compte_effectif() is not null as l")
+            .then(r => r.rows[0].l))
+        : false;
+
       return json(rep, {
         connecte: !!session, ia_publique: IA_PUBLIQUE, langue,
         environnement: ENVIRONNEMENT,
         bibliotheques,
         bibliotheque: session?.t ?? null,
+        lecteur,
         // Une recette sans clef ne peut pas produire de résumé. Le dire
         // évite d'attendre une réponse qui ne viendra pas.
         ia_disponible: Boolean(CLE_ANTHROPIC),
@@ -2651,21 +2727,22 @@ const serveur = createServer(async (req, rep) => {
       if (livres.length > 1000) {
         return json(rep, { error: "Lot trop volumineux : 1000 ouvrages au maximum." }, 413);
       }
-      try {
-        return json(rep, { enregistres: await dans((c) => enregistrerLivres(c, livres)) });
-      } catch (e) {
-        /* « 42501 » vient d'« enregistrer_lecture » : la session n'identifie
-           personne, et une lecture doit appartenir à quelqu'un. Le cas
-           n'existe que sur la porte du MOT DE PASSE, et seulement si la
-           bibliothèque compte zéro ou plusieurs membres — jamais sur une
-           connexion par courriel ou par Google.
-
-           Sans cette traduction, la personne lit « Erreur interne » et
-           conclut que le service est cassé. Le 403 dit ce qu'il en est, et
-           surtout ce qu'il y a à faire. */
-        if (e.code === "42501") return json(rep, { error: e.message }, 403);
-        throw e;
-      }
+      /* CETTE ROUTE NE REFUSE PLUS POUR UNE LECTURE INATTRIBUABLE — 18/09/2026.
+       *
+       * Elle traduisait le « 42501 » d'« enregistrer_lecture » en 403, et
+       * annulait donc l'enregistrement ENTIER. Sur une bibliothèque à
+       * plusieurs membres, la porte par mot de passe ne pouvait plus ajouter
+       * ni modifier aucun ouvrage — la page envoie toujours « statut ».
+       *
+       * « enregistrerLivres » décide désormais lui-même : il écrit l'étagère
+       * et rend « lecture_ignoree » quand la session n'identifie personne.
+       * Le refus disparaît, l'aveu le remplace.
+       *
+       * Le « 42501 » reste possible par d'autres chemins — une politique qui
+       * refuse — et continue donc de remonter en erreur interne, ce qui est
+       * juste : ce serait alors un défaut, pas un état du monde. */
+      const bilan = await dans((c) => enregistrerLivres(c, livres));
+      return json(rep, bilan);
     }
 
     // Mise à jour partielle : uniquement les couvertures résolues par le navigateur.

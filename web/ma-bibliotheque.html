@@ -731,10 +731,15 @@
       <div class="champ"><label for="fSphere">Perso ou Pro</label>
         <select id="fSphere"><option>Perso</option><option>Pro</option></select>
       </div>
-      <div class="champ"><label for="fStatut">Statut</label>
+      <!-- CES DEUX CHAMPS N'ONT DE SENS QUE POUR QUELQU'UN DE NOMMÉ.
+           Voir « appliquerDroits » : ils sont masqués quand la session
+           n'identifie aucun compte, parce que le serveur ne saurait alors à
+           qui attribuer le statut. Un champ qu'on remplit et qui ne part pas
+           est pire qu'un champ absent. -->
+      <div class="champ" id="champStatut"><label for="fStatut">Statut</label>
         <select id="fStatut"><option>Lu</option><option>En cours</option><option>A lire</option></select>
       </div>
-      <div class="champ"><label for="fNote">Note sur 5</label><input type="number" id="fNote" min="0" max="5" step="0.5"></div>
+      <div class="champ" id="champNote"><label for="fNote">Note sur 5</label><input type="number" id="fNote" min="0" max="5" step="0.5"></div>
     </div>
     <div class="champ">
       <label for="fSources">Appareil critique</label>
@@ -861,6 +866,20 @@ let iaPublique = false;
 let bibliotheques = [];
 let bibliothequeOuverte = null;
 
+/* Y A-T-IL QUELQU'UN POUR PORTER UNE LECTURE ? — 18/09/2026.
+
+   LA RÉPONSE VIENT DU SERVEUR, ET ON NE LA DÉDUIT PAS. « /api/session » rend
+   « lecteur », qui vaut exactement « compte_effectif() is not null » — la
+   règle que la base applique.
+
+   La première rédaction la déduisait de « bibliotheques.length > 0 ». Un
+   substitut, et faux dans un cas précis : la session par mot de passe ne
+   nomme aucun compte — liste vide — mais le serveur sait désigner l'unique
+   membre quand la bibliothèque n'en a qu'un. L'écran aurait caché le statut
+   et la note à l'installation personnelle, celle-là même qu'on s'était donné
+   du mal à préserver. */
+let lecteurIdentifie = false;
+
 /* --------------------------------------------------------------------------
    LE SÉLECTEUR — visible seulement quand il y a un choix à faire
 
@@ -941,6 +960,7 @@ async function demarrer() {
     iaPublique = s.ia_publique;
     bibliotheques = Array.isArray(s.bibliotheques) ? s.bibliotheques : [];
     bibliothequeOuverte = s.bibliotheque ?? null;
+    lecteurIdentifie = s.lecteur === true;
     majSelecteurBibliotheques();
 
     /* Le bouton Google n'existe que si Google est configuré. */
@@ -1046,6 +1066,19 @@ function appliquerDroits() {
     : '<option value="">Rayon professionnel</option>';
   sphere.disabled = !connecte;
   sphere.value = etat.sphere;
+
+  /* LE STATUT ET LA NOTE N'APPARAISSENT QUE S'IL Y A QUELQU'UN POUR LES
+     PORTER — 18/09/2026.
+
+     Une session par mot de passe sur une bibliothèque à plusieurs membres ne
+     nomme personne : le serveur ne peut pas attribuer une lecture, et la
+     laisser saisir reviendrait à offrir un geste qui n'aboutit pas. C'est la
+     même règle que pour les boutons d'équipe dans les réglages — ce qui est
+     offert doit être possible. */
+  ["champStatut", "champNote"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.hidden = !lecteurIdentifie;
+  });
 
   // Ajout, import, export et édition sont réservés.
   ["ajouter", "exportJson", "importBtn"].forEach(id => {
@@ -1160,6 +1193,21 @@ async function connexion(evt) {
     etatEl.textContent = "";
     document.getElementById("modaleConnexion").close();
     connecte = true;
+
+    /* ON REDEMANDE LA SESSION, ET CE N'EST PAS UNE PRÉCAUTION D'ESTHÈTE.
+       Ce chemin entrait dans l'application sans relire « /api/session » :
+       « lecteurIdentifie » serait resté faux, et le statut et la note auraient
+       été masqués à une installation personnelle où le serveur les accepte
+       parfaitement. Un état déduit au démarrage et jamais rafraîchi finit par
+       décrire une session qui n'existe plus. */
+    try {
+      const s = await api("/session");
+      bibliotheques = Array.isArray(s.bibliotheques) ? s.bibliotheques : [];
+      bibliothequeOuverte = s.bibliotheque ?? null;
+      lecteurIdentifie = s.lecteur === true;
+      majSelecteurBibliotheques();
+    } catch { /* l'écran reste utilisable sans cette précision */ }
+
     await entrerDansApp();
   } catch (e) {
     etatEl.className = "etat err";
@@ -1209,11 +1257,31 @@ function versApp(r) {
   };
 }
 
+/* --------------------------------------------------------------------------
+   LA LECTURE NE VOYAGE QUE S'IL Y A QUELQU'UN POUR LA PORTER — 18/09/2026
+
+   « statut » et « note » appartiennent à une PERSONNE depuis la migration 17.
+   Une session par mot de passe sur une bibliothèque à plusieurs membres n'en
+   nomme aucune : le serveur ne peut alors attribuer ni l'un ni l'autre.
+
+   Les envoyer quand même obligeait le serveur à choisir entre deux mauvaises
+   réponses — tout refuser, ou écrire en silence une partie de la demande. Il
+   refusait, et PLUS AUCUN OUVRAGE ne pouvait être enregistré par cette porte.
+   Constaté en production le 18/09/2026.
+
+   On ne les envoie donc pas. C'est la règle appliquée partout ailleurs ce
+   jour-là : ce qui est offert doit être possible. Le serveur garde son aveu
+   (« lecture_ignoree ») comme filet, mais il ne devrait plus se déclencher
+   depuis cette page.
+   -------------------------------------------------------------------------- */
 function versBase(l) {
   return {
     id: l.id, isbn: l.isbn || null, titre: l.titre, auteur: l.auteur,
-    editeur: l.editeur || null, annee: l.annee ?? null, statut: l.statut,
-    note: l.note ?? null, categorie: l.categorie, sous_categorie: l.sousCategorie,
+    editeur: l.editeur || null, annee: l.annee ?? null,
+    ...(lecteurIdentifie
+        ? { statut: l.statut, note: l.note ?? null }
+        : {}),
+    categorie: l.categorie, sous_categorie: l.sousCategorie,
     sphere: l.sphere || (l.categorie === "Savoirs" ? "Pro" : "Perso"),
     /* La provenance voyage avec la fiche, sinon elle meurt ici — c'est le
        défaut décrit plus haut pour « visibilite », et il se reproduit à
@@ -2880,6 +2948,22 @@ async function importer(fichier) {
     }
     await charger();
     rafraichir();
+
+    /* CE QUI N'A PAS ÉTÉ IMPORTÉ SE DIT — 18/09/2026.
+
+       Un fichier d'export porte les statuts de lecture et les notes. Sur une
+       session qui n'identifie personne, ils ne peuvent être attribués à
+       personne, et « versBase » ne les envoie donc pas. Les perdre en silence
+       serait le pire des trois comportements possibles : on croirait avoir
+       tout retrouvé, et l'on s'en apercevrait des semaines plus tard. */
+    const avaitDesLectures = data.some(
+      l => l && (l.statut !== undefined || l.note !== undefined));
+    annoncer(!lecteurIdentifie && avaitDesLectures
+      ? `${data.length} ouvrage(s) importé(s). Les statuts de lecture et les `
+        + "notes n'ont PAS été repris : cette session n'identifie aucun compte. "
+        + "Connectez-vous par courriel ou par Google, puis réimportez."
+      : `${data.length} ouvrage(s) importé(s).`,
+      !lecteurIdentifie && avaitDesLectures);
   } catch (e) {
     annoncer("Import impossible : " + e.message, true);
   }

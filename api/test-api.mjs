@@ -232,40 +232,101 @@ try {
     r.corps?.perimetre === "complet" && r.corps?.total === tous.length,
     `${r.corps?.perimetre} / ${r.corps?.total} vs ${tous.length}`);
 
-  /* LES CHIFFRES DE LECTURE EXISTENT POUR QUI EST IDENTIFIÉ. Sans cette
-     moitié, on aurait seulement prouvé qu'ils sont toujours absents — ce
-     qu'un serveur qui les aurait supprimés satisferait aussi. */
+  /* ======================================================================
+     DEUX BRANCHES, ET CE FICHIER NE SAIT PAS D'AVANCE LAQUELLE — 18/09/2026
+
+     Ce contrôle ouvre sa session avec le MOT DE PASSE, parce que c'est le
+     seul secret que la chaîne de livraison détient. Or cette porte n'identifie
+     personne : elle ouvre la bibliothèque par défaut sans nommer de compte.
+
+     Le serveur sait néanmoins désigner quelqu'un quand la bibliothèque n'a
+     QU'UN membre — il n'y a alors rien à départager. Dès qu'ils sont deux, il
+     ne le peut plus.
+
+     La version précédente supposait le premier cas. Le 18/09/2026, une
+     invitation a porté la bibliothèque de production à deux membres, et douze
+     vérifications sont devenues rouges d'un coup — dont la création d'un
+     ouvrage, qui n'avait rien à voir avec la lecture.
+
+     ON DEMANDE DONC AU SERVEUR CE QU'IL EST, et l'on éprouve la branche
+     correspondante. Les deux affirment quelque chose : aucune ne se contente
+     de sauter le contrôle. Une session qui n'identifie personne doit tout de
+     même pouvoir tenir l'étagère, et DIRE ce qu'elle n'a pas enregistré.
+     ====================================================================== */
   const statsMoi = r.corps ?? {};
-  verifier("statistiques : les chiffres de lecture reviennent une fois connecté",
-    ["lus", "en_cours", "a_lire", "notes"]
-      .every(c => typeof statsMoi[c] === "number"),
-    JSON.stringify(Object.fromEntries(
-      ["lus", "en_cours", "a_lire", "notes"].map(c => [c, statsMoi[c]]))));
+  const sess = (await appel("/api/session")).corps ?? {};
 
-  verifier("statistiques : les trois statuts couvrent le total",
-    statsMoi.lus + statsMoi.en_cours + statsMoi.a_lire === statsMoi.total,
-    `${statsMoi.lus} + ${statsMoi.en_cours} + ${statsMoi.a_lire} `
-    + `vs ${statsMoi.total}`);
+  /* ON LIT « lecteur », ON NE LE DÉDUIT PAS DE LA LISTE DES BIBLIOTHÈQUES.
+     Cette liste est vide pour une session par mot de passe, y compris quand
+     la bibliothèque n'a qu'un membre et que le serveur sait parfaitement à
+     qui attribuer la lecture. Déduire aurait fait éprouver la mauvaise
+     branche — et un contrôle qui se trompe de branche ne mesure rien. */
+  const identifie = sess.lecteur === true;
 
-  // L'effectif sur lequel porte la note moyenne. avg() ignore les valeurs
-  // nulles sans le dire : sans ce compte, la page affiche « 4,32 » à côté de
-  // « 242 ouvrages » et personne ne peut savoir que 57 seulement sont notés.
-  verifier("statistiques : les notés ne dépassent pas le total",
-    statsMoi.notes <= statsMoi.total, statsMoi.notes + " sur " + statsMoi.total);
-  verifier("statistiques : une moyenne n'est donnée que s'il y a des notes",
-    (statsMoi.notes > 0) === (statsMoi.note_moyenne !== null),
-    "notes = " + statsMoi.notes + ", moyenne = " + statsMoi.note_moyenne);
+  verifier("la session dit si quelqu'un peut porter une lecture",
+    typeof sess.lecteur === "boolean",
+    "« lecteur » absent de /api/session : on ne peut pas choisir la branche");
 
-  // Chaque rayon annonce combien de ses ouvrages sont lus : c'est ce que
-  // remplit la jauge de la mosaïque.
-  verifier("statistiques : part lue fournie par rayon",
-    statsMoi.sous_categories.every(x => typeof x.lus === "number" && x.lus <= x.n),
-    JSON.stringify(statsMoi.sous_categories.find(x => typeof x.lus !== "number") ?? "—"));
+  if (identifie) {
+    verifier("statistiques : les chiffres de lecture reviennent une fois connecté",
+      ["lus", "en_cours", "a_lire", "notes"]
+        .every(c => typeof statsMoi[c] === "number"),
+      JSON.stringify(Object.fromEntries(
+        ["lus", "en_cours", "a_lire", "notes"].map(c => [c, statsMoi[c]]))));
+
+    verifier("statistiques : les trois statuts couvrent le total",
+      statsMoi.lus + statsMoi.en_cours + statsMoi.a_lire === statsMoi.total,
+      `${statsMoi.lus} + ${statsMoi.en_cours} + ${statsMoi.a_lire} `
+      + `vs ${statsMoi.total}`);
+
+    // L'effectif sur lequel porte la note moyenne. avg() ignore les valeurs
+    // nulles sans le dire : sans ce compte, la page affiche « 4,32 » à côté de
+    // « 242 ouvrages » et personne ne peut savoir que 57 seulement sont notés.
+    verifier("statistiques : les notés ne dépassent pas le total",
+      statsMoi.notes <= statsMoi.total, statsMoi.notes + " sur " + statsMoi.total);
+    verifier("statistiques : une moyenne n'est donnée que s'il y a des notes",
+      (statsMoi.notes > 0) === (statsMoi.note_moyenne !== null),
+      "notes = " + statsMoi.notes + ", moyenne = " + statsMoi.note_moyenne);
+
+    // Chaque rayon annonce combien de ses ouvrages sont lus : c'est ce que
+    // remplit la jauge de la mosaïque.
+    verifier("statistiques : part lue fournie par rayon",
+      statsMoi.sous_categories.every(x => typeof x.lus === "number" && x.lus <= x.n),
+      JSON.stringify(statsMoi.sous_categories.find(x => typeof x.lus !== "number") ?? "—"));
+  } else {
+    /* SANS LECTEUR, LES CHIFFRES SONT TUS — pas rendus à zéro. C'est la même
+       exigence que pour le visiteur, et elle vaut ici aussi : « 0 lu » sur une
+       bibliothèque de 348 ouvrages est une affirmation fausse et crédible. */
+    verifier("sans lecteur, aucun chiffre de lecture n'est rendu",
+      ["lus", "en_cours", "a_lire", "notes", "note_moyenne"]
+        .every(c => statsMoi[c] === null),
+      JSON.stringify(Object.fromEntries(
+        ["lus", "en_cours", "a_lire", "notes", "note_moyenne"]
+          .map(c => [c, statsMoi[c]]))));
+
+    verifier("… ni par rayon",
+      (statsMoi.sous_categories ?? []).every(x => x.lus === null),
+      JSON.stringify(statsMoi.sous_categories?.slice(0, 1)));
+  }
 
   /* ------------------------------------------------------------- Écriture */
 
+  /* LE GABARIT PORTE « statut » ET « note », COMME LA VRAIE PAGE. C'est ce
+     qui rend ce contrôle représentatif : la page envoie toujours ces deux
+     champs dans son objet livre.
+
+     Le 18/09/2026, cela suffisait à faire échouer TOUTE la création sur une
+     bibliothèque à plusieurs membres — la porte nommée levait, la transaction
+     entière était annulée, et l'on ne pouvait plus ajouter un seul ouvrage.
+     L'enregistrement écrit désormais l'étagère et AVOUE ce qu'il n'a pas pu
+     attribuer. */
   r = await appel("/api/livres", { methode: "PUT", corps: [gabarit(T1, "Perso"), gabarit(T2, "Pro")] });
   verifier("création acceptée", r.statut === 200 && r.corps?.enregistres === 2, JSON.stringify(r.corps));
+
+  verifier("… et la réponse dit si la lecture a pu être attribuée",
+    r.corps?.lecture_ignoree === !identifie,
+    `lecture_ignoree=${r.corps?.lecture_ignoree} alors que `
+    + `la session ${identifie ? "identifie" : "n'identifie pas"} quelqu'un`);
 
   r = await appel("/api/livres");
   const cree = r.corps.find(l => l.id === T1);
@@ -278,7 +339,16 @@ try {
   const modifie = r.corps.find(l => l.id === T1);
   verifier("mise à jour sans doublon", r.corps.filter(l => l.id === T1).length === 1);
   verifier("titre modifié", modifie?.titre === "Titre modifié", modifie?.titre);
-  verifier("note enregistrée", Number(modifie?.note) === 4, String(modifie?.note));
+
+  /* LA NOTE SUIT LA MÊME RÈGLE QUE LE RESTE : elle s'enregistre s'il y a
+     quelqu'un pour la porter, et reste absente sinon. Vérifier les deux, et
+     pas seulement le cas commode, est ce qui manquait à ce fichier. */
+  verifier(identifie
+      ? "note enregistrée"
+      : "note NON enregistrée, faute de lecteur — et l'étagère l'est quand même",
+    identifie ? Number(modifie?.note) === 4
+              : (modifie?.note === null || modifie?.note === undefined),
+    String(modifie?.note));
 
   /* -------------------------------- Mise à jour partielle des couvertures */
 

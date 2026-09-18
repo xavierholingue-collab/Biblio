@@ -356,6 +356,33 @@ const parMotDePasse = await (async () => {
 verifier("le mot de passe ouvre bien une session", cx.statut === 200,
   JSON.stringify(cx.corps));
 
+/* « lecteur » DIT LA RÈGLE DU SERVEUR, ET IL NE SE DÉDUIT PAS DE LA LISTE
+   DES BIBLIOTHÈQUES — 18/09/2026.
+
+   Une session par mot de passe ne nomme aucun compte : sa liste est TOUJOURS
+   vide. Mais le serveur sait désigner l'unique membre quand la bibliothèque
+   n'en a qu'un. Déduire « il y a un lecteur » de « la liste n'est pas vide »
+   donne donc faux précisément là où l'installation personnelle vit.
+
+   Les deux vérifications ci-dessous tiennent ensemble : la liste est vide ET
+   le lecteur existe. C'est la contradiction apparente que « lecteur » résout,
+   et la raison pour laquelle ce champ existe. */
+{
+  const s = (await appel("/api/session", { cookie: parMotDePasse })).corps ?? {};
+  verifier("la session par mot de passe n'a AUCUNE bibliothèque à lister",
+    Array.isArray(s.bibliotheques) && s.bibliotheques.length === 0,
+    JSON.stringify(s.bibliotheques));
+  verifier("… et pourtant elle DÉSIGNE un lecteur, la bibliothèque n'ayant qu'un membre",
+    s.lecteur === true,
+    `lecteur=${s.lecteur} — l'écran masquerait le statut et la note à `
+    + "l'installation personnelle");
+
+  const jeton = signerJeton({ t: cabinet, expire: Date.now() + 1e9 });
+  const sDeux = (await appel("/api/session", { cookie: jeton })).corps ?? {};
+  verifier("… tandis que sur une bibliothèque à deux membres, elle n'en désigne aucun",
+    sDeux.lecteur === false, `lecteur=${sDeux.lecteur}`);
+}
+
 {
   const r = await appel("/api/livres", { cookie: parMotDePasse, methode: "PUT",
     corps: { id: "p1", titre: "Un livre à moi", auteur: "Auteur",
@@ -380,29 +407,83 @@ verifier("le mot de passe ouvre bien une session", cx.statut === 200,
     JSON.stringify(enBase));
 }
 
-/* DÈS QU'ILS SONT DEUX, ELLE NE PEUT PLUS ATTRIBUER — et elle le DIT.
-   Un 500 « Erreur interne » ferait chercher une panne ; le 403 dit ce qu'il
-   en est et ce qu'il y a à faire. */
+/* DÈS QU'ILS SONT DEUX, ELLE N'ATTRIBUE PLUS — MAIS ELLE ÉCRIT QUAND MÊME,
+   ET ELLE LE DIT. Corrigé le 18/09/2026, après une régression en production.
+
+   CE CONTRÔLE MESURAIT UNE CHARGE DE LABORATOIRE. Il vérifiait qu'un
+   enregistrement SANS « statut » passait encore — un cas que l'application ne
+   produit jamais, puisque la page envoie toujours ce champ dans son objet
+   livre. Et il exigeait un 403 sur la charge avec statut, ce qui semblait
+   prudent.
+
+   Le 403 annulait la transaction ENTIÈRE. Sur une bibliothèque à plusieurs
+   membres, la porte par mot de passe ne pouvait donc plus ajouter ni modifier
+   AUCUN ouvrage. Douze vérifications d'après-déploiement sont tombées d'un
+   coup, dont « création acceptée », qui n'a rien à voir avec la lecture.
+
+   Ce fichier était vert. Il éprouvait la bonne règle sur la mauvaise charge.
+
+   LA CHARGE EST DONC CELLE DE LA PAGE, maintenant : avec « statut ». Et l'on
+   exige trois choses — l'écriture aboutit, la lecture n'est PAS inventée, et
+   la réponse avoue. */
 {
   const jeton = signerJeton({ t: cabinet, expire: Date.now() + 1e9 });
   const r = await appel("/api/livres", { cookie: jeton, methode: "PUT",
-    corps: { id: "c2", titre: "Un second commun", auteur: "Auteur",
-             categorie: "Savoirs", sous_categorie: "Philosophie",
-             sphere: "Pro", statut: "Lu" } });
-  verifier("sur une bibliothèque à DEUX membres, elle refuse d'attribuer",
-    r.statut === 403, `statut ${r.statut} — ${JSON.stringify(r.corps)}`);
-  verifier("… et le refus est explicite, pas une « erreur interne »",
-    /identifie/i.test(r.corps?.error ?? ""), JSON.stringify(r.corps));
-
-  /* MAIS ELLE PEUT TOUJOURS TENIR L'ÉTAGÈRE. Refuser tout l'enregistrement
-     serait excessif : le rayon, le titre et la visibilité n'appartiennent à
-     personne en particulier. */
-  const sansLecture = await appel("/api/livres", { cookie: jeton, methode: "PUT",
     corps: { id: "c2", titre: "Un second commun, corrigé", auteur: "Auteur",
+             categorie: "Savoirs", sous_categorie: "Philosophie",
+             sphere: "Pro", statut: "Lu", note: 3 } });
+
+  verifier("sur une bibliothèque à DEUX membres, l'enregistrement ABOUTIT",
+    r.statut === 200,
+    `statut ${r.statut} — ${JSON.stringify(r.corps)} : la porte par mot de `
+    + "passe ne peut plus rien écrire du tout");
+
+  verifier("… et la réponse avoue que la lecture n'a pas été attribuée",
+    r.corps?.lecture_ignoree === true, JSON.stringify(r.corps));
+
+  /* L'ÉTAGÈRE A BIEN BOUGÉ — sinon « aboutit » ne voudrait rien dire. */
+  const [surEtagere] = await q(
+    `select o.titre from possessions p join ouvrages o on o.id = p.ouvrage_id
+      where p.tenant_id = $1 and p.id = 'c2'`, [cabinet]);
+  verifier("… l'étagère a réellement été mise à jour",
+    surEtagere?.titre === "Un second commun, corrigé", JSON.stringify(surEtagere));
+
+  /* ET AUCUNE LECTURE N'A ÉTÉ INVENTÉE. C'est la moitié qui protège : écrire
+     l'étagère ne doit pas devenir l'occasion d'attribuer un statut à
+     quelqu'un qu'on n'a pas su nommer. */
+  const lectures = await q(
+    "select compte_id, statut from lectures where tenant_id = $1 and possession = 'c2'",
+    [cabinet]);
+  verifier("… et AUCUNE lecture n'a été attribuée au hasard",
+    lectures.length === 0, JSON.stringify(lectures));
+
+  /* Une charge SANS lecture ne déclenche pas l'aveu : il n'y avait rien à
+     ignorer. Sans cette vérification, « lecture_ignoree » pourrait être
+     toujours vrai et le contrôle précédent passerait quand même. */
+  const sansLecture = await appel("/api/livres", { cookie: jeton, methode: "PUT",
+    corps: { id: "c2", titre: "Un second commun, re-corrigé", auteur: "Auteur",
              categorie: "Savoirs", sous_categorie: "Philosophie", sphere: "Pro" } });
-  verifier("… mais elle enregistre toujours ce qui n'est pas une lecture",
-    sansLecture.statut === 200,
+  verifier("une charge sans lecture n'a rien à avouer",
+    sansLecture.statut === 200 && sansLecture.corps?.lecture_ignoree === false,
     `statut ${sansLecture.statut} — ${JSON.stringify(sansLecture.corps)}`);
+}
+
+/* ET L'INVERSE : UNE SESSION IDENTIFIÉE N'AVOUE RIEN, PARCE QU'ELLE ÉCRIT.
+   Sans cette moitié, un serveur qui aurait cessé d'enregistrer toute lecture
+   satisferait aussi les vérifications ci-dessus. */
+{
+  const r = await appel("/api/livres", { cookie: sAlice, methode: "PUT",
+    corps: { id: "c2", titre: "Un second commun, re-corrigé", auteur: "Auteur",
+             categorie: "Savoirs", sous_categorie: "Philosophie",
+             sphere: "Pro", statut: "En cours", note: 2 } });
+  verifier("une session identifiée n'a rien à avouer",
+    r.statut === 200 && r.corps?.lecture_ignoree === false,
+    JSON.stringify(r.corps));
+
+  const vue = await vu(sAlice, "c2");
+  verifier("… et sa lecture est bien enregistrée",
+    vue?.statut === "En cours" && Number(vue?.note) === 2,
+    JSON.stringify(vue && { statut: vue.statut, note: vue.note }));
 }
 
 /* =====================================================================
