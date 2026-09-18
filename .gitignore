@@ -30,6 +30,14 @@ node_modules/
 dist/
 *.log
 
+# « package.json » est versionné — il déclare ce qu'il faut installer pour
+# faire tourner les contrôles sur un poste, et l'assembleur le recopie depuis
+# OneDrive. Le VERROU, non : npm le réécrit dans le dépôt à chaque
+# installation, alors que le dépôt est engendré et jamais édité à la main. Il
+# divergerait de la source dès la première commande, et personne ne saurait
+# laquelle des deux versions fait foi.
+package-lock.json
+
 # --- Système -------------------------------------------------------------
 .DS_Store
 Thumbs.db

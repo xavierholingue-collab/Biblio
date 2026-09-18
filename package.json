@@ -1,4 +1,10 @@
 {
+  "name": "biblio-controles",
+  "private": true,
+  "description": "Dépendances nécessaires pour faire tourner les contrôles sur un poste. AUCUNE ne part en production : le paquet déployé ne contient que api/ web/ db/ deploiement/, et l'API n'a que ses deux dépendances propres, déclarées dans api/package.json. Pas de « type »: module — test-fumee.js et test-accueil.js sont en CommonJS, et le déclarer les casserait.",
+  "scripts": {
+    "controles": "node tests/lancer-tous.mjs"
+  },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.8",
     "embedded-postgres": "^18.4.0-beta.17",

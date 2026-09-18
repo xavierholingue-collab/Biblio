@@ -428,9 +428,22 @@ verifier("le mot de passe ouvre bien une session", cx.statut === 200,
    la réponse avoue. */
 {
   const jeton = signerJeton({ t: cabinet, expire: Date.now() + 1e9 });
+  /* LE RAYON CHANGE, ET C'EST LUI QU'ON REGARDE — pas le titre.
+
+     La première rédaction vérifiait que le TITRE avait bougé. Elle a échoué
+     en intégration, et elle avait tort de la bonne façon : le titre
+     n'appartient pas à l'étagère, il appartient au CATALOGUE PARTAGÉ, et sa
+     correction est bornée par « and e.isbn is not null » — corriger un titre
+     le corrige pour tous les possesseurs de la même édition, on ne le fait
+     donc que sur une fiche identifiée. Sans ISBN dans la charge, aucune
+     correction n'était demandée, et le titre ne pouvait pas bouger.
+
+     Le contrôle mesurait la mauvaise table. « sous_categorie » est une
+     donnée de possession : elle appartient à cette bibliothèque-ci, et c'est
+     exactement ce que « l'étagère s'écrit quand même » veut dire. */
   const r = await appel("/api/livres", { cookie: jeton, methode: "PUT",
-    corps: { id: "c2", titre: "Un second commun, corrigé", auteur: "Auteur",
-             categorie: "Savoirs", sous_categorie: "Philosophie",
+    corps: { id: "c2", titre: "Un second commun", auteur: "Auteur",
+             categorie: "Savoirs", sous_categorie: "Épistémologie",
              sphere: "Pro", statut: "Lu", note: 3 } });
 
   verifier("sur une bibliothèque à DEUX membres, l'enregistrement ABOUTIT",
@@ -441,12 +454,14 @@ verifier("le mot de passe ouvre bien une session", cx.statut === 200,
   verifier("… et la réponse avoue que la lecture n'a pas été attribuée",
     r.corps?.lecture_ignoree === true, JSON.stringify(r.corps));
 
-  /* L'ÉTAGÈRE A BIEN BOUGÉ — sinon « aboutit » ne voudrait rien dire. */
+  /* L'ÉTAGÈRE A BIEN BOUGÉ — sinon « aboutit » ne voudrait rien dire : un
+     serveur qui rendrait 200 sans rien écrire satisferait la vérification
+     précédente. */
   const [surEtagere] = await q(
-    `select o.titre from possessions p join ouvrages o on o.id = p.ouvrage_id
-      where p.tenant_id = $1 and p.id = 'c2'`, [cabinet]);
+    "select sous_categorie from possessions where tenant_id = $1 and id = 'c2'",
+    [cabinet]);
   verifier("… l'étagère a réellement été mise à jour",
-    surEtagere?.titre === "Un second commun, corrigé", JSON.stringify(surEtagere));
+    surEtagere?.sous_categorie === "Épistémologie", JSON.stringify(surEtagere));
 
   /* ET AUCUNE LECTURE N'A ÉTÉ INVENTÉE. C'est la moitié qui protège : écrire
      l'étagère ne doit pas devenir l'occasion d'attribuer un statut à

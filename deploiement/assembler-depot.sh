@@ -136,7 +136,20 @@ fi
 # --- Le fichier de configuration d'exemple -------------------------------
 # Ce qui fait vivre la version LOCALE. Elle reste utilisable sur le poste :
 # le VPS n'est pas un remplacement, c'est une seconde facon d'y acceder.
-for f in .env.exemple .gitattributes docker-compose.yml nginx.conf \
+# « package.json » DÉCLARE LES DÉPENDANCES DES CONTRÔLES, et il est géré
+# d'ici comme les autres — 18/09/2026.
+#
+# Il est né par accident dans le dépôt, d'un « npm install » lancé au mauvais
+# endroit. Plutôt que de le retirer, on l'adopte : il répond à une vraie
+# friction — les dépendances nécessaires pour faire tourner les suites se
+# découvraient UNE PAR UNE, à chaque échec.
+#
+# « package-lock.json » n'est PAS copié, et c'est délibéré : npm le réécrit
+# dans le dépôt à chaque installation, il divergerait aussitôt de la source.
+# Il est ignoré par git (voir gitignore.modele). Aucune de ces dépendances ne
+# part en production : le paquet déployé ne contient que api/ web/ db/ et
+# deploiement/.
+for f in .env.exemple .gitattributes docker-compose.yml nginx.conf package.json \
          Demarrer.cmd Arreter.cmd Sauvegarder.cmd README.md; do
   cp -f "${SOURCE}/docker/${f}" "${DEPOT}/" 2>/dev/null
 done

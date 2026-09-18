@@ -608,6 +608,43 @@ de sa propre ligne `lancer`.
 
 ---
 
+## 13. Le dépôt est ENGENDRÉ : l'éprouver sans l'assembler mesure la veille
+
+*Ajoutée le 18/09/2026.*
+
+OneDrive est la source ; `~/dev/biblio` est **fabriqué** par
+`assembler-depot.sh`. Entre deux assemblages, le dépôt porte l'état précédent
+— et il le porte en silence, puisqu'un fichier périmé se lit exactement comme
+un fichier à jour.
+
+Le 18/09, après avoir corrigé une régression de production, j'ai donné
+`cd ~/dev/biblio && npm install && for t in tests/test-*.mjs; do node "$t"; done`
+**sans étape d'assemblage**. Vingt-huit suites au vert, et pas une ne portait
+sur le correctif : elles éprouvaient le code d'avant. La chaîne a trouvé
+l'échec au `push` suivant.
+
+Le signe était pourtant dans la sortie : `test-lectures.mjs` annonçait **35
+vérifications** en local et **42** en intégration. Un compte qui change tout
+seul entre deux exécutions du « même » fichier dit qu'on n'exécute pas le même
+fichier. Ce nombre est un témoin gratuit — encore faut-il le regarder.
+
+**La règle : assembler, PUIS éprouver. Jamais l'inverse, jamais l'un sans
+l'autre.**
+
+```bash
+~/bin/assembler-depot.sh && cd ~/dev/biblio && npm run controles
+```
+
+Et le corollaire, qui vaut au-delà de ce dépôt : **avant de conclure d'une
+mesure, vérifier qu'elle a porté sur ce qu'on vient d'écrire.** Un contrôle
+lancé sur une copie périmée n'est pas un contrôle faible — c'est un contrôle
+qui parle d'autre chose, avec la même autorité.
+
+> Une suite verte ne dit pas que le code est bon.
+> Elle dit que le code *qu'elle a lu* est bon.
+
+---
+
 ## Ce qui ne s'automatise pas, et revient à Xavier
 
 Le seul défaut réellement dangereux du 24/08 n'a été trouvé par aucun
