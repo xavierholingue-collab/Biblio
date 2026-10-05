@@ -36,7 +36,29 @@ jobs:
 
   controles:
     name: Contrôles
-    runs-on: ubuntu-latest
+    # LE COUREUR EST ÉPINGLÉ, comme les actions le sont déjà par empreinte.
+    # « ubuntu-latest » est un pointeur : GitHub le fait passer à Ubuntu 26.04
+    # entre le 19 octobre et le 19 novembre 2026, et surtout PROGRESSIVEMENT
+    # (annonce actions/runner-images #14748). Pendant ce mois, deux exécutions
+    # du même commit peuvent ne pas tourner sur le même système : un échec s'y
+    # présenterait comme aléatoire, le défaut le plus coûteux à diagnostiquer.
+    #
+    # Posé le 05/10/2026 (constat V69), et ÉPROUVÉ avant d'être cru. Le même
+    # jour, sur l'image « ubuntu26/20260927.149 » : Y-Factor a passé contrôles,
+    # 486 vecteurs, SSH, déploiement de recette ET de production ; SupPerf a
+    # passé ses 990 tests, Prisma, les migrations et les politiques RLS sur sa
+    # base de CI. Ici l'épreuve se fait par déclenchement manuel sur une branche
+    # d'essai : les emplois de déploiement étant gardés par
+    # « github.event_name == 'push' », une exécution lancée à la main n'en
+    # déclenche aucun.
+    #
+    # Écarts annoncés entre 24.04.5 et 26.04.1 LTS : noyau 6.17 → 7.0,
+    # systemd 255 → 259 ; la plupart des outils gardent leur version.
+    #
+    # Repli documenté si une incompatibilité apparaît : « ubuntu-24.04 ».
+    # Pour monter de version — relever l'étiquette, ne jamais la deviner :
+    #   https://github.com/actions/runner-images
+    runs-on: ubuntu-26.04
 
     # PostgreSQL 18, comme en production depuis le 06/09/2026. Une version
     # différente ferait passer en CI ce qui échouerait sur le serveur — c'est
@@ -363,7 +385,7 @@ jobs:
     name: Recette
     needs: controles
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
@@ -449,7 +471,7 @@ jobs:
     name: Production
     needs: recette
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     environment: production
 
     steps:
