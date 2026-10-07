@@ -153,6 +153,46 @@ défauts les plus graves du mois d'août.
 
 ---
 
+## 5. Ce que la livraison a réellement donné — 18/09/2026
+
+**Les six nombres sont identiques au relevé** : 348 · 310 · 0 · 38 · 70 ·
+4,300. La reprise a repris. `xavier` est bien en `manuelle` (100 000 / 20 $,
+2 membres), `9ddc7911d5` en `sieges` (10 / 0,900, 1 membre).
+
+### La régression, et ce qui l'a laissée passer
+
+Entre le déploiement et ce constat, la production a été **cassée pendant
+quelques heures** : sur une bibliothèque à plusieurs membres, la porte par
+mot de passe ne pouvait plus ajouter **aucun** ouvrage. `enregistrer_lecture`
+levait, et une exception annule la transaction entière — l'étagère tombait
+avec la lecture.
+
+Le contrôle qui aurait dû l'attraper était vert. Il éprouvait une charge
+**sans `statut`**, que l'application n'envoie jamais : la page met toujours ce
+champ dans son objet livre. Il vérifiait la bonne règle sur la mauvaise
+charge.
+
+Corrigé le même jour : l'écriture de l'étagère et celle de la lecture sont
+séparées, la réponse porte `lecture_ignoree`, et `/api/session` publie
+`lecteur` pour que l'écran sache masquer les champs plutôt que de les
+proposer en vain. Les contrôles éprouvent désormais la charge de la page.
+
+### Le parcours manuel, fait le 18/09
+
+| | |
+|---|---|
+| Session Google, bibliothèque à **un** membre : statut et note tiennent | ✅ |
+| Session Google, bibliothèque à **deux** membres : la lecture est bien la sienne | ✅ |
+| Porte par mot de passe, deux membres : champs masqués, ajout qui **aboutit** | ✅ |
+| Import **JSON** par cette porte : les livres entrent, les statuts sont annoncés perdus | **non fait** |
+
+Le premier de ces quatre est le seul chemin que la chaîne n'éprouve jamais :
+`test-api.mjs` ne franchit que la porte par mot de passe, faute de session
+Google en intégration. Il restera à faire à la main à chaque livraison qui
+touche aux lectures.
+
+---
+
 ## Ce qui reste ouvert
 
 - Le dos des livres se lit de bas en haut (convention anglo-saxonne) ; en
