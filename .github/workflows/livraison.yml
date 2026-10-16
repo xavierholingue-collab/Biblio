@@ -364,6 +364,15 @@ jobs:
 
       - name: Fabriquer le paquet
         run: |
+          # >>> marqueur de commit déployé — posé par poste-marqueur-commit.py
+          # La machine n'a aucun dépôt git : elle ne peut pas déduire ce qu'elle exécute.
+          # Le commit voyage donc avec le paquet. Dans api/ seulement : les racines web
+          # sont servies par Caddy, le SHA d'un dépôt privé n'a rien à y faire.
+          printf 'commit=%s\nref=%s\nexecution=%s\nempaquete=%s\n' \
+            "$GITHUB_SHA" "$GITHUB_REF" \
+            "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > api/.commit-deploye
+          # <<< marqueur de commit déployé
           tar czf paquet.tar.gz --exclude=node_modules api web db deploiement
           echo "poids : $(du -h paquet.tar.gz | cut -f1)"
 
